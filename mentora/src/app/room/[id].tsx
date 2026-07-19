@@ -6,6 +6,7 @@ import { useAuth } from '@/context/AuthContext';
 import { spacing, typography, borderRadius, useThemeColors } from '@/constants/theme';
 import { Feather } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import { BlurView } from 'expo-blur';
 
 type MessageType = {
   id: string;
@@ -232,6 +233,7 @@ export default function StudyRoomScreen() {
           <Text style={styles.timerValue}>{formatTime(timeLeft)}</Text>
           <View style={styles.timerControls}>
             <Pressable style={styles.timerControlButton}>
+              <BlurView tint="light" intensity={40} style={StyleSheet.absoluteFillObject} />
               <Feather name="pause" size={20} color={colors.background} />
             </Pressable>
             
@@ -239,6 +241,7 @@ export default function StudyRoomScreen() {
               style={[styles.timerControlButton, isCameraActive && styles.timerControlButtonActive]} 
               onPress={toggleCamera}
             >
+              {!isCameraActive && <BlurView tint="light" intensity={40} style={StyleSheet.absoluteFillObject} />}
               <Feather name={isCameraActive ? "video" : "video-off"} size={20} color={colors.background} />
             </Pressable>
           </View>
@@ -334,17 +337,28 @@ export default function StudyRoomScreen() {
                 ) : (
                   <View style={styles.mockVideoBox}>
                     <Feather name="video-off" size={32} color={colors.textTertiary} />
-                    <Text style={styles.mockVideoName}>You</Text>
+                    <View style={styles.nameLabelGlass}>
+                      <BlurView tint="dark" intensity={60} style={StyleSheet.absoluteFillObject} />
+                      <Text style={styles.nameLabelText}>You</Text>
+                    </View>
                   </View>
                 )}
-                {isCameraActive && <View style={styles.nameLabel}><Text style={styles.nameLabelText}>You</Text></View>}
+                {isCameraActive && (
+                  <View style={styles.nameLabelGlass}>
+                    <BlurView tint="dark" intensity={60} style={StyleSheet.absoluteFillObject} />
+                    <Text style={styles.nameLabelText}>You</Text>
+                  </View>
+                )}
               </View>
               
               {/* Mock Student 1 */}
               <View style={styles.gridBox}>
                 <View style={[styles.mockVideoBox, { backgroundColor: '#2C3E50' }]}>
                   <Text style={styles.mockAvatarText}>A</Text>
-                  <Text style={styles.mockVideoName}>Alice (Studying)</Text>
+                  <View style={styles.nameLabelGlass}>
+                    <BlurView tint="dark" intensity={60} style={StyleSheet.absoluteFillObject} />
+                    <Text style={styles.nameLabelText}>Alice (Studying)</Text>
+                  </View>
                 </View>
               </View>
             </View>
@@ -354,7 +368,10 @@ export default function StudyRoomScreen() {
               <View style={styles.gridBox}>
                 <View style={[styles.mockVideoBox, { backgroundColor: '#8E44AD' }]}>
                   <Text style={styles.mockAvatarText}>J</Text>
-                  <Text style={styles.mockVideoName}>James</Text>
+                  <View style={styles.nameLabelGlass}>
+                    <BlurView tint="dark" intensity={60} style={StyleSheet.absoluteFillObject} />
+                    <Text style={styles.nameLabelText}>James</Text>
+                  </View>
                 </View>
               </View>
               
@@ -362,7 +379,10 @@ export default function StudyRoomScreen() {
               <View style={styles.gridBox}>
                 <View style={[styles.mockVideoBox, { backgroundColor: '#27AE60' }]}>
                   <Text style={styles.mockAvatarText}>S</Text>
-                  <Text style={styles.mockVideoName}>Sarah</Text>
+                  <View style={styles.nameLabelGlass}>
+                    <BlurView tint="dark" intensity={60} style={StyleSheet.absoluteFillObject} />
+                    <Text style={styles.nameLabelText}>Sarah</Text>
+                  </View>
                 </View>
               </View>
             </View>
@@ -431,12 +451,13 @@ const createStyles = (colors: any) => StyleSheet.create({
     gap: spacing.md,
   },
   timerControlButton: {
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: 'transparent',
     width: 48,
     height: 48,
     borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
   timerControlButtonActive: {
     backgroundColor: colors.success,
@@ -681,26 +702,15 @@ const createStyles = (colors: any) => StyleSheet.create({
     color: 'rgba(255,255,255,0.2)',
     fontWeight: 'bold',
   },
-  mockVideoName: {
+  nameLabelGlass: {
     position: 'absolute',
     bottom: 8,
     left: 8,
-    color: 'white',
-    fontSize: 12,
-    fontWeight: '600',
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  nameLabel: {
-    position: 'absolute',
-    bottom: 8,
-    left: 8,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(0,0,0,0.2)',
   },
   nameLabelText: {
     color: 'white',

@@ -28,7 +28,15 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setSession(session);
       setUser(session?.user ?? null);
       setIsLoading(false);
+    }).catch((error) => {
+      console.error('Supabase getSession error:', error);
+      setIsLoading(false);
     });
+
+    // Failsafe: If Supabase auth hangs, forcefully stop loading after 3 seconds so the app doesn't get stuck on the splash screen
+    const failsafeTimer = setTimeout(() => {
+      setIsLoading(false);
+    }, 3000);
 
     // Listen for auth changes
     const { data: authListener } = supabase.auth.onAuthStateChange(
@@ -40,6 +48,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     );
 
     return () => {
+      clearTimeout(failsafeTimer);
       authListener.subscription.unsubscribe();
     };
   }, []);

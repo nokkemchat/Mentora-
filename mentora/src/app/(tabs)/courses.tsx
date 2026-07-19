@@ -83,6 +83,21 @@ export default function CoursesScreen() {
       <Text style={styles.headerTitle}>Explore Courses</Text>
       <Text style={styles.headerSubtitle}>Find subjects tailored to your syllabus</Text>
 
+      {/* AI Exam Intelligence Banner */}
+      <Pressable 
+        style={styles.aiBanner}
+        onPress={() => router.push('/papers')}
+      >
+        <View style={styles.aiBannerContent}>
+          <MaterialCommunityIcons name="robot-outline" size={32} color="#fff" />
+          <View style={{ flex: 1, marginLeft: spacing.md }}>
+            <Text style={styles.aiBannerTitle}>AI Exam Intelligence</Text>
+            <Text style={styles.aiBannerSubtitle}>Past papers turned into an interactive AI tutor.</Text>
+          </View>
+          <MaterialCommunityIcons name="chevron-right" size={24} color="#fff" />
+        </View>
+      </Pressable>
+
       {errorMsg ? (
         <Text style={{ color: 'red', marginTop: 20 }}>Error: {errorMsg}</Text>
       ) : loading ? (
@@ -132,8 +147,35 @@ const createStyles = (colors: any) => StyleSheet.create({
   headerSubtitle: {
     fontSize: typography.sizes.md,
     color: colors.textSecondary,
-    marginBottom: spacing.xxl,
+    marginBottom: spacing.md,
     marginTop: spacing.xs,
+  },
+  aiBanner: {
+    backgroundColor: '#6C63FF', // Vibrant AI purple
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    marginBottom: spacing.xxl,
+    shadowColor: '#6C63FF',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  aiBannerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  aiBannerTitle: {
+    color: '#fff',
+    fontSize: typography.sizes.lg,
+    fontWeight: typography.weights.bold,
+    marginBottom: 4,
+  },
+  aiBannerSubtitle: {
+    color: '#fff',
+    opacity: 0.9,
+    fontSize: typography.sizes.sm,
+    lineHeight: 20,
   },
   grid: {
     flexDirection: 'row',

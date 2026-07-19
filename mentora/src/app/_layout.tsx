@@ -1,7 +1,7 @@
 import { usePreventScreenCapture } from 'expo-screen-capture';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useFonts, Outfit_300Light, Outfit_400Regular, Outfit_500Medium, Outfit_600SemiBold, Outfit_700Bold } from '@expo-google-fonts/outfit';
 import { StatusBar } from 'expo-status-bar';
 import { View, Image } from 'react-native';
@@ -9,8 +9,7 @@ import { AuthProvider } from '../context/AuthContext';
 import { ThemeProvider } from '../context/ThemeContext';
 import { useThemeColors } from '../constants/theme';
 
-import { AnimatedSplashScreen } from '../components/AnimatedSplashScreen';
-import { useAuth } from '../context/AuthContext';
+
 
 SplashScreen.preventAutoHideAsync();
 
@@ -44,9 +43,6 @@ function GlobalWatermark() {
 }
 
 function AppContent() {
-  const { isLoading } = useAuth();
-  const [showSplash, setShowSplash] = useState(true);
-
   return (
     <View style={{ flex: 1 }}>
       <Stack screenOptions={{ headerShown: false }}>
@@ -56,14 +52,6 @@ function AppContent() {
       </Stack>
       
       <GlobalWatermark />
-
-      {/* Render the JS animated splash screen on top until auth is ready and animation finishes */}
-      {showSplash && (
-        <AnimatedSplashScreen 
-          authReady={!isLoading} 
-          onFinish={() => setShowSplash(false)} 
-        />
-      )}
     </View>
   );
 }

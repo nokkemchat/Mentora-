@@ -1,42 +1,22 @@
 import React, { useEffect, useState } from 'react';
 import { View, StyleSheet, Platform, Text, Pressable, ActivityIndicator, TextInput, Alert, KeyboardAvoidingView } from 'react-native';
 import { Tabs } from 'expo-router';
-import { Feather, Ionicons } from '@expo/vector-icons';
+import { Feather } from '@expo/vector-icons';
 import { typography, spacing, borderRadius, useThemeColors } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabase';
-
-const TabIcon = ({ name, title, focused, color, colors }: { name: any, title: string, focused: boolean, color: string, colors: any }) => {
-  return (
-    <View style={[
-      styles.iconContainer,
-      focused && { backgroundColor: `${colors.primary}15`, paddingHorizontal: 16, borderRadius: 24, width: 'auto' }
-    ]}>
-      <Ionicons 
-        name={focused ? name : `${name}-outline`} 
-        size={24} 
-        color={focused ? colors.primary : colors.textSecondary} 
-        style={focused ? styles.iconActive : styles.iconInactive}
-      />
-      {focused && (
-        <Text style={{ color: colors.primary, marginLeft: 6, fontWeight: '600', fontSize: 13, fontFamily: 'Outfit_600SemiBold' }}>
-          {title}
-        </Text>
-      )}
-    </View>
-  );
-};
+import { MentoraTabBar } from '@/components/MentoraTabBar';
 
 export default function TabsLayout() {
   const colors = useThemeColors();
   const { user } = useAuth();
   const role = user?.user_metadata?.role;
   
-  const [isApproved, setIsApproved] = useState(false);
-  const [isActivated, setIsActivated] = useState(false);
+  const [isApproved, setIsApproved]     = useState(false);
+  const [isActivated, setIsActivated]   = useState(false);
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [verificationCode, setVerificationCode] = useState('');
-  const [verifying, setVerifying] = useState(false);
+  const [verifying, setVerifying]       = useState(false);
 
   useEffect(() => {
     if (!user || role !== 'teacher') {
@@ -62,20 +42,18 @@ export default function TabsLayout() {
 
     const subscription = supabase
       .channel('profile_changes_layout')
-      .on('postgres_changes', { 
-        event: 'UPDATE', 
-        schema: 'public', 
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
         table: 'profiles',
-        filter: `id=eq.${user.id}`
+        filter: `id=eq.${user.id}`,
       }, (payload) => {
         setIsApproved(!!payload.new.is_approved);
         setIsActivated(!!payload.new.is_activated);
       })
       .subscribe();
 
-    return () => {
-      supabase.removeChannel(subscription);
-    };
+    return () => { supabase.removeChannel(subscription); };
   }, [user, role]);
 
   const handleVerifyCode = async () => {
@@ -83,9 +61,8 @@ export default function TabsLayout() {
       Alert.alert('Invalid Code', 'Please enter the 6-digit verification code.');
       return;
     }
-
     setVerifying(true);
-    
+
     const { data: profile, error } = await supabase
       .from('profiles')
       .select('activation_code')
@@ -112,10 +89,10 @@ export default function TabsLayout() {
     } else {
       Alert.alert('Incorrect Code', `Expected: ${profile?.activation_code}, Got: ${verificationCode.trim()}`);
     }
-    
     setVerifying(false);
   };
 
+  // ── Gate: Loading ──────────────────────────────────────────────────────────
   if (loadingStatus) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center' }}>
@@ -124,6 +101,7 @@ export default function TabsLayout() {
     );
   }
 
+  // ── Gate: Teacher pending approval ────────────────────────────────────────
   if (role === 'teacher' && !isApproved) {
     return (
       <View style={[styles.blockContainer, { backgroundColor: colors.background }]}>
@@ -136,9 +114,13 @@ export default function TabsLayout() {
     );
   }
 
+  // ── Gate: Teacher approved but needs activation code ──────────────────────
   if (role === 'teacher' && isApproved && !isActivated) {
     return (
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={[styles.blockContainer, { backgroundColor: colors.background }]}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={[styles.blockContainer, { backgroundColor: colors.background }]}
+      >
         <View style={{ alignItems: 'center', marginBottom: spacing.xxl }}>
           <View style={{ width: 80, height: 80, borderRadius: 40, backgroundColor: colors.success + '20', alignItems: 'center', justifyContent: 'center', marginBottom: spacing.lg }}>
             <Feather name="check" size={40} color={colors.success} />
@@ -151,27 +133,25 @@ export default function TabsLayout() {
 
         <View style={{ width: '100%', marginBottom: spacing.xxl, maxWidth: 400, alignItems: 'center' }}>
           <Text style={[styles.statLabel, { marginBottom: spacing.md, color: colors.text }]}>Enter 6-Digit Code</Text>
-          
           <View style={styles.otpContainer}>
             {[0, 1, 2, 3, 4, 5].map((index) => {
               const digit = verificationCode[index] || '';
               const isFocused = verificationCode.length === index || (verificationCode.length === 6 && index === 5);
               return (
-                <View 
-                  key={index} 
+                <View
+                  key={index}
                   style={[
-                    styles.otpBox, 
-                    { 
-                      borderColor: isFocused ? colors.primary : colors.border, 
-                      backgroundColor: isFocused ? `${colors.primary}10` : colors.surface 
-                    }
+                    styles.otpBox,
+                    {
+                      borderColor: isFocused ? colors.primary : colors.border,
+                      backgroundColor: isFocused ? `${colors.primary}10` : colors.surface,
+                    },
                   ]}
                 >
                   <Text style={[styles.otpText, { color: colors.text }]}>{digit}</Text>
                 </View>
               );
             })}
-            {/* Absolute invisible input overlaid on top to capture typing */}
             <TextInput
               style={styles.hiddenInput}
               value={verificationCode}
@@ -184,13 +164,13 @@ export default function TabsLayout() {
           </View>
         </View>
 
-        <Pressable 
+        <Pressable
           style={[styles.primaryButton, { backgroundColor: colors.primary, width: '100%', maxWidth: 400 }, verifying && { opacity: 0.7 }]}
           onPress={handleVerifyCode}
           disabled={verifying}
         >
           {verifying ? (
-             <ActivityIndicator color="#fff" />
+            <ActivityIndicator color="#fff" />
           ) : (
             <Text style={styles.primaryButtonText}>Verify & Continue</Text>
           )}
@@ -199,80 +179,21 @@ export default function TabsLayout() {
     );
   }
 
+  // ── Main App Tabs ──────────────────────────────────────────────────────────
   return (
     <Tabs
-      screenOptions={{
-        headerShown: false,
-        tabBarShowLabel: false,
-        tabBarActiveTintColor: colors.primary,
-        tabBarInactiveTintColor: colors.textSecondary,
-        tabBarStyle: {
-          position: 'absolute',
-          bottom: Platform.OS === 'ios' ? 30 : 20,
-          left: 24,
-          right: 24,
-          elevation: 0,
-          backgroundColor: colors.surface,
-          borderRadius: 40,
-          height: 64,
-          paddingBottom: 0,
-          paddingTop: 0,
-          shadowColor: '#000',
-          shadowOffset: { width: 0, height: 10 },
-          shadowOpacity: 0.1,
-          shadowRadius: 20,
-          borderTopWidth: 0,
-        },
-      }}
+      screenOptions={{ headerShown: false }}
+      tabBar={(props) => <MentoraTabBar {...props} />}
     >
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Home',
-          tabBarIcon: ({ focused, color }) => <TabIcon name="home" title="Home" focused={focused} color={color} colors={colors} />,
-        }}
-      />
-      <Tabs.Screen
-        name="courses"
-        options={{
-          title: 'Courses',
-          tabBarIcon: ({ focused, color }) => <TabIcon name="library" title="Courses" focused={focused} color={color} colors={colors} />,
-        }}
-      />
-      <Tabs.Screen
-        name="rooms"
-        options={{
-          title: 'Rooms',
-          tabBarIcon: ({ focused, color }) => <TabIcon name="chatbubbles" title="Rooms" focused={focused} color={color} colors={colors} />,
-        }}
-      />
-      <Tabs.Screen
-        name="profile"
-        options={{
-          title: 'Profile',
-          tabBarIcon: ({ focused, color }) => <TabIcon name="person" title="Profile" focused={focused} color={color} colors={colors} />,
-        }}
-      />
+      <Tabs.Screen name="index"   options={{ title: 'Home' }} />
+      <Tabs.Screen name="courses" options={{ title: 'Courses' }} />
+      <Tabs.Screen name="rooms"   options={{ title: 'Rooms' }} />
+      <Tabs.Screen name="profile" options={{ title: 'Profile' }} />
     </Tabs>
   );
 }
 
 const styles = StyleSheet.create({
-  iconContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: 40,
-    width: 40,
-    borderRadius: 20,
-    marginTop: Platform.OS === 'ios' ? 12 : 0, 
-  },
-  iconActive: {
-    transform: [{ scale: 1.1 }],
-  },
-  iconInactive: {
-    transform: [{ scale: 1 }],
-  },
   blockContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -293,15 +214,6 @@ const styles = StyleSheet.create({
   statLabel: {
     fontSize: typography.sizes.xs,
     fontWeight: typography.weights.medium,
-  },
-  input: {
-    borderWidth: 1,
-    borderRadius: borderRadius.md,
-    padding: spacing.lg,
-    textAlign: 'center',
-    fontSize: 24,
-    letterSpacing: 8,
-    fontWeight: 'bold',
   },
   otpContainer: {
     flexDirection: 'row',
@@ -336,5 +248,5 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: typography.sizes.md,
     fontWeight: typography.weights.semibold,
-  }
+  },
 });
