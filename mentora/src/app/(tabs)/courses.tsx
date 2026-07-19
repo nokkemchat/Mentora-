@@ -89,12 +89,12 @@ export default function CoursesScreen() {
         onPress={() => router.push('/papers')}
       >
         <View style={styles.aiBannerContent}>
-          <MaterialCommunityIcons name="robot-outline" size={32} color="#fff" />
+          <MaterialCommunityIcons name="robot-outline" size={32} color="#CCFF00" />
           <View style={{ flex: 1, marginLeft: spacing.md }}>
             <Text style={styles.aiBannerTitle}>AI Exam Intelligence</Text>
             <Text style={styles.aiBannerSubtitle}>Past papers turned into an interactive AI tutor.</Text>
           </View>
-          <MaterialCommunityIcons name="chevron-right" size={24} color="#fff" />
+          <MaterialCommunityIcons name="chevron-right" size={24} color="#CCFF00" />
         </View>
       </Pressable>
 
@@ -151,29 +151,30 @@ const createStyles = (colors: any) => StyleSheet.create({
     marginTop: spacing.xs,
   },
   aiBanner: {
-    backgroundColor: '#6C63FF', // Vibrant AI purple
+    backgroundColor: '#1A1A1A', // Graphite
     borderRadius: borderRadius.lg,
     padding: spacing.lg,
     marginBottom: spacing.xxl,
-    shadowColor: '#6C63FF',
+    shadowColor: '#CCFF00', // Lime Spark glow
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
+    shadowOpacity: 0.15,
     shadowRadius: 12,
     elevation: 8,
+    borderWidth: 1,
+    borderColor: '#333333',
   },
   aiBannerContent: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   aiBannerTitle: {
-    color: '#fff',
+    color: '#CCFF00', // Lime Spark
     fontSize: typography.sizes.lg,
     fontWeight: typography.weights.bold,
     marginBottom: 4,
   },
   aiBannerSubtitle: {
-    color: '#fff',
-    opacity: 0.9,
+    color: '#A0A0A0', // Light Graphite
     fontSize: typography.sizes.sm,
     lineHeight: 20,
   },

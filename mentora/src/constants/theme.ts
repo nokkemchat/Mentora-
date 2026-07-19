@@ -1,33 +1,33 @@
 import { useColorScheme } from 'react-native';
 
 export const lightColors = {
-  background: '#FFFFFF',
-  text: '#0F172A', 
-  textSecondary: '#4B5563',
-  textTertiary: '#9CA3AF',
-  primary: '#0B0F19', // Navy
-  primaryLight: '#1E3A8A', 
-  accent: '#0B0F19', 
-  border: '#E5E7EB',
-  surface: '#F8FAFC', 
-  surfaceHighlight: '#F1F5F9',
-  error: '#EF4444',
+  background: '#FAFAFA',
+  text: '#121212', // Graphite text
+  textSecondary: '#4A4A4A',
+  textTertiary: '#8E8E8E',
+  primary: '#CCFF00', // Lime Spark
+  primaryLight: '#E6FF80', 
+  accent: '#121212', // Graphite
+  border: '#E0E0E0',
+  surface: '#FFFFFF', 
+  surfaceHighlight: '#F5F5F5',
+  error: '#FF4D4D',
   success: '#10B981',
   warning: '#F59E0B',
 };
 
 export const darkColors = {
-  background: '#0B0F19', // Navy
-  text: '#F8FAFC', 
-  textSecondary: '#94A3B8', 
-  textTertiary: '#64748B', 
-  primary: '#3B82F6', // Blue-500
-  primaryLight: '#1E3A8A', // Deep Blue
-  accent: '#3B82F6', 
-  border: '#1E293B', 
-  surface: '#0F172A', 
-  surfaceHighlight: '#1E293B', 
-  error: '#F87171',
+  background: '#121212', // Deep Graphite
+  text: '#FFFFFF', 
+  textSecondary: '#A0A0A0', 
+  textTertiary: '#6E6E6E', 
+  primary: '#CCFF00', // Lime Spark
+  primaryLight: '#334000', // Dark tinted lime
+  accent: '#CCFF00', 
+  border: '#2A2A2A', // Light Graphite border
+  surface: '#1A1A1A', // Graphite surface
+  surfaceHighlight: '#222222', 
+  error: '#FF6B6B',
   success: '#34D399',
   warning: '#FBBF24',
 };
