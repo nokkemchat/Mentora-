@@ -1,5 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, SafeAreaView, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { spacing, typography, borderRadius, useThemeColors } from '@/constants/theme';
@@ -75,7 +76,7 @@ export default function RoomsScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
       <ScrollView style={styles.container} contentContainerStyle={styles.content}>
         <View style={styles.header}>
           <View>

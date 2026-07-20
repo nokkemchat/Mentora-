@@ -1,5 +1,6 @@
 import React, { useMemo, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Pressable, ActivityIndicator } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabase';
@@ -64,7 +65,7 @@ export default function ProfileScreen() {
   const schoolText = profile?.school ? `${profile.school} • ${profile.grade || ''}` : 'No school listed';
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
         <View style={styles.avatarPlaceholder}>
           <Text style={styles.avatarText}>
@@ -136,7 +137,7 @@ export default function ProfileScreen() {
         <Feather name="log-out" size={20} color={colors.error} />
         <Text style={styles.signOutText}>Sign Out</Text>
       </Pressable>
-    </View>
+    </SafeAreaView>
   );
 }
 

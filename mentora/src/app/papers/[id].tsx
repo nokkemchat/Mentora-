@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TextInput, Pressable, KeyboardAvoidingView, Platform } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { Bot, Send, Sparkles, AlertCircle, BookOpen } from 'lucide-react-native';
 import { useThemeColors, typography, spacing, borderRadius } from '@/constants/theme';
@@ -40,7 +41,7 @@ export default function QuestionTutorScreen() {
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
       <Stack.Screen options={{ 
         title: `Question ${question.number}`,
         headerStyle: { backgroundColor: colors.surface },
@@ -119,7 +120,7 @@ export default function QuestionTutorScreen() {
           </Pressable>
         </View>
       </KeyboardAvoidingView>
-    </View>
+    </SafeAreaView>
   );
 }
 

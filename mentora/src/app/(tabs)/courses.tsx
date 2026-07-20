@@ -1,5 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { spacing, typography, borderRadius, useThemeColors } from '@/constants/theme';
@@ -79,8 +80,9 @@ export default function CoursesScreen() {
   }, [user, role]);
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Text style={styles.headerTitle}>Explore Courses</Text>
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <ScrollView contentContainerStyle={styles.content}>
+        <Text style={styles.headerTitle}>Explore Courses</Text>
       <Text style={styles.headerSubtitle}>Find subjects tailored to your syllabus</Text>
 
       {/* AI Exam Intelligence Banner */}
@@ -124,9 +126,10 @@ export default function CoursesScreen() {
               </View>
             </Pressable>
           ))}
-        </View>
-      )}
-    </ScrollView>
+          </View>
+        )}
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 

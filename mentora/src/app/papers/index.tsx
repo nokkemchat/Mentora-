@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TextInput, Pressable } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, router } from 'expo-router';
 import { Search, Filter, ChevronRight, BookOpen } from 'lucide-react-native';
 import { useThemeColors, typography, spacing, borderRadius } from '@/constants/theme';
@@ -19,7 +20,7 @@ export default function PastPapersScreen() {
   ];
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
       <Stack.Screen options={{ 
         title: 'AI Past Papers',
         headerStyle: { backgroundColor: colors.background },
@@ -96,7 +97,7 @@ export default function PastPapersScreen() {
           </Pressable>
         ))}
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 

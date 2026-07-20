@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Platform } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabase';
@@ -73,82 +74,84 @@ export default function TeacherDashboard() {
 
   // Render Dashboard
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-      {/* Header */}
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.greeting}>Welcome, {user?.user_metadata?.first_name || 'Teacher'}!</Text>
-          <Text style={styles.subtitle}>Let's inspire some students today.</Text>
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        {/* Header */}
+        <View style={styles.header}>
+          <View>
+            <Text style={styles.greeting}>Welcome, {user?.user_metadata?.first_name || 'Teacher'}!</Text>
+            <Text style={styles.subtitle}>Let's inspire some students today.</Text>
+          </View>
+          <View style={styles.avatarPlaceholder}>
+            <Feather name="users" size={24} color={colors.primary} />
+          </View>
         </View>
-        <View style={styles.avatarPlaceholder}>
-          <Feather name="users" size={24} color={colors.primary} />
-        </View>
-      </View>
 
-      {/* Stats Overview */}
-      <View style={styles.statsContainer}>
-        <View style={styles.statCard}>
-          <Feather name="book" size={24} color={colors.primary} />
-          <Text style={styles.statValue}>{courses.length}</Text>
-          <Text style={styles.statLabel}>Published Courses</Text>
+        {/* Stats Overview */}
+        <View style={styles.statsContainer}>
+          <View style={styles.statCard}>
+            <Feather name="book" size={24} color={colors.primary} />
+            <Text style={styles.statValue}>{courses.length}</Text>
+            <Text style={styles.statLabel}>Published Courses</Text>
+          </View>
         </View>
-      </View>
 
-      {/* Active Courses List */}
-      <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>My Courses</Text>
-          <Pressable>
-            <Text style={styles.seeAllText}>Manage</Text>
+        {/* Active Courses List */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>My Courses</Text>
+            <Pressable>
+              <Text style={styles.seeAllText}>Manage</Text>
+            </Pressable>
+          </View>
+
+          {courses.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Feather name="inbox" size={48} color={colors.border} />
+              <Text style={styles.emptyStateTitle}>No courses yet</Text>
+              <Text style={styles.emptyStateSubtitle}>Create your first course to start teaching!</Text>
+            </View>
+          ) : (
+            courses.map((course) => (
+              <Pressable 
+                key={course.id}
+                style={styles.courseCard}
+                onPress={() => router.push(`/course/${course.id}`)}
+              >
+                <View style={[styles.courseIconContainer, { backgroundColor: course.color }]}>
+                  <MaterialCommunityIcons name={course.icon as any} size={32} color={colors.background} />
+                </View>
+                <View style={styles.courseInfo}>
+                  <Text style={styles.courseSubject}>{course.board} • {course.level}</Text>
+                  <Text style={styles.courseTopic}>{course.title}</Text>
+                </View>
+                <Feather name="edit-2" size={20} color={colors.textSecondary} />
+              </Pressable>
+            ))
+          )}
+        </View>
+
+        {/* Upcoming Classes / Live Rooms */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Live Study Rooms</Text>
+          <Pressable 
+            style={styles.liveRoomCard}
+            onPress={() => router.push('/rooms')}
+          >
+            <View style={styles.liveIconContainer}>
+              <View style={styles.liveIndicator} />
+              <Feather name="video" size={24} color={colors.error} />
+            </View>
+            <View style={styles.liveInfo}>
+              <Text style={styles.liveTitle}>Host a Live Session</Text>
+              <Text style={styles.liveSubtitle}>Jump into a study room and interact directly with your students.</Text>
+            </View>
+            <Feather name="arrow-right" size={20} color={colors.textSecondary} />
           </Pressable>
         </View>
 
-        {courses.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Feather name="inbox" size={48} color={colors.border} />
-            <Text style={styles.emptyStateTitle}>No courses yet</Text>
-            <Text style={styles.emptyStateSubtitle}>Create your first course to start teaching!</Text>
-          </View>
-        ) : (
-          courses.map((course) => (
-            <Pressable 
-              key={course.id}
-              style={styles.courseCard}
-              onPress={() => router.push(`/course/${course.id}`)}
-            >
-              <View style={[styles.courseIconContainer, { backgroundColor: course.color }]}>
-                <MaterialCommunityIcons name={course.icon as any} size={32} color={colors.background} />
-              </View>
-              <View style={styles.courseInfo}>
-                <Text style={styles.courseSubject}>{course.board} • {course.level}</Text>
-                <Text style={styles.courseTopic}>{course.title}</Text>
-              </View>
-              <Feather name="edit-2" size={20} color={colors.textSecondary} />
-            </Pressable>
-          ))
-        )}
-      </View>
-
-      {/* Upcoming Classes / Live Rooms */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Live Study Rooms</Text>
-        <Pressable 
-          style={styles.liveRoomCard}
-          onPress={() => router.push('/rooms')}
-        >
-          <View style={styles.liveIconContainer}>
-            <View style={styles.liveIndicator} />
-            <Feather name="video" size={24} color={colors.error} />
-          </View>
-          <View style={styles.liveInfo}>
-            <Text style={styles.liveTitle}>Host a Live Session</Text>
-            <Text style={styles.liveSubtitle}>Jump into a study room and interact directly with your students.</Text>
-          </View>
-          <Feather name="arrow-right" size={20} color={colors.textSecondary} />
-        </Pressable>
-      </View>
-
-    </ScrollView>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 

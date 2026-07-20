@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable, Image, ActivityIndicator } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabase';
@@ -60,9 +61,10 @@ export default function StudentDashboard() {
   }, []);
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-      {/* Header */}
-      <View style={styles.header}>
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        {/* Header */}
+        <View style={styles.header}>
         <View>
           <Text style={styles.greeting}>Hello, {user?.user_metadata?.first_name || 'Student'}!</Text>
           <Text style={styles.subtitle}>Ready to crush your goals today?</Text>
@@ -178,6 +180,7 @@ export default function StudentDashboard() {
         </View>
       </View>
     </ScrollView>
+  </SafeAreaView>
   );
 }
 
