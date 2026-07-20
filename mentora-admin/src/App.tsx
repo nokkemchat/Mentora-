@@ -10,6 +10,7 @@ import Teachers from './pages/Teachers';
 import Courses from './pages/Courses';
 import Subscriptions from './pages/Subscriptions';
 import Moderation from './pages/Moderation';
+import Papers from './pages/Papers';
 
 const ProtectedRoute = () => {
   const { loading } = useAuth();
@@ -38,6 +39,7 @@ export default function App() {
             <Route path="/courses" element={<Courses />} />
             <Route path="/subscriptions" element={<Subscriptions />} />
             <Route path="/moderation" element={<Moderation />} />
+            <Route path="/papers" element={<Papers />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />

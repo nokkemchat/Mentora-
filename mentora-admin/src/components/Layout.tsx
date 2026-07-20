@@ -1,7 +1,7 @@
 import React from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { LayoutDashboard, Users, BookOpen, CreditCard, LogOut, Shield, ShieldAlert } from 'lucide-react';
+import { LayoutDashboard, Users, BookOpen, CreditCard, LogOut, Shield, ShieldAlert, FileBox } from 'lucide-react';
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
@@ -17,6 +17,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     { label: 'Overview', path: '/', icon: LayoutDashboard },
     { label: 'Teachers', path: '/teachers', icon: Users },
     { label: 'Courses', path: '/courses', icon: BookOpen },
+    { label: 'Past Papers', path: '/papers', icon: FileBox },
     { label: 'Finance & Payouts', path: '/subscriptions', icon: CreditCard },
     { label: 'Moderation', path: '/moderation', icon: ShieldAlert },
   ];

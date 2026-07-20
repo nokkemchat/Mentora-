@@ -29,7 +29,7 @@ serve(async (req) => {
 
     // Fetch Question and Solution context
     const { data: questionData, error: qError } = await supabaseClient
-      .from("questions")
+      .from("past_paper_questions")
       .select("content_text, topic, difficulty, marks, papers(subject, curriculum)")
       .eq("id", questionId)
       .single();
@@ -39,7 +39,7 @@ serve(async (req) => {
     }
 
     const { data: solutionData } = await supabaseClient
-      .from("solutions")
+      .from("past_paper_solutions")
       .select("official_mark_scheme, ai_worked_solution, common_mistakes")
       .eq("question_id", questionId)
       .single();
