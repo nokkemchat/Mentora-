@@ -7,6 +7,8 @@ interface BulkUploadModalProps {
   onSuccess: () => void;
 }
 
+import { extractFirstPageText } from '../lib/pdf-parser';
+
 interface ParsedFile {
   file: File;
   name: string;
@@ -17,7 +19,8 @@ interface ParsedFile {
   session: string;
   paper_number: string;
   variant: string;
-  status: 'pending' | 'uploading' | 'success' | 'error';
+  type: string;
+  status: 'analyzing' | 'pending' | 'uploading' | 'success' | 'error';
   errorMessage?: string;
 }
 
@@ -28,7 +31,7 @@ export default function BulkUploadModal({ onClose, onSuccess }: BulkUploadModalP
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const parseFilename = (filename: string): Partial<ParsedFile> => {
-    // Example format: ZIMSEC_Physics_O-Level_2023_Nov_P1_V2.pdf
+    // Example format: ZIMSEC_Physics_O-Level_2023_Nov_P1_V2_qp.pdf
     const nameWithoutExt = filename.replace(/\.[^/.]+$/, "");
     const parts = nameWithoutExt.split('_');
     
@@ -39,6 +42,12 @@ export default function BulkUploadModal({ onClose, onSuccess }: BulkUploadModalP
     let session = 'Nov';
     let paper_number = '1';
     let variant = '';
+    let type = 'qp';
+
+    const lowerName = filename.toLowerCase();
+    if (lowerName.includes('ms') || lowerName.includes('mark')) {
+      type = 'ms';
+    }
 
     if (parts.length >= 1) curriculum = parts[0];
     if (parts.length >= 2) subject = parts[1];
@@ -46,13 +55,11 @@ export default function BulkUploadModal({ onClose, onSuccess }: BulkUploadModalP
     if (parts.length >= 4) year = parts[3];
     if (parts.length >= 5) session = parts[4];
     
-    // Parse Paper Number (e.g. P1 -> 1)
     if (parts.length >= 6) {
       const pMatch = parts[5].match(/\d+/);
       if (pMatch) paper_number = pMatch[0];
     }
     
-    // Parse Variant (e.g. V2 -> 2)
     if (parts.length >= 7) {
       const vMatch = parts[6].match(/\d+/);
       if (vMatch) variant = vMatch[0];
@@ -61,23 +68,63 @@ export default function BulkUploadModal({ onClose, onSuccess }: BulkUploadModalP
     return { curriculum, subject, grade_level, year, session, paper_number, variant };
   };
 
-  const handleFiles = (newFiles: FileList | File[]) => {
-    const parsedFiles: ParsedFile[] = Array.from(newFiles).filter(f => f.type === 'application/pdf').map(file => {
-      const parsed = parseFilename(file.name);
-      return {
-        file,
-        name: file.name,
-        curriculum: parsed.curriculum || 'ZIMSEC',
-        subject: parsed.subject || 'Unknown',
-        grade_level: parsed.grade_level || 'O-Level',
-        year: parsed.year || '2023',
-        session: parsed.session || 'Nov',
-        paper_number: parsed.paper_number || '1',
-        variant: parsed.variant || '',
-        status: 'pending'
-      };
-    });
-    setFiles(prev => [...prev, ...parsedFiles]);
+  const handleFiles = async (newFiles: FileList | File[]) => {
+    const validFiles = Array.from(newFiles).filter(f => f.type === 'application/pdf');
+    
+    const initialFiles: ParsedFile[] = validFiles.map(file => ({
+      file,
+      name: file.name,
+      curriculum: 'ZIMSEC',
+      subject: 'Unknown',
+      grade_level: 'O-Level',
+      year: new Date().getFullYear().toString(),
+      session: 'November',
+      paper_number: '1',
+      variant: '',
+      type: 'qp',
+      status: 'analyzing'
+    }));
+    
+    setFiles(prev => [...prev, ...initialFiles]);
+
+    // Process files sequentially to avoid rate limits
+    for (let i = 0; i < validFiles.length; i++) {
+      const file = validFiles[i];
+      try {
+        const text = await extractFirstPageText(file);
+        const { data, error } = await supabase.functions.invoke('extract_pdf_metadata', {
+          body: { filename: file.name, text }
+        });
+        
+        if (!error && data) {
+          setFiles(prev => prev.map(p => {
+             if (p.file === file) {
+               return {
+                 ...p,
+                 curriculum: data.curriculum && data.curriculum !== 'Unknown' ? data.curriculum : p.curriculum,
+                 subject: data.subject || p.subject,
+                 grade_level: data.grade_level && data.grade_level !== 'Unknown' ? data.grade_level : p.grade_level,
+                 year: data.year || p.year,
+                 session: data.session && data.session !== 'Unknown' ? data.session : p.session,
+                 paper_number: data.paper_number || p.paper_number,
+                 variant: data.variant || p.variant,
+                 type: data.type || p.type,
+                 status: 'pending'
+               }
+             }
+             return p;
+          }));
+        } else {
+          // fallback
+          const parsed = parseFilename(file.name);
+          setFiles(prev => prev.map(p => p.file === file ? { ...p, ...parsed, status: 'pending' } : p));
+        }
+      } catch (err) {
+        // fallback
+        const parsed = parseFilename(file.name);
+        setFiles(prev => prev.map(p => p.file === file ? { ...p, ...parsed, status: 'pending' } : p));
+      }
+    }
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -114,7 +161,8 @@ export default function BulkUploadModal({ onClose, onSuccess }: BulkUploadModalP
       try {
         // 1. Upload to Supabase Storage
         const fileExt = fileObj.name.split('.').pop();
-        const filePath = `${fileObj.curriculum}/${fileObj.subject}/${fileObj.year}/${fileObj.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+        const constructedName = `${fileObj.curriculum}_${fileObj.subject}_${fileObj.year}_P${fileObj.paper_number}_${fileObj.type}.${fileExt}`;
+        const filePath = `${fileObj.curriculum}/${fileObj.subject}/${fileObj.year}/${constructedName.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
         
         const { error: uploadError } = await supabase.storage
           .from('past_papers')
@@ -136,6 +184,7 @@ export default function BulkUploadModal({ onClose, onSuccess }: BulkUploadModalP
           session: fileObj.session,
           paper_number: parseInt(fileObj.paper_number),
           variant: fileObj.variant || null,
+          type: fileObj.type,
           pdf_url: publicUrl
         });
 
@@ -215,6 +264,7 @@ export default function BulkUploadModal({ onClose, onSuccess }: BulkUploadModalP
                       <th className="p-3 font-medium w-24">Session</th>
                       <th className="p-3 font-medium w-24">Paper</th>
                       <th className="p-3 font-medium w-24">Variant</th>
+                      <th className="p-3 font-medium w-24">Type</th>
                       <th className="p-3 font-medium text-center w-16">Status</th>
                       <th className="p-3 font-medium text-center w-16">Action</th>
                     </tr>
@@ -274,15 +324,29 @@ export default function BulkUploadModal({ onClose, onSuccess }: BulkUploadModalP
                         </td>
                         <td className="p-2">
                           <input 
+                            type="text" 
                             value={file.variant} 
                             onChange={(e) => updateFileField(idx, 'variant', e.target.value)}
                             className="w-full bg-background border border-border rounded p-1 text-xs"
+                            placeholder="e.g. 41"
                             disabled={isUploading}
                           />
                         </td>
+                        <td className="p-2">
+                          <select 
+                            value={file.type} 
+                            onChange={(e) => updateFileField(idx, 'type', e.target.value)}
+                            className="w-full bg-background border border-border rounded p-1 text-xs"
+                            disabled={isUploading}
+                          >
+                            <option value="qp">QP</option>
+                            <option value="ms">MS</option>
+                          </select>
+                        </td>
                         <td className="p-3 text-center">
-                          {file.status === 'pending' && <span className="w-2 h-2 rounded-full bg-textMuted inline-block"></span>}
-                          {file.status === 'uploading' && <span className="w-4 h-4 rounded-full border-2 border-primary border-t-transparent animate-spin inline-block"></span>}
+                          {file.status === 'analyzing' && <span className="w-4 h-4 rounded-full border-2 border-primary border-t-transparent animate-spin inline-block" title="AI is reading PDF..."></span>}
+                          {file.status === 'pending' && <span className="w-2 h-2 rounded-full bg-textMuted inline-block" title="Ready to upload"></span>}
+                          {file.status === 'uploading' && <span className="w-4 h-4 rounded-full border-2 border-primary border-t-transparent animate-spin inline-block" title="Uploading..."></span>}
                           {file.status === 'success' && <CheckCircle2 className="w-5 h-5 text-success inline-block" />}
                           {file.status === 'error' && <AlertCircle className="w-5 h-5 text-error inline-block" />}
                         </td>

@@ -139,6 +139,7 @@ export default function Papers() {
               <tr className="bg-background border-b border-border text-textMuted text-sm">
                 <th className="p-4 font-medium">Subject</th>
                 <th className="p-4 font-medium">Details</th>
+                <th className="p-4 font-medium">Type</th>
                 <th className="p-4 font-medium">Year & Session</th>
                 <th className="p-4 font-medium">PDF File</th>
                 <th className="p-4 font-medium text-right">Actions</th>
@@ -147,13 +148,13 @@ export default function Papers() {
             <tbody className="divide-y divide-border">
               {loading ? (
                  <tr>
-                 <td colSpan={5} className="p-8 text-center text-textMuted">
+                 <td colSpan={6} className="p-8 text-center text-textMuted">
                    Loading papers...
                  </td>
                </tr>
               ) : filteredPapers.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="p-8 text-center text-textMuted">
+                  <td colSpan={6} className="p-8 text-center text-textMuted">
                     No papers found matching your criteria.
                   </td>
                 </tr>
@@ -175,6 +176,17 @@ export default function Papers() {
                       <span className="block text-text">Paper {paper.paper_number}</span>
                       {paper.variant && <span className="text-xs">Variant {paper.variant}</span>}
                     </td>
+                    <td className="p-4">
+                      {paper.type === 'ms' ? (
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-xl text-xs font-medium bg-[#10b981]/10 text-[#10b981] border border-[#10b981]/20">
+                          Marking Scheme
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-xl text-xs font-medium bg-primary/10 text-primary border border-primary/20">
+                          Question Paper
+                        </span>
+                      )}
+                    </td>
                     <td className="p-4 text-textMuted">
                       <span className="block text-text">{paper.year}</span>
                       <span className="text-xs">{paper.session || 'N/A'}</span>
@@ -189,13 +201,22 @@ export default function Papers() {
                       )}
                     </td>
                     <td className="p-4 text-right">
-                      <div className="flex items-center justify-end space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="flex items-center justify-end space-x-3">
+                        <button 
+                          onClick={() => alert('Edit Paper functionality coming soon')}
+                          className="flex items-center space-x-1 p-2 text-textMuted hover:text-primary hover:bg-primary/10 rounded-xl transition-colors" 
+                          title="Edit"
+                        >
+                          <Edit className="w-4 h-4" />
+                          <span className="text-sm font-medium">Edit</span>
+                        </button>
                         <button 
                           onClick={() => handleDelete(paper.id)}
-                          className="p-2 text-textMuted hover:text-error hover:bg-error/10 rounded-2xl transition-colors" 
+                          className="flex items-center space-x-1 p-2 text-textMuted hover:text-error hover:bg-error/10 rounded-xl transition-colors" 
                           title="Delete"
                         >
                           <Trash2 className="w-4 h-4" />
+                          <span className="text-sm font-medium">Delete</span>
                         </button>
                       </div>
                     </td>

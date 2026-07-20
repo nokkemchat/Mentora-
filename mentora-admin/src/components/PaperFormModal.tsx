@@ -2,6 +2,8 @@ import React, { useState, useRef } from 'react';
 import { X, UploadCloud, File as FileIcon } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
+import { extractFirstPageText } from '../lib/pdf-parser';
+
 interface PaperFormModalProps {
   onClose: () => void;
   onSuccess: () => void;
@@ -9,6 +11,7 @@ interface PaperFormModalProps {
 
 export default function PaperFormModal({ onClose, onSuccess }: PaperFormModalProps) {
   const [isUploading, setIsUploading] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -19,16 +22,46 @@ export default function PaperFormModal({ onClose, onSuccess }: PaperFormModalPro
     year: new Date().getFullYear().toString(),
     session: 'November',
     paper_number: '1',
-    variant: ''
+    variant: '',
+    type: 'qp'
   });
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      setPdfFile(e.target.files[0]);
+      const file = e.target.files[0];
+      setPdfFile(file);
+
+      setIsAnalyzing(true);
+      try {
+        const text = await extractFirstPageText(file);
+        const { data, error } = await supabase.functions.invoke('extract_pdf_metadata', {
+          body: { filename: file.name, text }
+        });
+        
+        if (error) throw error;
+        
+        if (data) {
+          setFormData(prev => ({
+            ...prev,
+            curriculum: data.curriculum && data.curriculum !== 'Unknown' ? data.curriculum : prev.curriculum,
+            subject: data.subject || prev.subject,
+            grade_level: data.grade_level && data.grade_level !== 'Unknown' ? data.grade_level : prev.grade_level,
+            year: data.year || prev.year,
+            session: data.session && data.session !== 'Unknown' ? data.session : prev.session,
+            paper_number: data.paper_number || prev.paper_number,
+            variant: data.variant || prev.variant,
+            type: data.type || prev.type,
+          }));
+        }
+      } catch (err) {
+        console.error("AI Analysis failed:", err);
+      } finally {
+        setIsAnalyzing(false);
+      }
     }
   };
 
@@ -42,7 +75,7 @@ export default function PaperFormModal({ onClose, onSuccess }: PaperFormModalPro
       // Upload PDF if present
       if (pdfFile) {
         const fileExt = pdfFile.name.split('.').pop();
-        const fileName = `${formData.curriculum}_${formData.subject}_${formData.year}_P${formData.paper_number}.${fileExt}`;
+        const fileName = `${formData.curriculum}_${formData.subject}_${formData.year}_P${formData.paper_number}_${formData.type}.${fileExt}`;
         const filePath = `${formData.curriculum}/${formData.subject}/${formData.year}/${fileName.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
         
         const { error: uploadError } = await supabase.storage
@@ -64,6 +97,7 @@ export default function PaperFormModal({ onClose, onSuccess }: PaperFormModalPro
         session: formData.session,
         paper_number: parseInt(formData.paper_number),
         variant: formData.variant || null,
+        type: formData.type,
         pdf_url
       });
 
@@ -179,10 +213,25 @@ export default function PaperFormModal({ onClose, onSuccess }: PaperFormModalPro
             </div>
 
             <div className="space-y-2">
+              <label className="text-sm font-medium text-text">Type</label>
+              <select 
+                name="type" 
+                value={formData.type} 
+                onChange={handleChange} 
+                className="w-full bg-surface border border-border text-text rounded-2xl px-4 py-3 focus:outline-none focus:border-primary"
+              >
+                <option value="qp">Question Paper (QP)</option>
+                <option value="ms">Marking Scheme (MS)</option>
+              </select>
+            </div>
+
+            <div className="space-y-2">
               <label className="text-sm font-medium text-text">PDF Document (Optional)</label>
               <div 
-                className="border-2 border-dashed border-border hover:border-primary hover:bg-primary/5 rounded-2xl p-6 flex flex-col items-center justify-center transition-colors cursor-pointer"
-                onClick={() => fileInputRef.current?.click()}
+                className={`border-2 border-dashed rounded-2xl p-6 flex flex-col items-center justify-center transition-colors cursor-pointer relative ${
+                  isAnalyzing ? 'border-primary bg-primary/5' : 'border-border hover:border-primary hover:bg-primary/5'
+                }`}
+                onClick={() => !isAnalyzing && fileInputRef.current?.click()}
               >
                 <input 
                   type="file" 
@@ -190,8 +239,14 @@ export default function PaperFormModal({ onClose, onSuccess }: PaperFormModalPro
                   className="hidden" 
                   ref={fileInputRef}
                   onChange={handleFileChange}
+                  disabled={isAnalyzing}
                 />
-                {pdfFile ? (
+                {isAnalyzing ? (
+                  <div className="flex flex-col items-center justify-center space-y-3 py-2">
+                     <span className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+                     <p className="text-sm font-medium text-text">AI is reading document...</p>
+                  </div>
+                ) : pdfFile ? (
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
                       <FileIcon className="w-5 h-5 text-primary" />

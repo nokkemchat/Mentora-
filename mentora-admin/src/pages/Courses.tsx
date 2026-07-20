@@ -149,9 +149,15 @@ export default function Courses() {
                   <tr className="hover:bg-background transition-colors group">
                     <td className="p-4">
                       <div className="flex items-center space-x-3">
-                        <div className={`w-10 h-10 rounded-2xl flex items-center justify-center ${course.color || 'bg-blue-500'}/10 border border-${(course.color || 'bg-blue-500').split('-')[1]}-500/20 shrink-0`}>
-                          <BookOpen className={`w-5 h-5 text-${(course.color || 'bg-blue-500').split('-')[1]}-500`} />
-                        </div>
+                        {course.image_url ? (
+                          <div className="w-16 h-12 rounded-lg overflow-hidden shrink-0 border border-border">
+                            <img src={course.image_url} alt={course.title} className="w-full h-full object-cover" />
+                          </div>
+                        ) : (
+                          <div className={`w-10 h-10 rounded-2xl flex items-center justify-center ${course.color || 'bg-blue-500'}/10 border border-${(course.color || 'bg-blue-500').split('-')[1]}-500/20 shrink-0`}>
+                            <BookOpen className={`w-5 h-5 text-${(course.color || 'bg-blue-500').split('-')[1]}-500`} />
+                          </div>
+                        )}
                         <div>
                           <span className="font-medium text-text">{course.title}</span>
                           {course.syllabus_code && <span className="text-xs text-textMuted block mt-0.5">Code: {course.syllabus_code}</span>}
@@ -173,26 +179,32 @@ export default function Courses() {
                       </span>
                     </td>
                     <td className="p-4 text-right">
-                      <div className="flex items-center justify-end space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button className="p-2 text-textMuted hover:text-primary hover:bg-primary/10 rounded-2xl transition-colors" title="View">
+                      <div className="flex items-center justify-end space-x-2">
+                        <button className="flex items-center space-x-1 p-2 text-textMuted hover:text-primary hover:bg-primary/10 rounded-xl transition-colors" title="View">
                           <Eye className="w-4 h-4" />
                         </button>
-                        <button className="p-2 text-textMuted hover:text-primary hover:bg-primary/10 rounded-2xl transition-colors" title="Edit">
+                        <button 
+                          onClick={() => alert('Edit Course functionality coming soon')}
+                          className="flex items-center space-x-1 p-2 text-textMuted hover:text-primary hover:bg-primary/10 rounded-xl transition-colors" 
+                          title="Edit"
+                        >
                           <Edit className="w-4 h-4" />
+                          <span className="text-sm font-medium">Edit</span>
                         </button>
                         <button 
                           onClick={() => setExpandedCourseId(expandedCourseId === course.id ? null : course.id)}
-                          className={`p-2 rounded-2xl transition-colors ${expandedCourseId === course.id ? 'text-primary bg-primary/10' : 'text-textMuted hover:text-primary hover:bg-primary/10'}`} 
+                          className={`flex items-center space-x-1 p-2 rounded-xl transition-colors ${expandedCourseId === course.id ? 'text-primary bg-primary/10' : 'text-textMuted hover:text-primary hover:bg-primary/10'}`} 
                           title="Analytics"
                         >
                           <BarChart2 className="w-4 h-4" />
                         </button>
                         <button 
                           onClick={() => handleDelete(course.id)}
-                          className="p-2 text-textMuted hover:text-error hover:bg-error/10 rounded-2xl transition-colors" 
+                          className="flex items-center space-x-1 p-2 text-textMuted hover:text-error hover:bg-error/10 rounded-xl transition-colors" 
                           title="Delete"
                         >
                           <Trash2 className="w-4 h-4" />
+                          <span className="text-sm font-medium">Delete</span>
                         </button>
                       </div>
                     </td>

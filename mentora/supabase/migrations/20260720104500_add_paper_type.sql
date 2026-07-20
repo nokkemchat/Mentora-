@@ -1,0 +1,1 @@
+ALTER TABLE public.papers ADD COLUMN type TEXT CHECK (type IN ('qp', 'ms')) NOT NULL DEFAULT 'qp';

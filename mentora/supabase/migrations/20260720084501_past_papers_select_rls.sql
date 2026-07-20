@@ -1,0 +1,1 @@
+CREATE POLICY "Public Access past_papers" ON storage.objects FOR SELECT USING (bucket_id = 'past_papers');

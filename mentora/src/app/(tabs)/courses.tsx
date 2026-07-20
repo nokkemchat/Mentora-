@@ -77,6 +77,23 @@ export default function CoursesScreen() {
     }
 
     fetchCourses();
+
+    // Subscribe to real-time changes on the courses table
+    const coursesSubscription = supabase
+      .channel('courses-changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'courses' },
+        () => {
+          // Re-fetch courses when any change occurs (insert, update, delete)
+          fetchCourses();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(coursesSubscription);
+    };
   }, [user, role]);
 
   return (
