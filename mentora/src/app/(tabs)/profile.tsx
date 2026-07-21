@@ -2,6 +2,8 @@ import React, { useMemo, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Pressable, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
+import { BlurView } from 'expo-blur';
 import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { spacing, typography, borderRadius, useThemeColors } from '@/constants/theme';
@@ -64,6 +66,12 @@ export default function ProfileScreen() {
   const roleText = profile?.role === 'teacher' ? 'Teacher Account' : 'Student Account';
   const schoolText = profile?.school ? `${profile.school} • ${profile.grade || ''}` : 'No school listed';
 
+  const isLightMode = colors.background === '#F8FAFC';
+  // iOS dark icon theme aesthetic: deep charcoal/black with slight sheen
+  const glassGradient = isLightMode 
+    ? ['rgba(28, 28, 30, 0.45)', 'rgba(28, 28, 30, 0.25)', 'rgba(28, 28, 30, 0.55)'] 
+    : ['rgba(255, 255, 255, 0.45)', 'rgba(255, 255, 255, 0.05)', 'rgba(255, 255, 255, 0.15)'];
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
@@ -89,6 +97,21 @@ export default function ProfileScreen() {
 
       {/* Theme Settings */}
       <View style={styles.section}>
+        <BlurView 
+          intensity={isLightMode ? 80 : 50} 
+          tint={isLightMode ? "light" : "dark"} 
+          style={StyleSheet.absoluteFillObject} 
+        />
+        {/* Glass reflection gradient */}
+        <LinearGradient
+          colors={glassGradient}
+          locations={[0, 0.4, 1]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={StyleSheet.absoluteFillObject}
+        />
+        {/* Edge highlight */}
+        <View style={styles.glassHighlight} />
         <View style={styles.sectionHeader}>
           <Feather name="moon" size={20} color={colors.text} />
           <Text style={styles.sectionTitleText}>App Theme</Text>
@@ -116,6 +139,21 @@ export default function ProfileScreen() {
 
       {/* Account Settings */}
       <View style={styles.section}>
+        <BlurView 
+          intensity={isLightMode ? 80 : 50} 
+          tint={isLightMode ? "light" : "dark"} 
+          style={StyleSheet.absoluteFillObject} 
+        />
+        {/* Glass reflection gradient */}
+        <LinearGradient
+          colors={glassGradient}
+          locations={[0, 0.4, 1]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={StyleSheet.absoluteFillObject}
+        />
+        {/* Edge highlight */}
+        <View style={styles.glassHighlight} />
         <Pressable style={styles.menuItem}>
           <Feather name="settings" size={20} color={colors.text} />
           <Text style={styles.menuItemText}>Account Settings</Text>
@@ -134,6 +172,11 @@ export default function ProfileScreen() {
       </View>
 
       <Pressable style={styles.signOutButton} onPress={handleSignOut}>
+        <BlurView 
+          intensity={isLightMode ? 80 : 50} 
+          tint={isLightMode ? "light" : "dark"} 
+          style={StyleSheet.absoluteFillObject} 
+        />
         <Feather name="log-out" size={20} color={colors.error} />
         <Text style={styles.signOutText}>Sign Out</Text>
       </Pressable>
@@ -198,12 +241,32 @@ const createStyles = (colors: any) => StyleSheet.create({
     fontSize: typography.sizes.sm,
   },
   section: {
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
+    backgroundColor: 'transparent',
+    borderRadius: 32, // extra smooth corners
+    borderWidth: 1.5,
+    borderColor: colors.background === '#F8FAFC' ? 'rgba(255, 255, 255, 0.15)' : 'rgba(255, 255, 255, 0.3)',
+    borderTopColor: colors.background === '#F8FAFC' ? 'rgba(255, 255, 255, 0.35)' : 'rgba(255, 255, 255, 0.6)', 
+    borderLeftColor: colors.background === '#F8FAFC' ? 'rgba(255, 255, 255, 0.25)' : 'rgba(255, 255, 255, 0.5)',
+    borderBottomColor: colors.background === '#F8FAFC' ? 'rgba(0, 0, 0, 0.8)' : 'rgba(255, 255, 255, 0.1)',
+    borderRightColor: colors.background === '#F8FAFC' ? 'rgba(0, 0, 0, 0.5)' : 'rgba(255, 255, 255, 0.1)',
     overflow: 'hidden',
     marginBottom: spacing.xxl,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: colors.background === '#F8FAFC' ? 0.05 : 0.2,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  glassHighlight: {
+    position: 'absolute',
+    top: 0,
+    left: '5%',
+    right: '5%',
+    height: '40%',
+    backgroundColor: colors.background === '#F8FAFC' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(255, 255, 255, 0.08)',
+    borderBottomLeftRadius: 100,
+    borderBottomRightRadius: 100,
+    transform: [{ scaleX: 1.2 }],
   },
   sectionHeader: {
     flexDirection: 'row',

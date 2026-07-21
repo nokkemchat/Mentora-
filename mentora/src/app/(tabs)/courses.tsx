@@ -1,10 +1,22 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
+import { BlurView } from 'expo-blur';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { spacing, typography, borderRadius, useThemeColors } from '@/constants/theme';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useAuth } from '@/context/AuthContext';
+
+const coverImages: Record<string, any> = {
+  '/covers/math.png': require('../../../assets/images/covers/math.png'),
+  '/covers/science.png': require('../../../assets/images/covers/science.png'),
+  '/covers/languages.png': require('../../../assets/images/covers/languages.png'),
+  '/covers/humanities.png': require('../../../assets/images/covers/humanities.png'),
+  '/covers/technology.png': require('../../../assets/images/covers/technology.png'),
+  '/covers/agriculture.png': require('../../../assets/images/covers/agriculture.png'),
+};
 
 type CourseType = {
   id: string;
@@ -13,10 +25,9 @@ type CourseType = {
   level: string;
   icon: string;
   color: string;
+  image_url: string | null;
   topics: { id: string }[];
 };
-
-import { useAuth } from '@/context/AuthContext';
 
 export default function CoursesScreen() {
   const colors = useThemeColors();
@@ -36,7 +47,6 @@ export default function CoursesScreen() {
 
       let allowedCourseTitles: string[] | null = null;
 
-      // If they are a teacher, we only want to show courses they chose during setup
       if (role === 'teacher') {
         const { data: profileData } = await supabase
           .from('profiles')
@@ -47,7 +57,6 @@ export default function CoursesScreen() {
         allowedCourseTitles = profileData?.subjects_taught || [];
       }
 
-      // If they are a teacher and have NO courses chosen, we can early return
       if (role === 'teacher' && allowedCourseTitles && allowedCourseTitles.length === 0) {
         setCourses([]);
         setLoading(false);
@@ -57,7 +66,7 @@ export default function CoursesScreen() {
       let query = supabase
         .from('courses')
         .select(`
-          id, title, board, level, icon, color,
+          id, title, board, level, icon, color, image_url,
           topics (id)
         `);
 
@@ -78,14 +87,12 @@ export default function CoursesScreen() {
 
     fetchCourses();
 
-    // Subscribe to real-time changes on the courses table
     const coursesSubscription = supabase
       .channel('courses-changes')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'courses' },
         () => {
-          // Re-fetch courses when any change occurs (insert, update, delete)
           fetchCourses();
         }
       )
@@ -102,18 +109,17 @@ export default function CoursesScreen() {
         <Text style={styles.headerTitle}>Explore Courses</Text>
       <Text style={styles.headerSubtitle}>Find subjects tailored to your syllabus</Text>
 
-      {/* AI Exam Intelligence Banner */}
       <Pressable 
         style={styles.aiBanner}
         onPress={() => router.push('/papers')}
       >
         <View style={styles.aiBannerContent}>
-          <MaterialCommunityIcons name="robot-outline" size={32} color="#CCFF00" />
+          <MaterialCommunityIcons name="robot-outline" size={32} color={colors.accent} />
           <View style={{ flex: 1, marginLeft: spacing.md }}>
             <Text style={styles.aiBannerTitle}>AI Exam Intelligence</Text>
             <Text style={styles.aiBannerSubtitle}>Past papers turned into an interactive AI tutor.</Text>
           </View>
-          <MaterialCommunityIcons name="chevron-right" size={24} color="#CCFF00" />
+          <MaterialCommunityIcons name="chevron-right" size={24} color={colors.accent} />
         </View>
       </Pressable>
 
@@ -125,24 +131,60 @@ export default function CoursesScreen() {
         <Text style={{ color: colors.textSecondary, marginTop: 20 }}>No courses found in the database.</Text>
       ) : (
         <View style={styles.grid}>
-          {courses.map((course) => (
-            <Pressable 
-              key={course.id} 
-              style={styles.card}
-              onPress={() => router.push(`/course/${course.id}`)}
-            >
-              <View style={[styles.iconContainer, { backgroundColor: course.color }]}>
-                <MaterialCommunityIcons name={course.icon as any} size={32} color={colors.background} />
-              </View>
+          {(() => {
+            const isLightMode = colors.background === '#F8FAFC';
+            const glassGradient = isLightMode 
+              ? ['rgba(28, 28, 30, 0.45)', 'rgba(28, 28, 30, 0.25)', 'rgba(28, 28, 30, 0.55)'] 
+              : ['rgba(255, 255, 255, 0.5)', 'rgba(255, 255, 255, 0.05)', 'rgba(255, 255, 255, 0.3)'];
+
+            return courses.map((course) => (
+              <Pressable 
+                key={course.id} 
+                style={styles.card}
+                onPress={() => router.push(`/course/${course.id}`)}
+              >
+                {/* Glass background effect */}
+                <BlurView 
+                  intensity={isLightMode ? 80 : 50} 
+                  tint={isLightMode ? "light" : "dark"}
+                  style={StyleSheet.absoluteFillObject} 
+                />
+                <LinearGradient
+                  colors={glassGradient}
+                  locations={[0, 0.5, 1]}
+                  start={{ x: 0.2, y: 0.1 }}
+                  end={{ x: 0.8, y: 0.9 }}
+                  style={StyleSheet.absoluteFillObject}
+                />
+              {course.image_url && coverImages[course.image_url] ? (
+                <Image 
+                  source={coverImages[course.image_url]} 
+                  style={styles.courseImage} 
+                  resizeMode="cover"
+                />
+              ) : (
+                <View style={[styles.iconContainer, { backgroundColor: course.color }]}>
+                  <MaterialCommunityIcons name={course.icon as any} size={32} color={colors.background} />
+                </View>
+              )}
               <Text style={styles.courseTitle}>{course.title}</Text>
               <Text style={styles.courseMeta}>{course.board} • {course.level}</Text>
               <View style={styles.topicBadge}>
+                {/* Glass Curvature Gradient (Water Bubble) */}
+                <LinearGradient
+                  colors={['rgba(255, 255, 255, 0.2)', 'rgba(255, 255, 255, 0.0)', 'rgba(255, 255, 255, 0.1)']}
+                  locations={[0, 0.5, 1]}
+                  start={{ x: 0.2, y: 0.1 }}
+                  end={{ x: 0.8, y: 0.9 }}
+                  style={StyleSheet.absoluteFillObject}
+                />
                 <Text style={styles.topicBadgeText}>
                   {course.topics?.length || 0} Topics
                 </Text>
               </View>
             </Pressable>
-          ))}
+            ));
+          })()}
           </View>
         )}
       </ScrollView>
@@ -171,30 +213,30 @@ const createStyles = (colors: any) => StyleSheet.create({
     marginTop: spacing.xs,
   },
   aiBanner: {
-    backgroundColor: '#1A1A1A', // Graphite
+    backgroundColor: colors.surface,
     borderRadius: borderRadius.lg,
     padding: spacing.lg,
     marginBottom: spacing.xxl,
-    shadowColor: '#CCFF00', // Lime Spark glow
+    shadowColor: colors.accent,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,
     shadowRadius: 12,
     elevation: 8,
     borderWidth: 1,
-    borderColor: '#333333',
+    borderColor: colors.border,
   },
   aiBannerContent: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   aiBannerTitle: {
-    color: '#CCFF00', // Lime Spark
+    color: colors.accent,
     fontSize: typography.sizes.lg,
     fontWeight: typography.weights.bold,
     marginBottom: 4,
   },
   aiBannerSubtitle: {
-    color: '#A0A0A0', // Light Graphite
+    color: colors.textSecondary,
     fontSize: typography.sizes.sm,
     lineHeight: 20,
   },
@@ -205,12 +247,31 @@ const createStyles = (colors: any) => StyleSheet.create({
   },
   card: {
     width: '47%', // Roughly half minus gap
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.lg,
+    height: 240, // Fixed height so all cards are the same size
+    justifyContent: 'space-between',
+    backgroundColor: 'transparent',
+    borderRadius: 32, // Smooth, rounded corners
     padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
+    borderWidth: 1.5,
+    borderColor: colors.background === '#F8FAFC' ? 'rgba(255, 255, 255, 0.15)' : 'rgba(255, 255, 255, 0.3)',
+    borderTopColor: colors.background === '#F8FAFC' ? 'rgba(255, 255, 255, 0.35)' : 'rgba(255, 255, 255, 0.6)',
+    borderLeftColor: colors.background === '#F8FAFC' ? 'rgba(255, 255, 255, 0.25)' : 'rgba(255, 255, 255, 0.5)',
+    borderBottomColor: colors.background === '#F8FAFC' ? 'rgba(0, 0, 0, 0.8)' : 'rgba(255, 255, 255, 0.1)',
+    borderRightColor: colors.background === '#F8FAFC' ? 'rgba(0, 0, 0, 0.5)' : 'rgba(255, 255, 255, 0.1)',
     alignItems: 'flex-start',
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: colors.background === '#F8FAFC' ? 0.05 : 0.2,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  courseImage: {
+    width: '100%',
+    aspectRatio: 16 / 9,
+    height: undefined,
+    borderRadius: borderRadius.md,
+    marginBottom: spacing.md,
   },
   iconContainer: {
     width: 56,
@@ -233,14 +294,23 @@ const createStyles = (colors: any) => StyleSheet.create({
     marginBottom: spacing.md,
   },
   topicBadge: {
-    backgroundColor: colors.primaryLight,
+    backgroundColor: 'transparent',
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
-    borderRadius: borderRadius.sm,
+    borderRadius: 9999, // Perfect pill shape
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    overflow: 'hidden',
+    shadowColor: '#FFFFFF',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
   },
   topicBadgeText: {
     fontSize: typography.sizes.xs,
-    color: colors.primary,
+    // Dark grey in light mode, White in dark mode
+    color: colors.background === '#F8FAFC' ? '#333333' : '#FFFFFF',
     fontWeight: typography.weights.bold,
   },
 });
