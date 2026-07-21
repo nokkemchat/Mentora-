@@ -1,35 +1,37 @@
 import { useColorScheme } from 'react-native';
 
 export const lightColors = {
-  background: '#FAFAFA',
-  text: '#121212', // Graphite text
-  textSecondary: '#4A4A4A',
-  textTertiary: '#8E8E8E',
-  primary: '#CCFF00', // Lime Spark
-  primaryLight: '#E6FF80', 
-  accent: '#121212', // Graphite
-  border: '#E0E0E0',
+  background: '#F8FAFC',
+  text: '#111827',
+  textSecondary: '#6B7280',
+  textTertiary: '#9CA3AF',
+  primary: '#1E3A8A', // Navy Blue
+  primaryLight: '#60A5FA', // Sky Blue
+  accent: '#FBBF24', // Gold
+  primaryContrast: '#1E3A8A', // Used for text on primaryLight bg
+  border: '#E5E7EB',
   surface: '#FFFFFF', 
-  surfaceHighlight: '#F5F5F5',
-  error: '#FF4D4D',
+  surfaceHighlight: '#F8FAFC',
+  error: '#EF4444',
   success: '#10B981',
   warning: '#F59E0B',
 };
 
 export const darkColors = {
-  background: '#121212', // Deep Graphite
-  text: '#FFFFFF', 
-  textSecondary: '#A0A0A0', 
-  textTertiary: '#6E6E6E', 
-  primary: '#CCFF00', // Lime Spark
-  primaryLight: '#334000', // Dark tinted lime
-  accent: '#CCFF00', 
-  border: '#2A2A2A', // Light Graphite border
-  surface: '#1A1A1A', // Graphite surface
-  surfaceHighlight: '#222222', 
-  error: '#FF6B6B',
-  success: '#34D399',
-  warning: '#FBBF24',
+  background: '#09090B',
+  text: '#FAFAFA', 
+  textSecondary: '#D4D4D8', 
+  textTertiary: '#A1A1AA', 
+  primary: '#60A5FA', // Sky Blue for readability on dark
+  primaryLight: '#1E3A8A', // Navy Blue
+  accent: '#60A5FA', // Sky Blue
+  primaryContrast: '#FAFAFA', // White text on Navy pill
+  border: '#3F3F46', 
+  surface: '#18181B', 
+  surfaceHighlight: '#27272A', 
+  error: '#EF4444',
+  success: '#10B981',
+  warning: '#F59E0B',
 };
 
 import { useAppTheme } from '@/context/ThemeContext';
@@ -86,17 +88,17 @@ export const borderRadius = {
 
 export const shadows = {
   sm: {
-    shadowColor: 'transparent',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0,
-    shadowRadius: 0,
-    elevation: 0,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
   },
   md: {
-    shadowColor: 'transparent',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0,
-    shadowRadius: 0,
-    elevation: 0,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    elevation: 4,
   },
 };

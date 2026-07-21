@@ -6,6 +6,8 @@ import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { spacing, typography, borderRadius, useThemeColors } from '@/constants/theme';
 import { Feather, Ionicons } from '@expo/vector-icons';
+import { GlobalWatermark } from '@/components/GlobalWatermark';
+import { BlurView } from 'expo-blur';
 
 type Teacher = {
   id: string;
@@ -19,6 +21,7 @@ type Teacher = {
 
 export default function StudentDashboard() {
   const colors = useThemeColors();
+  const isLightMode = colors.background === '#F8FAFC';
   const styles = useMemo(() => createStyles(colors), [colors]);
 
   const { user } = useAuth();
@@ -62,6 +65,7 @@ export default function StudentDashboard() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
+      <GlobalWatermark />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={styles.header}>
@@ -77,6 +81,11 @@ export default function StudentDashboard() {
       {/* Community Callout */}
       {user?.user_metadata?.school && (
         <View style={styles.communityCard}>
+          <BlurView 
+            intensity={75} 
+            tint={isLightMode ? "light" : "dark"} 
+            style={StyleSheet.absoluteFillObject} 
+          />
           <View style={styles.communityIconContainer}>
             <Ionicons name="people" size={24} color={colors.background} />
           </View>
@@ -96,6 +105,11 @@ export default function StudentDashboard() {
         style={styles.careerHubCard}
         onPress={() => router.push('/careers/hub')}
       >
+        <BlurView 
+          intensity={75} 
+          tint={isLightMode ? "light" : "dark"} 
+          style={StyleSheet.absoluteFillObject} 
+        />
         <View style={styles.careerHubInfo}>
           <Text style={styles.careerHubTitle}>Career Hub 🎓</Text>
           <Text style={styles.careerHubSubtitle}>Explore universities, scholarships, and plan your future roadmap.</Text>
@@ -125,6 +139,11 @@ export default function StudentDashboard() {
               style={styles.teacherCard}
               onPress={() => router.push(`/teacher/${teacher.id}`)}
             >
+              <BlurView 
+                intensity={75} 
+                tint={isLightMode ? "light" : "dark"} 
+                style={StyleSheet.absoluteFillObject} 
+              />
               <View style={styles.teacherHeader}>
                 {teacher.avatar_url ? (
                   <Image source={{ uri: teacher.avatar_url }} style={styles.teacherAvatar} />
@@ -156,7 +175,7 @@ export default function StudentDashboard() {
                 <View style={styles.subjectChips}>
                   {teacher.subjects_taught?.map((subject, idx) => (
                     <View key={idx} style={styles.subjectChip}>
-                      <Ionicons name="book" size={12} color={colors.primary} style={{ marginRight: 4 }} />
+                      <Ionicons name="book" size={12} color="#000000" style={{ marginRight: 4 }} />
                       <Text style={styles.subjectChipText}>{subject.trim()}</Text>
                     </View>
                   ))}
@@ -223,12 +242,13 @@ const createStyles = (colors: any) => StyleSheet.create({
   communityCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.surface,
+    backgroundColor: 'transparent',
     padding: spacing.lg,
     borderRadius: borderRadius.lg,
     borderWidth: 1,
     borderColor: colors.border,
     marginBottom: spacing.xl,
+    overflow: 'hidden',
   },
   communityIconContainer: {
     width: 48,
@@ -257,10 +277,13 @@ const createStyles = (colors: any) => StyleSheet.create({
   careerHubCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#8B5CF6',
+    backgroundColor: 'transparent',
     padding: spacing.xl,
     borderRadius: borderRadius.lg,
     marginBottom: spacing.xl,
+    borderWidth: 1,
+    borderColor: '#8B5CF6',
+    overflow: 'hidden',
   },
   careerHubInfo: {
     flex: 1,
@@ -321,12 +344,13 @@ const createStyles = (colors: any) => StyleSheet.create({
 
   // Teacher Card Styles
   teacherCard: {
-    backgroundColor: colors.surface,
+    backgroundColor: 'transparent',
     borderRadius: borderRadius.lg,
     padding: spacing.lg,
     marginBottom: spacing.md,
     borderWidth: 1,
     borderColor: colors.border,
+    overflow: 'hidden',
   },
   teacherHeader: {
     flexDirection: 'row',
@@ -408,7 +432,7 @@ const createStyles = (colors: any) => StyleSheet.create({
   subjectChipText: {
     fontSize: typography.sizes.sm,
     fontFamily: 'Outfit_500Medium',
-    color: colors.primary,
+    color: '#000000',
     fontWeight: typography.weights.medium,
   },
 });

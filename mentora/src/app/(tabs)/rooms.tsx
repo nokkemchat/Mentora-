@@ -5,9 +5,12 @@ import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { spacing, typography, borderRadius, useThemeColors } from '@/constants/theme';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
+import { BlurView } from 'expo-blur';
+import { GlobalWatermark } from '@/components/GlobalWatermark';
 
 export default function RoomsScreen() {
   const colors = useThemeColors();
+  const isLightMode = colors.background === '#F8FAFC';
   const styles = useMemo(() => createStyles(colors), [colors]);
   const router = useRouter();
 
@@ -36,6 +39,11 @@ export default function RoomsScreen() {
       style={styles.roomCard}
       onPress={() => router.push(`/room/${room.id}`)}
     >
+      <BlurView 
+        intensity={75} 
+        tint={isLightMode ? "light" : "dark"}
+        style={StyleSheet.absoluteFillObject} 
+      />
       <View style={styles.roomHeader}>
         <View style={styles.roomTitleContainer}>
           <Text style={styles.roomTitle}>{room.title}</Text>
@@ -77,6 +85,7 @@ export default function RoomsScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
+      <GlobalWatermark />
       <ScrollView style={styles.container} contentContainerStyle={styles.content}>
         <View style={styles.header}>
           <View>
@@ -169,12 +178,13 @@ const createStyles = (colors: any) => StyleSheet.create({
     color: colors.text,
   },
   roomCard: {
-    backgroundColor: colors.surface,
+    backgroundColor: 'transparent',
     borderRadius: borderRadius.lg,
     padding: spacing.lg,
     borderWidth: 1,
     borderColor: colors.border,
     marginBottom: spacing.md,
+    overflow: 'hidden',
   },
   roomHeader: {
     flexDirection: 'row',

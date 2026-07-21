@@ -32,8 +32,8 @@ CREATE TABLE public.options (
 
 -- Seed Quiz Data (From mockData)
 INSERT INTO public.questions (id, subtopic_id, text, explanation) VALUES
-('q1', 'st-quadratic-eq', 'Factorise: x^2 + 5x + 6', 'We need two numbers that multiply to 6 and add to 5. Those numbers are 2 and 3.'),
-('q2', 'st-circle-geometry', 'The angle subtended by an arc at the centre is...', 'A fundamental theorem of circle geometry: the angle at the centre is twice the angle at the circumference subtended by the same arc.');
+('q1', 'st-quadratic-eq', 'Factorise the quadratic expression: x² + 5x + 6', 'We need two numbers that multiply to 6 and add to 5. Those numbers are 2 and 3.'),
+('q2', 'st-circle-geometry', 'According to the circle theorems, the angle subtended by an arc at the centre of a circle is:', 'A fundamental theorem of circle geometry: the angle at the centre is twice the angle at the circumference subtended by the same arc.');
 
 INSERT INTO public.options (id, question_id, text, is_correct) VALUES
 ('o1-1', 'q1', '(x + 2)(x + 3)', true),

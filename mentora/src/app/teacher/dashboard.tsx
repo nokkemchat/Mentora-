@@ -387,3 +387,4 @@ const createStyles = (colors: any) => StyleSheet.create({
     fontSize: typography.sizes.sm,
   },
 });
+

@@ -9,6 +9,7 @@ import { supabase } from '@/lib/supabase';
 import { spacing, typography, borderRadius, useThemeColors } from '@/constants/theme';
 import { useAppTheme } from '@/context/ThemeContext';
 import { Feather } from '@expo/vector-icons';
+import { GlobalWatermark } from '@/components/GlobalWatermark';
 
 type ProfileType = {
   first_name: string | null;
@@ -67,14 +68,16 @@ export default function ProfileScreen() {
   const schoolText = profile?.school ? `${profile.school} • ${profile.grade || ''}` : 'No school listed';
 
   const isLightMode = colors.background === '#F8FAFC';
-  // iOS dark icon theme aesthetic: deep charcoal/black with slight sheen
-  const glassGradient = isLightMode 
-    ? ['rgba(28, 28, 30, 0.45)', 'rgba(28, 28, 30, 0.25)', 'rgba(28, 28, 30, 0.55)'] 
-    : ['rgba(255, 255, 255, 0.45)', 'rgba(255, 255, 255, 0.05)', 'rgba(255, 255, 255, 0.15)'];
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
+      <GlobalWatermark />
       <View style={styles.header}>
+        <BlurView 
+          intensity={75} 
+          tint={isLightMode ? "light" : "dark"} 
+          style={StyleSheet.absoluteFillObject} 
+        />
         <View style={styles.avatarPlaceholder}>
           <Text style={styles.avatarText}>
             {profile?.first_name ? profile.first_name[0].toUpperCase() : <Feather name="user" size={40} color={colors.primary} />}
@@ -98,16 +101,8 @@ export default function ProfileScreen() {
       {/* Theme Settings */}
       <View style={styles.section}>
         <BlurView 
-          intensity={isLightMode ? 80 : 50} 
+          intensity={75} 
           tint={isLightMode ? "light" : "dark"} 
-          style={StyleSheet.absoluteFillObject} 
-        />
-        {/* Glass reflection gradient */}
-        <LinearGradient
-          colors={glassGradient}
-          locations={[0, 0.4, 1]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
           style={StyleSheet.absoluteFillObject}
         />
         {/* Edge highlight */}
@@ -140,31 +135,32 @@ export default function ProfileScreen() {
       {/* Account Settings */}
       <View style={styles.section}>
         <BlurView 
-          intensity={isLightMode ? 80 : 50} 
+          intensity={75} 
           tint={isLightMode ? "light" : "dark"} 
-          style={StyleSheet.absoluteFillObject} 
-        />
-        {/* Glass reflection gradient */}
-        <LinearGradient
-          colors={glassGradient}
-          locations={[0, 0.4, 1]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
           style={StyleSheet.absoluteFillObject}
         />
         {/* Edge highlight */}
         <View style={styles.glassHighlight} />
-        <Pressable style={styles.menuItem}>
+        <Pressable 
+          style={styles.menuItem}
+          onPress={() => router.push('/settings/account')}
+        >
           <Feather name="settings" size={20} color={colors.text} />
           <Text style={styles.menuItemText}>Account Settings</Text>
           <Feather name="chevron-right" size={20} color={colors.textSecondary} />
         </Pressable>
-        <Pressable style={styles.menuItem}>
+        <Pressable 
+          style={styles.menuItem}
+          onPress={() => router.push('/settings/notifications')}
+        >
           <Feather name="bell" size={20} color={colors.text} />
           <Text style={styles.menuItemText}>Notifications</Text>
           <Feather name="chevron-right" size={20} color={colors.textSecondary} />
         </Pressable>
-        <Pressable style={styles.menuItem}>
+        <Pressable 
+          style={styles.menuItem}
+          onPress={() => router.push('/settings/support')}
+        >
           <Feather name="help-circle" size={20} color={colors.text} />
           <Text style={styles.menuItemText}>Help & Support</Text>
           <Feather name="chevron-right" size={20} color={colors.textSecondary} />
@@ -173,7 +169,7 @@ export default function ProfileScreen() {
 
       <Pressable style={styles.signOutButton} onPress={handleSignOut}>
         <BlurView 
-          intensity={isLightMode ? 80 : 50} 
+          intensity={75} 
           tint={isLightMode ? "light" : "dark"} 
           style={StyleSheet.absoluteFillObject} 
         />
@@ -194,6 +190,12 @@ const createStyles = (colors: any) => StyleSheet.create({
   header: {
     alignItems: 'center',
     marginBottom: spacing.xxl,
+    backgroundColor: 'transparent',
+    padding: spacing.xl,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    overflow: 'hidden',
   },
   avatarPlaceholder: {
     width: 80,
@@ -243,12 +245,6 @@ const createStyles = (colors: any) => StyleSheet.create({
   section: {
     backgroundColor: 'transparent',
     borderRadius: 32, // extra smooth corners
-    borderWidth: 1.5,
-    borderColor: colors.background === '#F8FAFC' ? 'rgba(255, 255, 255, 0.15)' : 'rgba(255, 255, 255, 0.3)',
-    borderTopColor: colors.background === '#F8FAFC' ? 'rgba(255, 255, 255, 0.35)' : 'rgba(255, 255, 255, 0.6)', 
-    borderLeftColor: colors.background === '#F8FAFC' ? 'rgba(255, 255, 255, 0.25)' : 'rgba(255, 255, 255, 0.5)',
-    borderBottomColor: colors.background === '#F8FAFC' ? 'rgba(0, 0, 0, 0.8)' : 'rgba(255, 255, 255, 0.1)',
-    borderRightColor: colors.background === '#F8FAFC' ? 'rgba(0, 0, 0, 0.5)' : 'rgba(255, 255, 255, 0.1)',
     overflow: 'hidden',
     marginBottom: spacing.xxl,
     shadowColor: '#000',
@@ -330,11 +326,12 @@ const createStyles = (colors: any) => StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: spacing.lg,
-    backgroundColor: colors.surface,
+    backgroundColor: 'transparent',
     borderRadius: borderRadius.md,
     borderWidth: 1,
     borderColor: colors.error,
     gap: spacing.sm,
+    overflow: 'hidden',
   },
   signOutText: {
     color: colors.error,

@@ -6,6 +6,8 @@ import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { spacing, typography, borderRadius, useThemeColors } from '@/constants/theme';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
+import { GlobalWatermark } from '@/components/GlobalWatermark';
+import { BlurView } from 'expo-blur';
 
 type Course = {
   id: string;
@@ -18,6 +20,7 @@ type Course = {
 
 export default function TeacherDashboard() {
   const colors = useThemeColors();
+  const isLightMode = colors.background === '#F8FAFC';
   const styles = useMemo(() => createStyles(colors), [colors]);
 
   const { user } = useAuth();
@@ -75,6 +78,7 @@ export default function TeacherDashboard() {
   // Render Dashboard
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
+      <GlobalWatermark />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={styles.header}>
@@ -90,6 +94,11 @@ export default function TeacherDashboard() {
         {/* Stats Overview */}
         <View style={styles.statsContainer}>
           <View style={styles.statCard}>
+            <BlurView 
+              intensity={75} 
+              tint={isLightMode ? "light" : "dark"} 
+              style={StyleSheet.absoluteFillObject} 
+            />
             <Feather name="book" size={24} color={colors.primary} />
             <Text style={styles.statValue}>{courses.length}</Text>
             <Text style={styles.statLabel}>Published Courses</Text>
@@ -118,6 +127,11 @@ export default function TeacherDashboard() {
                 style={styles.courseCard}
                 onPress={() => router.push(`/course/${course.id}`)}
               >
+                <BlurView 
+                  intensity={75} 
+                  tint={isLightMode ? "light" : "dark"} 
+                  style={StyleSheet.absoluteFillObject} 
+                />
                 <View style={[styles.courseIconContainer, { backgroundColor: course.color }]}>
                   <MaterialCommunityIcons name={course.icon as any} size={32} color={colors.background} />
                 </View>
@@ -138,6 +152,11 @@ export default function TeacherDashboard() {
             style={styles.liveRoomCard}
             onPress={() => router.push('/rooms')}
           >
+            <BlurView 
+              intensity={75} 
+              tint={isLightMode ? "light" : "dark"} 
+              style={StyleSheet.absoluteFillObject} 
+            />
             <View style={styles.liveIconContainer}>
               <View style={styles.liveIndicator} />
               <Feather name="video" size={24} color={colors.error} />
@@ -196,11 +215,12 @@ const createStyles = (colors: any) => StyleSheet.create({
   },
   statCard: {
     flex: 1,
-    backgroundColor: colors.surface,
+    backgroundColor: 'transparent',
     padding: spacing.lg,
     borderRadius: borderRadius.lg,
     borderWidth: 1,
     borderColor: colors.border,
+    overflow: 'hidden',
   },
   statValue: {
     fontSize: typography.sizes.xxl,
@@ -233,7 +253,7 @@ const createStyles = (colors: any) => StyleSheet.create({
     color: colors.primary,
   },
   courseCard: {
-    backgroundColor: colors.surface,
+    backgroundColor: 'transparent',
     borderRadius: borderRadius.lg,
     padding: spacing.lg,
     borderWidth: 1,
@@ -242,6 +262,7 @@ const createStyles = (colors: any) => StyleSheet.create({
     alignItems: 'center',
     gap: spacing.md,
     marginBottom: spacing.md,
+    overflow: 'hidden',
   },
   courseIconContainer: {
     width: 60,
@@ -290,11 +311,12 @@ const createStyles = (colors: any) => StyleSheet.create({
   liveRoomCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.surface,
+    backgroundColor: 'transparent',
     padding: spacing.lg,
     borderRadius: borderRadius.lg,
     borderWidth: 1,
     borderColor: colors.border,
+    overflow: 'hidden',
   },
   liveIconContainer: {
     width: 48,
@@ -350,3 +372,4 @@ const createStyles = (colors: any) => StyleSheet.create({
     fontWeight: typography.weights.semibold,
   },
 });
+

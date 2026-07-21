@@ -1,9 +1,10 @@
-import React, { useState, useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, SafeAreaView } from 'react-native';
+import React, { useState, useMemo, useEffect } from 'react';
+import { View, Text, StyleSheet, ScrollView, Pressable, SafeAreaView, ActivityIndicator } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { mockCourses } from '@/data/mockData';
+import { supabase } from '@/lib/supabase';
 import { spacing, typography, borderRadius, useThemeColors } from '@/constants/theme';
 import { Feather } from '@expo/vector-icons';
+import Scratchpad from '@/components/Scratchpad';
 
 export default function QuizScreen() {
   const colors = useThemeColors();
@@ -12,26 +13,45 @@ export default function QuizScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
 
-  // Find the subtopic by searching through all courses and topics
-  let currentTopic: any = null;
-  for (const course of mockCourses) {
-    for (const topic of course.topics) {
-      const found = topic.subtopics.find((st) => st.id === id);
-      if (found) {
-        currentTopic = found;
-        break;
-      }
-    }
-    if (currentTopic) break;
-  }
-
+  const [questions, setQuestions] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedOptionId, setSelectedOptionId] = useState<string | null>(null);
   const [isAnswerChecked, setIsAnswerChecked] = useState(false);
   const [score, setScore] = useState(0);
   const [isFinished, setIsFinished] = useState(false);
+  const [isScratchpadVisible, setIsScratchpadVisible] = useState(false);
 
-  if (!currentTopic || currentTopic.questions.length === 0) {
+  useEffect(() => {
+    async function fetchQuestions() {
+      if (!id) return;
+      try {
+        setLoading(true);
+        const { data, error } = await supabase
+          .from('questions')
+          .select('*, options(*)')
+          .eq('subtopic_id', id);
+
+        if (error) throw error;
+        setQuestions(data || []);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchQuestions();
+  }, [id]);
+
+  if (loading) {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
+
+  if (questions.length === 0) {
     return (
       <View style={styles.centered}>
         <Text style={styles.errorText}>No questions found for this topic.</Text>
@@ -42,7 +62,7 @@ export default function QuizScreen() {
     );
   }
 
-  const currentQuestion = currentTopic.questions[currentIndex];
+  const currentQuestion = questions[currentIndex];
 
   const handleSelectOption = (optionId: string) => {
     if (isAnswerChecked) return;
@@ -53,14 +73,14 @@ export default function QuizScreen() {
     if (!selectedOptionId) return;
     
     setIsAnswerChecked(true);
-    const isCorrect = currentQuestion.options.find((o: any) => o.id === selectedOptionId)?.isCorrect;
+    const isCorrect = currentQuestion.options.find((o: any) => o.id === selectedOptionId)?.is_correct;
     if (isCorrect) {
       setScore((prev) => prev + 1);
     }
   };
 
   const handleNext = () => {
-    if (currentIndex < currentTopic.questions.length - 1) {
+    if (currentIndex < questions.length - 1) {
       setCurrentIndex((prev) => prev + 1);
       setSelectedOptionId(null);
       setIsAnswerChecked(false);
@@ -75,7 +95,7 @@ export default function QuizScreen() {
         <View style={styles.summaryContainer}>
           <Feather name="award" size={64} color={colors.warning} style={styles.awardIcon} />
           <Text style={styles.summaryTitle}>Quiz Completed!</Text>
-          <Text style={styles.scoreText}>You scored {score} out of {currentTopic.questions.length}</Text>
+          <Text style={styles.scoreText}>You scored {score} out of {questions.length}</Text>
           
           <View style={styles.actionButtons}>
             <Pressable 
@@ -100,13 +120,19 @@ export default function QuizScreen() {
           <View 
             style={[
               styles.progressFill, 
-              { width: `${((currentIndex + 1) / currentTopic.questions.length) * 100}%` }
+              { width: `${((currentIndex + 1) / questions.length) * 100}%` }
             ]} 
           />
         </View>
         <Text style={styles.progressText}>
-          {currentIndex + 1} / {currentTopic.questions.length}
+          {currentIndex + 1} / {questions.length}
         </Text>
+        <Pressable 
+          onPress={() => setIsScratchpadVisible(true)} 
+          style={styles.scratchpadButton}
+        >
+          <Feather name="edit-3" size={20} color={colors.primary} />
+        </Pressable>
       </View>
 
       <ScrollView style={styles.contentContainer}>
@@ -165,11 +191,16 @@ export default function QuizScreen() {
         ) : (
           <Pressable style={styles.primaryButton} onPress={handleNext}>
             <Text style={styles.primaryButtonText}>
-              {currentIndex < currentTopic.questions.length - 1 ? 'Next Question' : 'Finish Quiz'}
+              {currentIndex < questions.length - 1 ? 'Next Question' : 'Finish Quiz'}
             </Text>
           </Pressable>
         )}
       </View>
+
+      <Scratchpad 
+        isVisible={isScratchpadVisible} 
+        onClose={() => setIsScratchpadVisible(false)} 
+      />
     </SafeAreaView>
   );
 }
@@ -194,6 +225,10 @@ const createStyles = (colors: any) => StyleSheet.create({
   },
   closeButton: {
     padding: spacing.xs,
+  },
+  scratchpadButton: {
+    padding: spacing.xs,
+    marginLeft: spacing.xs,
   },
   progressTracker: {
     flex: 1,

@@ -10,6 +10,15 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as WebBrowser from 'expo-web-browser';
 import { decode } from 'base64-arraybuffer';
 
+const coverImages: Record<string, any> = {
+  '/covers/math.png': require('../../../assets/images/covers/math.png'),
+  '/covers/science.png': require('../../../assets/images/covers/science.png'),
+  '/covers/languages.png': require('../../../assets/images/covers/languages.png'),
+  '/covers/humanities.png': require('../../../assets/images/covers/humanities.png'),
+  '/covers/technology.png': require('../../../assets/images/covers/technology.png'),
+  '/covers/agriculture.png': require('../../../assets/images/covers/agriculture.png'),
+};
+
 // Enable LayoutAnimation on Android
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -228,9 +237,17 @@ export default function CourseDetailScreen() {
       </Pressable>
 
       <View style={styles.header}>
-        <View style={[styles.iconContainer, { backgroundColor: course.color }]}>
-          <MaterialCommunityIcons name={course.icon as any} size={40} color={colors.background} />
-        </View>
+        {course.image_url && coverImages[course.image_url] ? (
+          <Image 
+            source={coverImages[course.image_url]} 
+            style={styles.coverImage} 
+            resizeMode="cover"
+          />
+        ) : (
+          <View style={[styles.iconContainer, { backgroundColor: course.color }]}>
+            <MaterialCommunityIcons name={course.icon as any} size={40} color={colors.background} />
+          </View>
+        )}
         <Text style={styles.courseTitle}>{course.title}</Text>
         <Text style={styles.courseMeta}>{course.board} • {course.level}</Text>
       </View>
@@ -414,6 +431,13 @@ const createStyles = (colors: any) => StyleSheet.create({
   header: {
     alignItems: 'center',
     marginBottom: spacing.xxxl,
+  },
+  coverImage: {
+    width: '100%',
+    aspectRatio: 16 / 9,
+    height: undefined,
+    borderRadius: borderRadius.lg,
+    marginBottom: spacing.lg,
   },
   iconContainer: {
     width: 80,

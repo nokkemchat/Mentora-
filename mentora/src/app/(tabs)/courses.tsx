@@ -8,6 +8,7 @@ import { supabase } from '@/lib/supabase';
 import { spacing, typography, borderRadius, useThemeColors } from '@/constants/theme';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useAuth } from '@/context/AuthContext';
+import { GlobalWatermark } from '../../components/GlobalWatermark';
 
 const coverImages: Record<string, any> = {
   '/covers/math.png': require('../../../assets/images/covers/math.png'),
@@ -105,6 +106,7 @@ export default function CoursesScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
+      <GlobalWatermark />
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.headerTitle}>Explore Courses</Text>
       <Text style={styles.headerSubtitle}>Find subjects tailored to your syllabus</Text>
@@ -113,6 +115,11 @@ export default function CoursesScreen() {
         style={styles.aiBanner}
         onPress={() => router.push('/papers')}
       >
+        <BlurView 
+          intensity={75} 
+          tint={colors.background === '#F8FAFC' ? "light" : "dark"}
+          style={StyleSheet.absoluteFillObject} 
+        />
         <View style={styles.aiBannerContent}>
           <MaterialCommunityIcons name="robot-outline" size={32} color={colors.accent} />
           <View style={{ flex: 1, marginLeft: spacing.md }}>
@@ -133,9 +140,6 @@ export default function CoursesScreen() {
         <View style={styles.grid}>
           {(() => {
             const isLightMode = colors.background === '#F8FAFC';
-            const glassGradient = isLightMode 
-              ? ['rgba(28, 28, 30, 0.45)', 'rgba(28, 28, 30, 0.25)', 'rgba(28, 28, 30, 0.55)'] 
-              : ['rgba(255, 255, 255, 0.5)', 'rgba(255, 255, 255, 0.05)', 'rgba(255, 255, 255, 0.3)'];
 
             return courses.map((course) => (
               <Pressable 
@@ -145,42 +149,41 @@ export default function CoursesScreen() {
               >
                 {/* Glass background effect */}
                 <BlurView 
-                  intensity={isLightMode ? 80 : 50} 
+                  intensity={75} 
                   tint={isLightMode ? "light" : "dark"}
                   style={StyleSheet.absoluteFillObject} 
                 />
-                <LinearGradient
-                  colors={glassGradient}
-                  locations={[0, 0.5, 1]}
-                  start={{ x: 0.2, y: 0.1 }}
-                  end={{ x: 0.8, y: 0.9 }}
-                  style={StyleSheet.absoluteFillObject}
-                />
-              {course.image_url && coverImages[course.image_url] ? (
-                <Image 
-                  source={coverImages[course.image_url]} 
-                  style={styles.courseImage} 
-                  resizeMode="cover"
-                />
-              ) : (
-                <View style={[styles.iconContainer, { backgroundColor: course.color }]}>
-                  <MaterialCommunityIcons name={course.icon as any} size={32} color={colors.background} />
+              <View style={styles.cardContent}>
+                {course.image_url && coverImages[course.image_url] ? (
+                  <Image 
+                    source={coverImages[course.image_url]} 
+                    style={styles.courseImage} 
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <View style={[styles.iconContainer, { backgroundColor: course.color }]}>
+                    <MaterialCommunityIcons name={course.icon as any} size={28} color={colors.background} />
+                  </View>
+                )}
+                
+                <View style={styles.cardTextContainer}>
+                  <Text style={styles.courseTitle}>{course.title}</Text>
+                  <Text style={styles.courseMeta}>{course.board} • {course.level}</Text>
                 </View>
-              )}
-              <Text style={styles.courseTitle}>{course.title}</Text>
-              <Text style={styles.courseMeta}>{course.board} • {course.level}</Text>
-              <View style={styles.topicBadge}>
-                {/* Glass Curvature Gradient (Water Bubble) */}
-                <LinearGradient
-                  colors={['rgba(255, 255, 255, 0.2)', 'rgba(255, 255, 255, 0.0)', 'rgba(255, 255, 255, 0.1)']}
-                  locations={[0, 0.5, 1]}
-                  start={{ x: 0.2, y: 0.1 }}
-                  end={{ x: 0.8, y: 0.9 }}
-                  style={StyleSheet.absoluteFillObject}
-                />
-                <Text style={styles.topicBadgeText}>
-                  {course.topics?.length || 0} Topics
-                </Text>
+
+                <View style={styles.topicBadge}>
+                  {/* Glass Curvature Gradient (Water Bubble) */}
+                  <LinearGradient
+                    colors={['rgba(255, 255, 255, 0.2)', 'rgba(255, 255, 255, 0.0)', 'rgba(255, 255, 255, 0.1)']}
+                    locations={[0, 0.5, 1]}
+                    start={{ x: 0.2, y: 0.1 }}
+                    end={{ x: 0.8, y: 0.9 }}
+                    style={StyleSheet.absoluteFillObject}
+                  />
+                  <Text style={styles.topicBadgeText}>
+                    {course.topics?.length || 0}
+                  </Text>
+                </View>
               </View>
             </Pressable>
             ));
@@ -213,7 +216,7 @@ const createStyles = (colors: any) => StyleSheet.create({
     marginTop: spacing.xs,
   },
   aiBanner: {
-    backgroundColor: colors.surface,
+    backgroundColor: 'transparent',
     borderRadius: borderRadius.lg,
     padding: spacing.lg,
     marginBottom: spacing.xxl,
@@ -224,6 +227,7 @@ const createStyles = (colors: any) => StyleSheet.create({
     elevation: 8,
     borderWidth: 1,
     borderColor: colors.border,
+    overflow: 'hidden',
   },
   aiBannerContent: {
     flexDirection: 'row',
@@ -241,23 +245,14 @@ const createStyles = (colors: any) => StyleSheet.create({
     lineHeight: 20,
   },
   grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexDirection: 'column',
     gap: spacing.md,
   },
   card: {
-    width: '47%', // Roughly half minus gap
-    height: 240, // Fixed height so all cards are the same size
-    justifyContent: 'space-between',
+    width: '100%', 
     backgroundColor: 'transparent',
-    borderRadius: 32, // Smooth, rounded corners
+    borderRadius: 100, // Pill shape like navigation bar
     padding: spacing.lg,
-    borderWidth: 1.5,
-    borderColor: colors.background === '#F8FAFC' ? 'rgba(255, 255, 255, 0.15)' : 'rgba(255, 255, 255, 0.3)',
-    borderTopColor: colors.background === '#F8FAFC' ? 'rgba(255, 255, 255, 0.35)' : 'rgba(255, 255, 255, 0.6)',
-    borderLeftColor: colors.background === '#F8FAFC' ? 'rgba(255, 255, 255, 0.25)' : 'rgba(255, 255, 255, 0.5)',
-    borderBottomColor: colors.background === '#F8FAFC' ? 'rgba(0, 0, 0, 0.8)' : 'rgba(255, 255, 255, 0.1)',
-    borderRightColor: colors.background === '#F8FAFC' ? 'rgba(0, 0, 0, 0.5)' : 'rgba(255, 255, 255, 0.1)',
     alignItems: 'flex-start',
     overflow: 'hidden',
     shadowColor: '#000',
@@ -266,20 +261,27 @@ const createStyles = (colors: any) => StyleSheet.create({
     shadowRadius: 20,
     elevation: 10,
   },
-  courseImage: {
+  cardContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
     width: '100%',
-    aspectRatio: 16 / 9,
-    height: undefined,
-    borderRadius: borderRadius.md,
-    marginBottom: spacing.md,
+  },
+  cardTextContainer: {
+    flex: 1,
+    paddingHorizontal: spacing.md,
+    justifyContent: 'center',
+  },
+  courseImage: {
+    width: 56,
+    height: 56,
+    borderRadius: 28, // Circular image
   },
   iconContainer: {
     width: 56,
     height: 56,
-    borderRadius: borderRadius.md,
+    borderRadius: 28, // Circular icon container
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: spacing.md,
   },
   courseTitle: {
     fontSize: typography.sizes.lg,

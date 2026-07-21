@@ -1,234 +1,201 @@
-import React, { useEffect, useMemo } from 'react';
-import {
-  View,
-  Text,
-  Pressable,
-  StyleSheet,
-  Platform,
-  Dimensions,
-  Image,
-} from 'react-native';
-import { BlurView } from 'expo-blur';
-import { LinearGradient } from 'expo-linear-gradient';
+import React, { useEffect } from 'react';
+import { View, Text, Pressable, StyleSheet, Platform, Dimensions } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withSpring,
   withTiming,
-  withRepeat,
-  withSequence,
-  Easing,
-  interpolateColor,
+  useDerivedValue,
   interpolate,
+  interpolateColor,
+  Extrapolation,
 } from 'react-native-reanimated';
+import { BlurView } from 'expo-blur';
+import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
-import { Home, BookOpen, MessagesSquare, UserRound } from 'lucide-react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useAppTheme } from '@/context/ThemeContext';
 
-// ─── Constants ─────────────────────────────────────────────────────────────────
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const BAR_WIDTH = Math.min(SCREEN_WIDTH - 40, 390); // Mobile width target 360-390
+const BAR_WIDTH = Math.min(SCREEN_WIDTH - 40, 390);
 const TAB_COUNT = 4;
 const ITEM_WIDTH = BAR_WIDTH / TAB_COUNT;
-const BUBBLE_W = 52;
-const BUBBLE_H = 48;
-const BAR_HEIGHT = 72; // 68-74px requested
+const PILL_WIDTH = ITEM_WIDTH - 24; // Generous padding inside
+const PILL_HEIGHT = 56;
+const BAR_HEIGHT = 72;
+
+// The physics requested by the user
+const SPRING_CONFIG = {
+  stiffness: 380,
+  damping: 30,
+  mass: 0.9,
+  overshootClamping: false,
+};
 
 const TABS = [
-  { name: 'index',   label: 'Home',    Icon: Home },
-  { name: 'courses', label: 'Courses', Icon: BookOpen },
-  { name: 'rooms',   label: 'Rooms',   Icon: MessagesSquare },
-  { name: 'profile', label: 'Profile', Icon: UserRound },
+  { name: 'index',   label: 'Home',    activeIcon: 'home',              inactiveIcon: 'home-outline' },
+  { name: 'courses', label: 'Courses', activeIcon: 'library',           inactiveIcon: 'library-outline' },
+  { name: 'rooms',   label: 'Rooms',   activeIcon: 'chatbubbles',       inactiveIcon: 'chatbubbles-outline' },
+  { name: 'profile', label: 'Profile', activeIcon: 'person-circle',     inactiveIcon: 'person-circle-outline' },
 ] as const;
 
-// Physics: high damping, medium stiffness. "Feels like physical glass sliding."
-const SPRING_BUBBLE = { damping: 22, stiffness: 220, mass: 1.1 };
-const SPRING_ICON = { damping: 14, stiffness: 280, mass: 0.9 };
-
-// "Microscopic grain texture" for etched glass feel.
-const NOISE_BASE64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADIAAAAyBAMAAADsEZWCAAAAGFBMVEUAAAAAAP////////////////////////8F5Jj+AAAACHRSTlMA/////////9n632MAAABySURBVDjLxY3BEoMwDAQzGZ/R///RDCv0Yk/b2TkD6V2ZtTnnH2N8b/jP0W+N1t0b1r93rP7esXofrN4Hq/fB6n2weh+s3ger98HqfbB6H6zeB6v3wep9sHofbLwP1r93vP5u+M/Rb43W3Rvf25zzD6yYDhG5q8aHAAAAAElFTkSuQmCC';
-
-// ─── Single Tab Item ───────────────────────────────────────────────────────────
 type TabItemProps = {
   tab: typeof TABS[number];
   isActive: boolean;
   onPress: () => void;
+  themeColors: any;
+  isDark: boolean;
 };
 
-function TabItem({ tab, isActive, onPress }: TabItemProps) {
-  // Icon lifting and scaling
-  const translateY = useSharedValue(isActive ? -4 : 0);
-  const scale = useSharedValue(1);
+function TabItem({ tab, isActive, onPress, themeColors, isDark }: TabItemProps) {
+  // Shared values for transitions
   const activeProgress = useSharedValue(isActive ? 1 : 0);
 
   useEffect(() => {
-    translateY.value = withSpring(isActive ? -4 : 0, SPRING_ICON);
-    activeProgress.value = withTiming(isActive ? 1 : 0, { duration: 300 });
-
-    if (isActive) {
-      // 1.00 -> 1.15 -> 1.00 natural bounce
-      scale.value = withSequence(
-        withSpring(1.15, { damping: 12, stiffness: 300 }),
-        withSpring(1.0, { damping: 14, stiffness: 250 })
-      );
-    } else {
-      scale.value = withSpring(1.0, SPRING_ICON);
-    }
+    activeProgress.value = withSpring(isActive ? 1 : 0, SPRING_CONFIG);
   }, [isActive]);
 
-  const animStyle = useAnimatedStyle(() => ({
-    transform: [
-      { translateY: translateY.value },
-      { scale: scale.value },
-    ],
-  }));
+  // Active Icon color depends on theme
+  // Made monochrome (colorless) for maximum readability as requested
+  const activeIconColor = isDark ? '#FFFFFF' : '#1C1C1E';
+  const inactiveIconColor = isDark ? '#A1A1AA' : '#71717A';
 
-  const labelStyle = useAnimatedStyle(() => ({
-    opacity: activeProgress.value,
-    transform: [{ translateY: interpolate(activeProgress.value, [0, 1], [4, 0]) }],
-  }));
+  const iconAnimStyle = useAnimatedStyle(() => {
+    const scale = interpolate(activeProgress.value, [0, 1], [1, 1.15], Extrapolation.CLAMP);
+    
+    return {
+      transform: [
+        { scale }
+      ],
+    };
+  });
+
+  const labelAnimStyle = useAnimatedStyle(() => {
+    const translateY = interpolate(activeProgress.value, [0, 1], [10, 0], Extrapolation.CLAMP);
+    const opacity = interpolate(activeProgress.value, [0, 1], [0, 1], Extrapolation.CLAMP);
+    
+    return {
+      opacity,
+      transform: [{ translateY }],
+    };
+  });
+
+  // Ionicons doesn't have strokeWidth, we just rely on the bold filled variant
+  const iconName = isActive ? tab.activeIcon : tab.inactiveIcon;
 
   return (
     <Pressable
       style={styles.tabItem}
       onPress={onPress}
-      onPressIn={() => {
-        scale.value = withSpring(0.95, { damping: 20, stiffness: 400 });
-      }}
-      onPressOut={() => {
-        scale.value = withSpring(isActive ? 1.0 : 1.0, SPRING_ICON);
-      }}
       accessibilityRole="tab"
       accessibilityState={{ selected: isActive }}
     >
-      <Animated.View style={[styles.iconWrapper, animStyle]}>
-        <tab.Icon
+      <Animated.View style={[styles.iconWrapper, iconAnimStyle]}>
+        <Ionicons
+          name={iconName as any}
           size={24}
-          color={isActive ? '#FFFFFF' : 'rgba(160, 170, 180, 0.7)'}
-          strokeWidth={isActive ? 2.2 : 2.0}
+          color={isActive ? activeIconColor : inactiveIconColor}
         />
-        {/* Label fades in to bold when active */}
-        <Animated.View style={[styles.labelContainer, labelStyle]}>
-          <Text style={styles.label}>{tab.label}</Text>
+        <Animated.View style={[styles.labelContainer, labelAnimStyle]}>
+          <Text style={[styles.label, { color: isActive ? activeIconColor : inactiveIconColor }]}>
+            {tab.label}
+          </Text>
         </Animated.View>
       </Animated.View>
     </Pressable>
   );
 }
 
-// ─── Main Tab Bar ──────────────────────────────────────────────────────────────
 export function MentoraTabBar({ state, navigation }: any) {
+  const { colors, isDark } = useAppTheme();
   const activeIndex = state.index;
 
-  // 1. Sliding Bubble Position
-  const bubbleX = useSharedValue(
-    activeIndex * ITEM_WIDTH + (ITEM_WIDTH - BUBBLE_W) / 2
+  const pillX = useSharedValue(
+    activeIndex * ITEM_WIDTH + (ITEM_WIDTH - PILL_WIDTH) / 2
   );
+  
+  // To calculate the stretch based on velocity
+  const prevX = useSharedValue(pillX.value);
 
   useEffect(() => {
-    const target = activeIndex * ITEM_WIDTH + (ITEM_WIDTH - BUBBLE_W) / 2;
-    bubbleX.value = withSpring(target, SPRING_BUBBLE);
+    const target = activeIndex * ITEM_WIDTH + (ITEM_WIDTH - PILL_WIDTH) / 2;
+    pillX.value = withSpring(target, SPRING_CONFIG);
   }, [activeIndex]);
 
-  const bubbleAnimStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: bubbleX.value }],
-  }));
+  const pillAnimStyle = useAnimatedStyle(() => {
+    // Calculate pseudo-velocity (distance moved per frame)
+    const diff = Math.abs(pillX.value - prevX.value);
+    prevX.value = pillX.value;
+    
+    // Stretch horizontally based on speed, max 30% stretch
+    const scaleX = 1 + Math.min(diff / 25, 0.3);
+    
+    // Compress vertically slightly based on speed
+    const scaleY = 1 - Math.min(diff / 100, 0.1);
 
-  // 2. Slow Reflection Sweep (15s loop)
-  const reflectionX = useSharedValue(-BAR_WIDTH);
+    return {
+      transform: [
+        { translateX: pillX.value },
+        { scaleX },
+        { scaleY },
+      ],
+    };
+  });
+
+  // Make the background translucent to let the blur show through
+  const barBgColor = isDark ? 'rgba(28, 28, 30, 0.65)' : 'rgba(255, 255, 255, 0.75)';
+  const barBorderColor = isDark ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.08)';
   
-  useEffect(() => {
-    reflectionX.value = withRepeat(
-      withTiming(BAR_WIDTH * 2, {
-        duration: 16000,
-        easing: Easing.linear,
-      }),
-      -1,
-      false
-    );
-  }, []);
+  // Indicator color: Light = Navy (#1E3A8A), Dark = Gold (#FBBF24)
+  const indicatorColor = isDark ? colors.accent : colors.primary;
 
-  const reflectionAnimStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: reflectionX.value }],
-  }));
-
-  // 3. Continuous Floating Effect (1-2px)
-  const floatY = useSharedValue(0);
-
-  useEffect(() => {
-    floatY.value = withRepeat(
-      withSequence(
-        withTiming(-1.5, { duration: 2500, easing: Easing.inOut(Easing.sin) }),
-        withTiming(1.5, { duration: 2500, easing: Easing.inOut(Easing.sin) })
-      ),
-      -1,
-      true
-    );
-  }, []);
-
-  const floatAnimStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: floatY.value }],
-    shadowOffset: { width: 0, height: interpolate(floatY.value, [-1.5, 1.5], [12, 8]) },
-    shadowOpacity: interpolate(floatY.value, [-1.5, 1.5], [0.15, 0.12]),
-  }));
+  // Shadow styles based on theme
+  const shadowStyle = isDark
+    ? {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.2,
+        shadowRadius: 8,
+        elevation: 8,
+      }
+    : {
+        shadowColor: '#64748B',
+        shadowOffset: { width: 0, height: 12 },
+        shadowOpacity: 0.15,
+        shadowRadius: 24,
+        elevation: 12,
+      };
 
   return (
-    <Animated.View style={[styles.outerContainer, floatAnimStyle]} pointerEvents="box-none">
-      <View style={styles.barContainer}>
-        {/* 1. Frosted Glass Blur Backdrop */}
-        <BlurView
-          tint="light"
-          intensity={40}
-          style={StyleSheet.absoluteFillObject}
-        />
-
-        {/* 2. White Tint & Edge Lighting (10-15% white opacity) */}
-        <LinearGradient
-          colors={['rgba(255,255,255,0.18)', 'rgba(255,255,255,0.06)']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 0, y: 1 }}
-          style={StyleSheet.absoluteFillObject}
-          pointerEvents="none"
-        />
-
-        {/* 3. Microscopic Grain Texture */}
-        <Image
-          source={{ uri: NOISE_BASE64 }}
-          style={styles.noiseTexture}
-          resizeMode="repeat"
-        />
-
-        {/* 4. Sliding Light Reflection (Glass sheen) */}
-        <Animated.View style={[styles.reflectionContainer, reflectionAnimStyle]} pointerEvents="none">
-          <LinearGradient
-            colors={['rgba(255,255,255,0.0)', 'rgba(255,255,255,0.15)', 'rgba(255,255,255,0.0)']}
-            start={{ x: 0, y: 0.5 }}
-            end={{ x: 1, y: 0.5 }}
-            style={StyleSheet.absoluteFillObject}
-          />
+    <View style={[styles.outerContainer, shadowStyle]} pointerEvents="box-none">
+      <BlurView
+        intensity={isDark ? 50 : 80}
+        tint={isDark ? 'dark' : 'light'}
+        style={[
+          styles.barContainer,
+          { backgroundColor: barBgColor, borderColor: barBorderColor },
+        ]}
+      >
+        {/* Continuous Active Indicator (Water Bubble / Liquid Glass) */}
+        <Animated.View style={[styles.activePillContainer, pillAnimStyle]}>
+          <View style={[styles.activePill, { backgroundColor: 'transparent' }]}>
+            {/* Glass Curvature Gradient */}
+            <LinearGradient
+              colors={['rgba(255, 255, 255, 0.45)', 'rgba(255, 255, 255, 0.05)', 'rgba(255, 255, 255, 0.25)']}
+              locations={[0, 0.5, 1]}
+              start={{ x: 0.2, y: 0.1 }}
+              end={{ x: 0.8, y: 0.9 }}
+              style={StyleSheet.absoluteFillObject}
+            />
+          </View>
         </Animated.View>
 
-        {/* 5. Active Bubble Track */}
-        <Animated.View style={[styles.bubbleTrack, bubbleAnimStyle]} pointerEvents="none">
-          {/* Bubble Glow / Bloom */}
-          <View style={styles.bubbleBloom} />
-          {/* Bubble Material (20% opacity gradient) */}
-          <LinearGradient
-            colors={['rgba(69, 240, 199, 0.25)', 'rgba(59, 130, 246, 0.20)', 'rgba(124, 92, 255, 0.25)']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.bubble}
-          />
-          <View style={styles.bubbleHighlight} />
-        </Animated.View>
-
-        {/* 6. Navigation Items */}
+        {/* Navigation Items */}
         <View style={styles.tabsRow}>
           {TABS.map((tab, index) => {
             const isActive = index === activeIndex;
             const onPress = () => {
-              if (!isActive) {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Soft);
-              }
+              if (!isActive) Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               const event = navigation.emit({
                 type: 'tabPress',
                 target: state.routes[index]?.key,
@@ -244,86 +211,71 @@ export function MentoraTabBar({ state, navigation }: any) {
                 tab={tab}
                 isActive={isActive}
                 onPress={onPress}
+                themeColors={colors}
+                isDark={isDark}
               />
             );
           })}
         </View>
-      </View>
-    </Animated.View>
+      </BlurView>
+    </View>
   );
 }
 
-// ─── Styles ────────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   outerContainer: {
     position: 'absolute',
     bottom: Platform.OS === 'ios' ? 36 : 24,
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.12,
-    shadowRadius: 20,
-    elevation: 10,
+    alignSelf: 'center',
+    width: BAR_WIDTH,
   },
   barContainer: {
-    width: BAR_WIDTH,
+    width: '100%',
     height: BAR_HEIGHT,
-    borderRadius: 40, // Large rounded corners (40px+)
-    overflow: 'hidden',
+    borderRadius: 9999, // Perfect pill shape
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.10)', // Hairline white border
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-  },
-  noiseTexture: {
-    ...StyleSheet.absoluteFillObject,
-    opacity: 0.03, // Very subtle 2-3%
-    pointerEvents: 'none',
-  },
-  reflectionContainer: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    width: 150,
-    transform: [{ skewX: '-20deg' }],
-  },
-  bubbleTrack: {
-    position: 'absolute',
-    top: (BAR_HEIGHT - BUBBLE_H) / 2,
-    width: BUBBLE_W,
-    height: BUBBLE_H,
-    borderRadius: 30,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    overflow: 'hidden',
   },
-  bubble: {
+  activePillContainer: {
+    position: 'absolute',
+    top: (BAR_HEIGHT - PILL_HEIGHT) / 2,
+    width: PILL_WIDTH,
+    height: PILL_HEIGHT,
+  },
+  activePill: {
     width: '100%',
     height: '100%',
-    borderRadius: 30,
-  },
-  bubbleBloom: {
-    position: 'absolute',
-    top: -10,
-    bottom: -10,
-    left: -10,
-    right: -10,
-    borderRadius: 40,
-    backgroundColor: 'rgba(59, 130, 246, 0.15)',
-    // Fake blur bloom for React Native
-    shadowColor: '#3B82F6',
+    borderRadius: 9999,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.5)',
+    overflow: 'hidden',
+    shadowColor: '#FFFFFF',
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 20,
+    shadowOpacity: 0.4,
+    shadowRadius: 10,
+    elevation: 5,
   },
-  bubbleHighlight: {
+  bubbleSpecular: {
     position: 'absolute',
-    top: 0,
-    left: '10%',
-    right: '10%',
-    height: 2,
-    backgroundColor: 'rgba(255,255,255,0.4)',
-    borderRadius: 2,
+    top: 6,
+    left: 12,
+    width: 20,
+    height: 10,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    transform: [{ rotate: '-25deg' }],
+  },
+  bubbleBottomGlow: {
+    position: 'absolute',
+    bottom: -8,
+    left: 8,
+    right: 8,
+    height: 18,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.4)',
+    transform: [{ scaleY: 0.6 }],
   },
   tabsRow: {
     flex: 1,
@@ -339,18 +291,16 @@ const styles = StyleSheet.create({
   iconWrapper: {
     alignItems: 'center',
     justifyContent: 'center',
+    height: '100%',
   },
   labelContainer: {
     position: 'absolute',
-    bottom: -16,
-    width: 60,
+    bottom: 12,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   label: {
-    fontSize: 11,
+    fontSize: 10,
     fontFamily: 'Outfit_600SemiBold',
-    color: '#FFFFFF',
-    letterSpacing: 0.3,
   },
 });
-

@@ -9,6 +9,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as WebBrowser from 'expo-web-browser';
 import { decode } from 'base64-arraybuffer';
+import DownloadableMaterial from '@/components/DownloadableMaterial';
 
 const STATUS_COLORS: Record<string, string> = {
   'Not Started': '#9CA3AF',
@@ -181,25 +182,41 @@ export default function TopicDetailScreen() {
   const uploadFileToSupabase = async (fileUri: string, bucket: string, folder: string, mimeType: string) => {
     const fileExt = fileUri.split('.').pop() || (mimeType.includes('pdf') ? 'pdf' : 'mp4');
     const fileName = `${folder}/${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
-
-    let fileBody: any;
     
     if (Platform.OS === 'web') {
       const response = await fetch(fileUri);
-      fileBody = await response.blob();
+      const fileBody = await response.blob();
+      const { error: uploadError } = await supabase.storage
+        .from(bucket)
+        .upload(fileName, fileBody, {
+          contentType: mimeType,
+          upsert: true
+        });
+      if (uploadError) throw uploadError;
     } else {
-      const base64 = await FileSystem.readAsStringAsync(fileUri, { encoding: 'base64' });
-      fileBody = decode(base64);
+      const { data: { session } } = await supabase.auth.getSession();
+      const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+      const supabaseKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+      
+      const uploadResult = await FileSystem.uploadAsync(
+        `${supabaseUrl}/storage/v1/object/${bucket}/${fileName}`,
+        fileUri,
+        {
+          httpMethod: 'POST',
+          uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+          headers: {
+            Authorization: `Bearer ${session?.access_token ?? supabaseKey}`,
+            apikey: supabaseKey as string,
+            'Content-Type': mimeType,
+            'x-upsert': 'true',
+          },
+        }
+      );
+
+      if (uploadResult.status !== 200) {
+        throw new Error(`Upload failed with status ${uploadResult.status}: ${uploadResult.body}`);
+      }
     }
-
-    const { error: uploadError } = await supabase.storage
-      .from(bucket)
-      .upload(fileName, fileBody, {
-        contentType: mimeType,
-        upsert: true
-      });
-
-    if (uploadError) throw uploadError;
 
     const { data: publicUrlData } = supabase.storage.from(bucket).getPublicUrl(fileName);
     return publicUrlData.publicUrl;
@@ -250,6 +267,24 @@ export default function TopicDetailScreen() {
 
       setUploading(true);
       const asset = result.assets[0];
+      
+      const MAX_SIZE_BYTES = 50 * 1024 * 1024; // 50MB Free tier limit
+      let fileSize = asset.size;
+      
+      if (!fileSize) {
+        const fileInfo = await FileSystem.getInfoAsync(asset.uri);
+        if (fileInfo.exists) {
+          fileSize = fileInfo.size;
+        }
+      }
+      
+      if (fileSize && fileSize > MAX_SIZE_BYTES) {
+        Alert.alert('File Too Large', 'Because you are on the Supabase Free Tier, the maximum allowed file size is 50 MB. Please compress your video.');
+        setUploading(false);
+        isPickingRef.current = false;
+        return;
+      }
+      
       
       const fileUrl = await uploadFileToSupabase(asset.uri, bucket, subtopic.id, asset.mimeType || mimeTypes[0]);
 
@@ -371,17 +406,14 @@ export default function TopicDetailScreen() {
             <Text style={styles.emptyText}>{isTeacher ? 'No videos uploaded' : 'Coming soon'}</Text>
           ) : (
             videoMaterials.map(mat => (
-              <View key={mat.id} style={styles.materialRow}>
-                <Pressable style={styles.materialRowContent} onPress={() => WebBrowser.openBrowserAsync(mat.content_url)}>
-                  <Feather name="film" size={16} color={colors.textSecondary} />
-                  <Text style={styles.materialTitle} numberOfLines={1}>{mat.title}</Text>
-                </Pressable>
-                {isTeacher && (
-                  <Pressable style={styles.deleteButton} onPress={() => handleDeleteMaterial(mat.id)}>
-                    <Feather name="trash-2" size={16} color={colors.error} />
-                  </Pressable>
-                )}
-              </View>
+              <DownloadableMaterial
+                key={mat.id}
+                material={mat}
+                isTeacher={isTeacher}
+                onDelete={handleDeleteMaterial}
+                iconName="film"
+                colors={colors}
+              />
             ))
           )}
         </View>
@@ -405,26 +437,19 @@ export default function TopicDetailScreen() {
             <Text style={styles.emptyText}>{isTeacher ? 'No notes added' : 'Coming soon'}</Text>
           ) : (
             notesMaterials.map(mat => (
-              <View key={mat.id} style={styles.materialRow}>
-                <Pressable 
-                  style={styles.materialRowContent} 
-                  onPress={() => {
-                    if (mat.type === 'notes_pdf' && mat.content_url) {
-                      WebBrowser.openBrowserAsync(mat.content_url);
-                    } else if (mat.type === 'notes_text') {
-                      Alert.alert('Study Notes', mat.content_text || 'No content');
-                    }
-                  }}
-                >
-                  <Feather name={mat.type === 'notes_pdf' ? 'file' : 'align-left'} size={16} color={colors.textSecondary} />
-                  <Text style={styles.materialTitle} numberOfLines={1}>{mat.title}</Text>
-                </Pressable>
-                {isTeacher && (
-                  <Pressable style={styles.deleteButton} onPress={() => handleDeleteMaterial(mat.id)}>
-                    <Feather name="trash-2" size={16} color={colors.error} />
-                  </Pressable>
-                )}
-              </View>
+              <DownloadableMaterial
+                key={mat.id}
+                material={mat}
+                isTeacher={isTeacher}
+                onDelete={handleDeleteMaterial}
+                iconName={mat.type === 'notes_pdf' ? 'file' : 'align-left'}
+                colors={colors}
+                onPressTextNotes={() => {
+                  if (mat.type === 'notes_text') {
+                    Alert.alert('Study Notes', mat.content_text || 'No content');
+                  }
+                }}
+              />
             ))
           )}
         </View>
@@ -496,17 +521,14 @@ export default function TopicDetailScreen() {
             <Text style={styles.emptyText}>{isTeacher ? 'No past papers' : 'Coming soon'}</Text>
           ) : (
             pastPaperMaterials.map(mat => (
-              <View key={mat.id} style={styles.materialRow}>
-                <Pressable style={styles.materialRowContent} onPress={() => WebBrowser.openBrowserAsync(mat.content_url)}>
-                  <Feather name="file-text" size={16} color={colors.textSecondary} />
-                  <Text style={styles.materialTitle} numberOfLines={1}>{mat.title}</Text>
-                </Pressable>
-                {isTeacher && (
-                  <Pressable style={styles.deleteButton} onPress={() => handleDeleteMaterial(mat.id)}>
-                    <Feather name="trash-2" size={16} color={colors.error} />
-                  </Pressable>
-                )}
-              </View>
+              <DownloadableMaterial
+                key={mat.id}
+                material={mat}
+                isTeacher={isTeacher}
+                onDelete={handleDeleteMaterial}
+                iconName="file-text"
+                colors={colors}
+              />
             ))
           )}
         </View>
