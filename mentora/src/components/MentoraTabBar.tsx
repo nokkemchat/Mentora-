@@ -33,10 +33,10 @@ const SPRING_CONFIG = {
 };
 
 const TABS = [
-  { name: 'index',   label: 'Home',    activeIcon: 'home',              inactiveIcon: 'home-outline' },
-  { name: 'courses', label: 'Courses', activeIcon: 'library',           inactiveIcon: 'library-outline' },
-  { name: 'rooms',   label: 'Rooms',   activeIcon: 'chatbubbles',       inactiveIcon: 'chatbubbles-outline' },
-  { name: 'profile', label: 'Profile', activeIcon: 'person-circle',     inactiveIcon: 'person-circle-outline' },
+  { name: 'index',      label: 'Explore', activeIcon: 'compass',           inactiveIcon: 'compass-outline' },
+  { name: 'my-classes', label: 'Classes', activeIcon: 'library',           inactiveIcon: 'library-outline' },
+  { name: 'rooms',      label: 'Rooms',   activeIcon: 'chatbubbles',       inactiveIcon: 'chatbubbles-outline' },
+  { name: 'profile',    label: 'Profile', activeIcon: 'person-circle',     inactiveIcon: 'person-circle-outline' },
 ] as const;
 
 type TabItemProps = {

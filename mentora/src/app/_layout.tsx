@@ -1,10 +1,10 @@
-import { usePreventScreenCapture } from 'expo-screen-capture';
+import * as ScreenCapture from 'expo-screen-capture';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
 import { useFonts, Outfit_300Light, Outfit_400Regular, Outfit_500Medium, Outfit_600SemiBold, Outfit_700Bold } from '@expo-google-fonts/outfit';
 import { StatusBar } from 'expo-status-bar';
-import { View, Image } from 'react-native';
+import { View, Image, Platform } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AuthProvider } from '../context/AuthContext';
 import { ThemeProvider } from '../context/ThemeContext';
@@ -29,7 +29,14 @@ function AppContent() {
 }
 
 export default function RootLayout() {
-  usePreventScreenCapture();
+  useEffect(() => {
+    if (Platform.OS !== 'web') {
+      ScreenCapture.preventScreenCaptureAsync();
+      return () => {
+        ScreenCapture.allowScreenCaptureAsync();
+      };
+    }
+  }, []);
 
   const [loaded, error] = useFonts({
     Outfit_300Light,

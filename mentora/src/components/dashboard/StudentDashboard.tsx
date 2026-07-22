@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, Image, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, Image, ActivityIndicator, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/context/AuthContext';
@@ -8,6 +8,7 @@ import { spacing, typography, borderRadius, useThemeColors } from '@/constants/t
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { GlobalWatermark } from '@/components/GlobalWatermark';
 import { BlurView } from 'expo-blur';
+import ExploreCourses from './ExploreCourses';
 
 type Teacher = {
   id: string;
@@ -29,6 +30,7 @@ export default function StudentDashboard() {
   const [schoolmatesCount, setSchoolmatesCount] = useState<number | null>(null);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [loadingTeachers, setLoadingTeachers] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     if (user?.user_metadata?.school) {
@@ -66,39 +68,31 @@ export default function StudentDashboard() {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <GlobalWatermark />
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Header */}
-        <View style={styles.header}>
-        <View>
-          <Text style={styles.greeting}>Hello, {user?.user_metadata?.first_name || 'Student'}!</Text>
-          <Text style={styles.subtitle}>Ready to crush your goals today?</Text>
-        </View>
-        <View style={styles.avatarPlaceholder}>
-          <Ionicons name="person" size={24} color={colors.primary} />
-        </View>
-      </View>
-
-      {/* Community Callout */}
-      {user?.user_metadata?.school && (
-        <View style={styles.communityCard}>
+      <ScrollView 
+        contentContainerStyle={styles.content} 
+        showsVerticalScrollIndicator={false}
+        stickyHeaderIndices={[0]}
+      >
+        {/* Sticky Search Bar Container */}
+        <View style={styles.stickyHeaderWrapper}>
           <BlurView 
-            intensity={75} 
+            intensity={80} 
             tint={isLightMode ? "light" : "dark"} 
             style={StyleSheet.absoluteFillObject} 
           />
-          <View style={styles.communityIconContainer}>
-            <Ionicons name="people" size={24} color={colors.background} />
-          </View>
-          <View style={styles.communityInfo}>
-            <Text style={styles.communityTitle}>
-              {schoolmatesCount !== null ? schoolmatesCount : '...'} Students
-            </Text>
-            <Text style={styles.communitySubtitle}>
-              from {user.user_metadata.school} are here
-            </Text>
+          <View style={styles.searchContainer}>
+            <Ionicons name="search" size={20} color={colors.textSecondary} style={styles.searchIcon} />
+            <TextInput 
+              style={styles.searchInput}
+              placeholder="Search for subjects, topics, or papers..."
+              placeholderTextColor={colors.textSecondary}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+            />
           </View>
         </View>
-      )}
+
+
 
       {/* Career Hub Banner */}
       <Pressable 
@@ -117,87 +111,12 @@ export default function StudentDashboard() {
         <Ionicons name="arrow-forward-circle" size={28} color={colors.background} />
       </Pressable>
 
-      {/* Available Teachers Section */}
-      <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <Ionicons name="school" size={22} color={colors.primary} />
-          <Text style={styles.sectionTitle}>Available Teachers</Text>
-        </View>
 
-        {loadingTeachers ? (
-          <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: spacing.xl }} />
-        ) : teachers.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Ionicons name="person-add-outline" size={48} color={colors.border} />
-            <Text style={styles.emptyTitle}>No teachers yet</Text>
-            <Text style={styles.emptySubtitle}>Teachers will appear here once they've been approved.</Text>
-          </View>
-        ) : (
-          teachers.map((teacher) => (
-            <Pressable 
-              key={teacher.id} 
-              style={styles.teacherCard}
-              onPress={() => router.push(`/teacher/${teacher.id}`)}
-            >
-              <BlurView 
-                intensity={75} 
-                tint={isLightMode ? "light" : "dark"} 
-                style={StyleSheet.absoluteFillObject} 
-              />
-              <View style={styles.teacherHeader}>
-                {teacher.avatar_url ? (
-                  <Image source={{ uri: teacher.avatar_url }} style={styles.teacherAvatar} />
-                ) : (
-                  <View style={styles.teacherAvatarFallback}>
-                    <Ionicons name="person" size={28} color={colors.primary} />
-                  </View>
-                )}
-                <View style={styles.teacherInfo}>
-                  <Text style={styles.teacherName}>
-                    {teacher.first_name} {teacher.last_name}
-                  </Text>
-                  {teacher.school && (
-                    <View style={styles.teacherMeta}>
-                      <Ionicons name="location-outline" size={14} color={colors.textSecondary} />
-                      <Text style={styles.teacherSchool}>{teacher.school}</Text>
-                    </View>
-                  )}
-                </View>
-                <Ionicons name="chevron-forward" size={22} color={colors.textTertiary} />
-              </View>
 
-              {teacher.bio ? (
-                <Text style={styles.teacherBio}>{teacher.bio}</Text>
-              ) : null}
 
-              <View style={styles.subjectsRow}>
-                <Text style={styles.subjectsLabel}>Subjects</Text>
-                <View style={styles.subjectChips}>
-                  {teacher.subjects_taught?.map((subject, idx) => (
-                    <View key={idx} style={styles.subjectChip}>
-                      <Ionicons name="book" size={12} color="#000000" style={{ marginRight: 4 }} />
-                      <Text style={styles.subjectChipText}>{subject.trim()}</Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
-            </Pressable>
-          ))
-        )}
-      </View>
 
-      {/* My Courses */}
-      <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <Ionicons name="library" size={22} color={colors.primary} />
-          <Text style={styles.sectionTitle}>My Courses</Text>
-        </View>
-        <View style={styles.emptyState}>
-          <Ionicons name="book-outline" size={48} color={colors.border} />
-          <Text style={styles.emptyTitle}>No active courses</Text>
-          <Text style={styles.emptySubtitle}>You haven't enrolled in any courses yet.</Text>
-        </View>
-      </View>
+
+      <ExploreCourses searchQuery={searchQuery} />
     </ScrollView>
   </SafeAreaView>
   );
@@ -209,35 +128,35 @@ const createStyles = (colors: any) => StyleSheet.create({
     backgroundColor: colors.background,
   },
   content: {
-    padding: spacing.xl,
-    paddingTop: spacing.xxxl,
+    paddingHorizontal: spacing.xl,
     paddingBottom: 100,
   },
-  header: {
+  stickyHeaderWrapper: {
+    marginHorizontal: -spacing.xl,
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.xxxl,
+    paddingBottom: spacing.md,
+    marginBottom: spacing.md,
+    zIndex: 10,
+  },
+  searchContainer: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: spacing.lg,
+    backgroundColor: 'rgba(150, 150, 150, 0.1)',
+    borderRadius: borderRadius.full,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
-  greeting: {
-    fontSize: typography.sizes.xl,
-    fontWeight: typography.weights.bold,
-    fontFamily: 'Outfit_700Bold',
-    color: colors.text,
+  searchIcon: {
+    marginRight: spacing.sm,
   },
-  subtitle: {
-    fontSize: typography.sizes.sm,
+  searchInput: {
+    flex: 1,
+    fontSize: typography.sizes.md,
     fontFamily: 'Outfit_400Regular',
-    color: colors.textSecondary,
-    marginTop: spacing.xs,
-  },
-  avatarPlaceholder: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: colors.primaryLight,
-    alignItems: 'center',
-    justifyContent: 'center',
+    color: colors.text,
   },
   communityCard: {
     flexDirection: 'row',

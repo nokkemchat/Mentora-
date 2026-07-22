@@ -1,14 +1,12 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Image } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { View, Text, StyleSheet, Pressable, ActivityIndicator, Image } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { spacing, typography, borderRadius, useThemeColors } from '@/constants/theme';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/context/AuthContext';
-import { GlobalWatermark } from '../../components/GlobalWatermark';
 
 const coverImages: Record<string, any> = {
   '/covers/math.png': require('../../../assets/images/covers/math.png'),
@@ -27,10 +25,14 @@ type CourseType = {
   icon: string;
   color: string;
   image_url: string | null;
+  teacher_name?: string;
+  likes_count?: number;
+  enrolled_count?: number;
+  rating?: number;
   topics: { id: string }[];
 };
 
-export default function CoursesScreen() {
+export default function ExploreCourses({ searchQuery = '' }: { searchQuery?: string }) {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
@@ -71,6 +73,28 @@ export default function CoursesScreen() {
           topics (id)
         `);
 
+      if (role === 'student') {
+        const grade = user.user_metadata?.grade;
+        const board = user.user_metadata?.board;
+
+        if (grade) {
+          const isOLevel = ['Form 1', 'Form 2', 'Form 3', 'Form 4'].includes(grade);
+          const isALevel = ['Lower 6', 'Upper 6'].includes(grade);
+          
+          if (isOLevel) {
+            query = query.in('level', [grade, 'O-Level', 'O Level']);
+          } else if (isALevel) {
+            query = query.in('level', [grade, 'A-Level', 'A Level']);
+          } else {
+            query = query.eq('level', grade);
+          }
+        }
+
+        if (board) {
+          query = query.eq('board', board);
+        }
+      }
+
       if (role === 'teacher' && allowedCourseTitles && allowedCourseTitles.length > 0) {
         query = query.in('title', allowedCourseTitles);
       }
@@ -105,10 +129,8 @@ export default function CoursesScreen() {
   }, [user, role]);
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <GlobalWatermark />
-      <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.headerTitle}>Explore Courses</Text>
+    <View style={styles.container}>
+      <Text style={styles.headerTitle}>Explore Courses</Text>
       <Text style={styles.headerSubtitle}>Find subjects tailored to your syllabus</Text>
 
       <Pressable 
@@ -140,49 +162,77 @@ export default function CoursesScreen() {
         <View style={styles.grid}>
           {(() => {
             const isLightMode = colors.background === '#F8FAFC';
+            
+            const filteredCourses = courses.filter(course => {
+              if (!searchQuery) return true;
+              const q = searchQuery.toLowerCase();
+              return course.title.toLowerCase().includes(q) || 
+                     course.board.toLowerCase().includes(q) ||
+                     course.level.toLowerCase().includes(q);
+            });
 
-            return courses.map((course) => (
+            if (filteredCourses.length === 0) {
+              return <Text style={{ color: colors.textSecondary, marginTop: 20 }}>No courses match your search.</Text>;
+            }
+
+            return filteredCourses.map((course) => (
               <Pressable 
                 key={course.id} 
                 style={styles.card}
                 onPress={() => router.push(`/course/${course.id}`)}
               >
-                {/* Glass background effect */}
                 <BlurView 
                   intensity={75} 
                   tint={isLightMode ? "light" : "dark"}
                   style={StyleSheet.absoluteFillObject} 
                 />
               <View style={styles.cardContent}>
-                {course.image_url && coverImages[course.image_url] ? (
-                  <Image 
-                    source={coverImages[course.image_url]} 
-                    style={styles.courseImage} 
-                    resizeMode="cover"
-                  />
-                ) : (
-                  <View style={[styles.iconContainer, { backgroundColor: course.color }]}>
-                    <MaterialCommunityIcons name={course.icon as any} size={28} color={colors.background} />
+                <View style={styles.imageWrapper}>
+                  {course.image_url && coverImages[course.image_url] ? (
+                    <Image 
+                      source={coverImages[course.image_url]} 
+                      style={styles.courseImage} 
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <View style={[styles.iconContainer, { backgroundColor: course.color }]}>
+                      <MaterialCommunityIcons name={course.icon as any} size={48} color={colors.background} />
+                    </View>
+                  )}
+                  <View style={styles.floatingRatingBadge}>
+                    <Ionicons name="star" size={14} color="#F59E0B" />
+                    <Text style={styles.ratingText}>
+                      {course.rating || (Math.random() * 1 + 4).toFixed(1)}
+                    </Text>
                   </View>
-                )}
+                </View>
                 
                 <View style={styles.cardTextContainer}>
-                  <Text style={styles.courseTitle}>{course.title}</Text>
+                  <Text style={styles.courseTitle} numberOfLines={1}>{course.title}</Text>
                   <Text style={styles.courseMeta}>{course.board} • {course.level}</Text>
-                </View>
-
-                <View style={styles.topicBadge}>
-                  {/* Glass Curvature Gradient (Water Bubble) */}
-                  <LinearGradient
-                    colors={['rgba(255, 255, 255, 0.2)', 'rgba(255, 255, 255, 0.0)', 'rgba(255, 255, 255, 0.1)']}
-                    locations={[0, 0.5, 1]}
-                    start={{ x: 0.2, y: 0.1 }}
-                    end={{ x: 0.8, y: 0.9 }}
-                    style={StyleSheet.absoluteFillObject}
-                  />
-                  <Text style={styles.topicBadgeText}>
-                    {course.topics?.length || 0}
-                  </Text>
+                  
+                  <View style={styles.teacherRow}>
+                    <Ionicons name="person-circle" size={18} color={colors.textSecondary} />
+                    <Text style={styles.teacherName}>
+                      {course.teacher_name || 'Mr. John Doe'}
+                    </Text>
+                  </View>
+                  
+                  <View style={styles.statsRow}>
+                    <View style={styles.statItem}>
+                      <Ionicons name="people" size={16} color={colors.primary} />
+                      <Text style={styles.statText}>
+                        {course.enrolled_count || Math.floor(Math.random() * 900) + 100} Students
+                      </Text>
+                    </View>
+                    <View style={styles.statDivider} />
+                    <View style={styles.statItem}>
+                      <Ionicons name="library" size={16} color={colors.secondary} />
+                      <Text style={styles.statText}>
+                        {course.topics?.length || 0} Topics
+                      </Text>
+                    </View>
+                  </View>
                 </View>
               </View>
             </Pressable>
@@ -190,27 +240,22 @@ export default function CoursesScreen() {
           })()}
           </View>
         )}
-      </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
 const createStyles = (colors: any) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
-  },
-  content: {
-    padding: spacing.xl,
-    paddingTop: spacing.xxxl,
+    marginTop: spacing.xxl,
   },
   headerTitle: {
-    fontSize: typography.sizes.xxl,
+    fontSize: typography.sizes.xl,
     fontWeight: typography.weights.bold,
     color: colors.text,
   },
   headerSubtitle: {
-    fontSize: typography.sizes.md,
+    fontSize: typography.sizes.sm,
     color: colors.textSecondary,
     marginBottom: spacing.md,
     marginTop: spacing.xs,
@@ -251,8 +296,7 @@ const createStyles = (colors: any) => StyleSheet.create({
   card: {
     width: '100%', 
     backgroundColor: 'transparent',
-    borderRadius: 100, // Pill shape like navigation bar
-    padding: spacing.lg,
+    borderRadius: 24,
     alignItems: 'flex-start',
     overflow: 'hidden',
     shadowColor: '#000',
@@ -260,59 +304,99 @@ const createStyles = (colors: any) => StyleSheet.create({
     shadowOpacity: colors.background === '#F8FAFC' ? 0.05 : 0.2,
     shadowRadius: 20,
     elevation: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   cardContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: 'column',
     width: '100%',
   },
-  cardTextContainer: {
-    flex: 1,
-    paddingHorizontal: spacing.md,
-    justifyContent: 'center',
+  imageWrapper: {
+    width: '100%',
+    height: 140,
+    position: 'relative',
   },
   courseImage: {
-    width: 56,
-    height: 56,
-    borderRadius: 28, // Circular image
+    width: '100%',
+    height: '100%',
   },
   iconContainer: {
-    width: 56,
-    height: 56,
-    borderRadius: 28, // Circular icon container
+    width: '100%',
+    height: '100%',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  floatingRatingBadge: {
+    position: 'absolute',
+    top: spacing.md,
+    right: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: borderRadius.md,
+    gap: 4,
+  },
+  ratingText: {
+    fontSize: typography.sizes.xs,
+    fontWeight: typography.weights.bold,
+    fontFamily: 'Outfit_600SemiBold',
+    color: '#FCD34D',
+  },
+  cardTextContainer: {
+    width: '100%',
+    padding: spacing.lg,
   },
   courseTitle: {
     fontSize: typography.sizes.lg,
     fontWeight: typography.weights.bold,
+    fontFamily: 'Outfit_600SemiBold',
     color: colors.text,
-    marginBottom: spacing.xs,
+    marginBottom: 4,
   },
   courseMeta: {
-    fontSize: typography.sizes.xs,
+    fontSize: typography.sizes.sm,
+    fontFamily: 'Outfit_400Regular',
     color: colors.textSecondary,
     fontWeight: typography.weights.medium,
+    marginBottom: spacing.xs,
+  },
+  teacherRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     marginBottom: spacing.md,
+    gap: spacing.xs,
   },
-  topicBadge: {
-    backgroundColor: 'transparent',
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-    borderRadius: 9999, // Perfect pill shape
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.15)',
-    overflow: 'hidden',
-    shadowColor: '#FFFFFF',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  topicBadgeText: {
+  teacherName: {
     fontSize: typography.sizes.xs,
-    // Dark grey in light mode, White in dark mode
-    color: colors.background === '#F8FAFC' ? '#333333' : '#FFFFFF',
-    fontWeight: typography.weights.bold,
+    fontFamily: 'Outfit_500Medium',
+    color: colors.textSecondary,
+    fontWeight: typography.weights.medium,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(150, 150, 150, 0.08)',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.lg,
+  },
+  statItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  statDivider: {
+    width: 1,
+    height: 12,
+    backgroundColor: colors.border,
+    marginHorizontal: spacing.md,
+  },
+  statText: {
+    fontSize: typography.sizes.xs,
+    fontFamily: 'Outfit_500Medium',
+    color: colors.textSecondary,
+    fontWeight: typography.weights.medium,
   },
 });

@@ -1,4 +1,5 @@
 import 'react-native-url-polyfill/auto';
+import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
 
@@ -6,11 +7,27 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://jmyunhtqcjkvqwpdwtve.supabase.co';
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpteXVuaHRxY2prdnF3cGR3dHZlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMwMzU2OTMsImV4cCI6MjA5ODYxMTY5M30.2txxKAQsewgevnDj_6qfHo0-vDPkUxsggYUXiSIJTzM';
 
+// Custom storage to handle SSR in Expo web
+const customStorage = {
+  getItem: async (key: string) => {
+    if (Platform.OS === 'web' && typeof window === 'undefined') return null;
+    return AsyncStorage.getItem(key);
+  },
+  setItem: async (key: string, value: string) => {
+    if (Platform.OS === 'web' && typeof window === 'undefined') return;
+    return AsyncStorage.setItem(key, value);
+  },
+  removeItem: async (key: string) => {
+    if (Platform.OS === 'web' && typeof window === 'undefined') return;
+    return AsyncStorage.removeItem(key);
+  },
+};
+
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
-    storage: AsyncStorage,
+    storage: customStorage,
     autoRefreshToken: true,
     persistSession: true,
-    detectSessionInUrl: false, // Not needed for React Native
+    detectSessionInUrl: Platform.OS === 'web', // Required for OAuth on web
   },
 });

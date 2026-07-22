@@ -66,6 +66,7 @@ export default function AuthScreen() {
         provider,
         options: {
           redirectTo: redirectUrl,
+          skipBrowserRedirect: Platform.OS !== 'web',
           queryParams: {
             access_type: 'offline',
             prompt: 'consent',
@@ -75,7 +76,7 @@ export default function AuthScreen() {
       
       if (error) throw error;
       
-      if (data.url) {
+      if (Platform.OS !== 'web' && data?.url) {
         const res = await WebBrowser.openAuthSessionAsync(data.url, redirectUrl);
         if (res.type === 'success' && res.url) {
           // In most Expo Router setups, deep links are handled automatically.

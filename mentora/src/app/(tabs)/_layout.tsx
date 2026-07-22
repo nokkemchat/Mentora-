@@ -185,8 +185,8 @@ export default function TabsLayout() {
       screenOptions={{ headerShown: false }}
       tabBar={(props) => <MentoraTabBar {...props} />}
     >
-      <Tabs.Screen name="index"   options={{ title: 'Home' }} />
-      <Tabs.Screen name="courses" options={{ title: 'Courses' }} />
+      <Tabs.Screen name="index"   options={{ title: 'Explore' }} />
+      <Tabs.Screen name="my-classes" options={{ title: 'My Classes' }} />
       <Tabs.Screen name="rooms"   options={{ title: 'Rooms' }} />
       <Tabs.Screen name="profile" options={{ title: 'Profile' }} />
     </Tabs>
