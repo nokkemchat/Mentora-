@@ -8,6 +8,7 @@ import { Feather, MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as WebBrowser from 'expo-web-browser';
+import { LinearGradient } from 'expo-linear-gradient';
 import { decode } from 'base64-arraybuffer';
 
 const coverImages: Record<string, any> = {
@@ -51,9 +52,10 @@ export default function CourseDetailScreen() {
   const [uploadingSyllabus, setUploadingSyllabus] = useState(false);
   const [hasSubscription, setHasSubscription] = useState(false);
   const [teachers, setTeachers] = useState<any[]>([]);
+  const [pastPapers, setPastPapers] = useState<any[]>([]);
 
   const fetchCourseData = async () => {
-    setLoading(true);
+    if (!course) setLoading(true);
     const { data, error } = await supabase
       .from('courses')
       .select(`
@@ -62,7 +64,9 @@ export default function CourseDetailScreen() {
           *,
           subtopics (
             *,
-            user_progress (status)
+            user_progress (status),
+            subtopic_materials (estimated_minutes),
+            questions (id)
           )
         )
       `)
@@ -106,6 +110,17 @@ export default function CourseDetailScreen() {
 
       if (teacherData) {
         setTeachers(teacherData);
+      }
+      
+      // Fetch past papers matching subject and board
+      const { data: papersData } = await supabase
+        .from('papers')
+        .select('*')
+        .ilike('subject', data.title)
+        .ilike('curriculum', data.board);
+        
+      if (papersData) {
+        setPastPapers(papersData);
       }
     }
 
@@ -236,21 +251,16 @@ export default function CourseDetailScreen() {
         <Feather name="arrow-left" size={24} color={colors.text} />
       </Pressable>
 
-      <View style={styles.header}>
-        {course.image_url && coverImages[course.image_url] ? (
-          <Image 
-            source={coverImages[course.image_url]} 
-            style={styles.coverImage} 
-            resizeMode="cover"
-          />
-        ) : (
-          <View style={[styles.iconContainer, { backgroundColor: course.color }]}>
-            <MaterialCommunityIcons name={course.icon as any} size={40} color={colors.background} />
-          </View>
-        )}
+      <LinearGradient 
+        colors={[`${course.color}20`, `${course.color}05`, colors.background]} 
+        style={styles.headerGradient}
+      >
+        <View style={[styles.iconContainerSm, { backgroundColor: course.color }]}>
+          <MaterialCommunityIcons name={course.icon as any} size={28} color="#FFF" />
+        </View>
         <Text style={styles.courseTitle}>{course.title}</Text>
         <Text style={styles.courseMeta}>{course.board} • {course.level}</Text>
-      </View>
+      </LinearGradient>
 
       <View style={{ flexDirection: 'row', justifyContent: 'center', marginBottom: spacing.xl, gap: spacing.md }}>
         {course.syllabus_url && (
@@ -311,6 +321,38 @@ export default function CourseDetailScreen() {
         </View>
       )}
 
+      {/* Past Papers Section */}
+      {pastPapers.length > 0 && (
+        <View style={styles.teachersSection}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.md }}>
+            <MaterialCommunityIcons name="book-open-variant" size={20} color={colors.primary} />
+            <Text style={styles.sectionTitle}>Past Papers</Text>
+          </View>
+          {pastPapers.map((paper) => (
+            <Pressable
+              key={paper.id}
+              style={styles.teacherRow}
+              onPress={() => {
+                if (paper.pdf_url) {
+                  WebBrowser.openBrowserAsync(paper.pdf_url);
+                } else {
+                  router.push(`/exam/${paper.id}`);
+                }
+              }}
+            >
+              <View style={styles.teacherAvatarFallback}>
+                <Feather name="file-text" size={20} color={colors.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.teacherName}>{paper.title || `${paper.subject} Paper ${paper.paper_number || ''}`}</Text>
+                <Text style={styles.teacherSchool}>{paper.year} • {paper.level} • {paper.curriculum}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
+            </Pressable>
+          ))}
+        </View>
+      )}
+
       {!hasSubscription && user?.user_metadata?.role !== 'teacher' && (
         <View style={styles.enrollContainer}>
           <Pressable 
@@ -364,6 +406,8 @@ export default function CourseDetailScreen() {
                 <View style={styles.subtopicsContainer}>
                   {topic.subtopics?.map((subtopic: any) => {
                     const status = subtopic.user_progress?.[0]?.status || 'Not Started';
+                    const totalMins = (subtopic.subtopic_materials || []).reduce((acc: number, m: any) => acc + (m.estimated_minutes || 0), 0) + ((subtopic.questions || []).length > 0 ? (subtopic.estimated_quiz_minutes || 15) : 0);
+                    const subtopicTimeStr = totalMins > 0 ? `${totalMins} mins` : subtopic.estimated_time;
                     
                     return (
                       <Pressable
@@ -390,7 +434,7 @@ export default function CourseDetailScreen() {
                               </Text>
                               <Text style={styles.subtopicMetaDot}>•</Text>
                               <Text style={styles.subtopicTime}>
-                                <Feather name="clock" size={10} color={colors.textSecondary} /> {subtopic.estimated_time}
+                                <Feather name="clock" size={10} color={colors.textSecondary} /> {subtopicTimeStr}
                               </Text>
                             </View>
                           </View>
@@ -428,35 +472,41 @@ const createStyles = (colors: any) => StyleSheet.create({
   backNav: {
     marginBottom: spacing.lg,
   },
-  header: {
+  headerGradient: {
     alignItems: 'center',
-    marginBottom: spacing.xxxl,
+    paddingVertical: spacing.xxl,
+    paddingHorizontal: spacing.lg,
+    borderRadius: 24,
+    marginBottom: spacing.xxl,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
   },
-  coverImage: {
-    width: '100%',
-    aspectRatio: 16 / 9,
-    height: undefined,
-    borderRadius: borderRadius.lg,
-    marginBottom: spacing.lg,
-  },
-  iconContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: borderRadius.lg,
+  iconContainerSm: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: spacing.md,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 8,
   },
   courseTitle: {
-    fontSize: typography.sizes.xxl,
-    fontWeight: typography.weights.bold,
+    fontSize: typography.sizes.xxxl,
+    fontWeight: '900',
+    fontFamily: 'Outfit_600SemiBold',
     color: colors.text,
     marginBottom: spacing.xs,
+    textAlign: 'center',
   },
   courseMeta: {
-    fontSize: typography.sizes.sm,
+    fontSize: typography.sizes.md,
     color: colors.textSecondary,
-    fontWeight: typography.weights.medium,
+    fontFamily: 'Outfit_500Medium',
+    letterSpacing: 0.5,
   },
   sectionTitle: {
     fontSize: typography.sizes.lg,

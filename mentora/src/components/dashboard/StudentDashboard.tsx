@@ -5,9 +5,8 @@ import { useRouter } from 'expo-router';
 import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { spacing, typography, borderRadius, useThemeColors } from '@/constants/theme';
-import { Feather, Ionicons } from '@expo/vector-icons';
+import { Feather, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { GlobalWatermark } from '@/components/GlobalWatermark';
-import { BlurView } from 'expo-blur';
 import ExploreCourses from './ExploreCourses';
 
 type Teacher = {
@@ -75,11 +74,7 @@ export default function StudentDashboard() {
       >
         {/* Sticky Search Bar Container */}
         <View style={styles.stickyHeaderWrapper}>
-          <BlurView 
-            intensity={80} 
-            tint={isLightMode ? "light" : "dark"} 
-            style={StyleSheet.absoluteFillObject} 
-          />
+          <View style={StyleSheet.absoluteFillObject} />
           <View style={styles.searchContainer}>
             <Ionicons name="search" size={20} color={colors.textSecondary} style={styles.searchIcon} />
             <TextInput 
@@ -99,16 +94,14 @@ export default function StudentDashboard() {
         style={styles.careerHubCard}
         onPress={() => router.push('/careers/hub')}
       >
-        <BlurView 
-          intensity={75} 
-          tint={isLightMode ? "light" : "dark"} 
-          style={StyleSheet.absoluteFillObject} 
-        />
+        <View style={styles.careerHubIcon}>
+          <MaterialCommunityIcons name="school-outline" size={24} color={colors.primary} />
+        </View>
         <View style={styles.careerHubInfo}>
-          <Text style={styles.careerHubTitle}>Career Hub 🎓</Text>
+          <Text style={styles.careerHubTitle}>Career Hub</Text>
           <Text style={styles.careerHubSubtitle}>Explore universities, scholarships, and plan your future roadmap.</Text>
         </View>
-        <Ionicons name="arrow-forward-circle" size={28} color={colors.background} />
+        <Ionicons name="arrow-forward" size={20} color={colors.textSecondary} />
       </Pressable>
 
 
@@ -138,14 +131,17 @@ const createStyles = (colors: any) => StyleSheet.create({
     paddingBottom: spacing.md,
     marginBottom: spacing.md,
     zIndex: 10,
+    backgroundColor: colors.background,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
   },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(150, 150, 150, 0.1)',
-    borderRadius: borderRadius.full,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.md,
     paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
+    paddingVertical: spacing.sm,
     borderWidth: 1,
     borderColor: colors.border,
   },
@@ -196,30 +192,38 @@ const createStyles = (colors: any) => StyleSheet.create({
   careerHubCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'transparent',
-    padding: spacing.xl,
-    borderRadius: borderRadius.lg,
+    backgroundColor: colors.surface,
+    padding: spacing.lg,
+    borderRadius: borderRadius.md,
     marginBottom: spacing.xl,
     borderWidth: 1,
-    borderColor: '#8B5CF6',
-    overflow: 'hidden',
+    borderColor: colors.border,
+  },
+  careerHubIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: borderRadius.sm,
+    backgroundColor: colors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.md,
   },
   careerHubInfo: {
     flex: 1,
     marginRight: spacing.md,
   },
   careerHubTitle: {
-    fontSize: typography.sizes.lg,
+    fontSize: typography.sizes.md,
     fontWeight: typography.weights.bold,
     fontFamily: 'Outfit_600SemiBold',
-    color: colors.background,
-    marginBottom: spacing.xs,
+    color: colors.text,
+    marginBottom: 2,
   },
   careerHubSubtitle: {
     fontSize: typography.sizes.sm,
     fontFamily: 'Outfit_400Regular',
-    color: 'rgba(255, 255, 255, 0.8)',
-    lineHeight: 20,
+    color: colors.textSecondary,
+    lineHeight: 18,
   },
   section: {
     marginBottom: spacing.xl,

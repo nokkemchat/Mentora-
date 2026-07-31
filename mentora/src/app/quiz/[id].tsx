@@ -3,8 +3,10 @@ import { View, Text, StyleSheet, ScrollView, Pressable, SafeAreaView, ActivityIn
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { spacing, typography, borderRadius, useThemeColors } from '@/constants/theme';
+import { useAuth } from '@/context/AuthContext';
 import { Feather } from '@expo/vector-icons';
 import Scratchpad from '@/components/Scratchpad';
+import { markQuizComplete } from '@/lib/progress';
 
 export default function QuizScreen() {
   const colors = useThemeColors();
@@ -12,6 +14,7 @@ export default function QuizScreen() {
 
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const { user } = useAuth();
 
   const [questions, setQuestions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -79,13 +82,17 @@ export default function QuizScreen() {
     }
   };
 
-  const handleNext = () => {
+  const handleNext = async () => {
     if (currentIndex < questions.length - 1) {
       setCurrentIndex((prev) => prev + 1);
       setSelectedOptionId(null);
       setIsAnswerChecked(false);
     } else {
       setIsFinished(true);
+      if (user && id) {
+        const passed = score >= questions.length / 2;
+        await markQuizComplete(user.id, id, score, passed);
+      }
     }
   };
 

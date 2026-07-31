@@ -4,6 +4,7 @@ import { Feather } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as WebBrowser from 'expo-web-browser';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useRouter } from 'expo-router';
 import { typography, spacing } from '@/constants/theme';
 
 interface Material {
@@ -12,6 +13,8 @@ interface Material {
   content_url: string;
   type: string;
   content_text?: string;
+  estimated_minutes?: number;
+  user_material_progress?: { status: string }[];
 }
 
 interface DownloadableMaterialProps {
@@ -21,13 +24,15 @@ interface DownloadableMaterialProps {
   iconName: any;
   colors: any;
   onPressTextNotes?: () => void;
+  onMarkComplete?: (id: string) => void;
 }
 
-export default function DownloadableMaterial({ material, isTeacher, onDelete, iconName, colors, onPressTextNotes }: DownloadableMaterialProps) {
+export default function DownloadableMaterial({ material, isTeacher, onDelete, iconName, colors, onPressTextNotes, onMarkComplete }: DownloadableMaterialProps) {
   const [isDownloaded, setIsDownloaded] = useState(false);
   const [localUri, setLocalUri] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
+  const router = useRouter();
 
   const storageKey = `@downloaded_material_${material.id}`;
 
@@ -57,6 +62,11 @@ export default function DownloadableMaterial({ material, isTeacher, onDelete, ic
   };
 
   const handlePress = async () => {
+    // Mark as complete if student hasn't completed it yet
+    if (!isTeacher && onMarkComplete && material.user_material_progress?.[0]?.status !== 'completed') {
+      onMarkComplete(material.id);
+    }
+
     if (material.type === 'notes_text' && onPressTextNotes) {
       onPressTextNotes();
       return;
@@ -66,14 +76,14 @@ export default function DownloadableMaterial({ material, isTeacher, onDelete, ic
       if (Platform.OS === 'web') {
         WebBrowser.openBrowserAsync(material.content_url);
       } else {
-        // We'll use WebBrowser to handle local file URIs as well
-        WebBrowser.openBrowserAsync(localUri).catch(() => {
-          Alert.alert('Cannot Open File', 'Your device does not have an app to open this file.');
-        });
+        router.push(`/viewer?uri=${encodeURIComponent(localUri)}&type=${encodeURIComponent(material.type)}&title=${encodeURIComponent(material.title)}`);
       }
     } else {
-      // Not downloaded, stream from web
-      WebBrowser.openBrowserAsync(material.content_url);
+      if (Platform.OS === 'web') {
+        WebBrowser.openBrowserAsync(material.content_url);
+      } else {
+        router.push(`/viewer?uri=${encodeURIComponent(material.content_url)}&type=${encodeURIComponent(material.type)}&title=${encodeURIComponent(material.title)}`);
+      }
     }
   };
 
@@ -158,6 +168,19 @@ export default function DownloadableMaterial({ material, isTeacher, onDelete, ic
           <Text style={[styles.materialTitle, { color: colors.text }]} numberOfLines={1}>
             {material.title}
           </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: 2 }}>
+            {material.estimated_minutes && (
+              <Text style={{ fontSize: 10, color: colors.textSecondary }}>
+                <Feather name="clock" size={10} /> {material.estimated_minutes} mins
+              </Text>
+            )}
+            {!isTeacher && material.user_material_progress?.[0]?.status === 'completed' && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
+                <Feather name="check-circle" size={10} color="#10B981" />
+                <Text style={{ fontSize: 10, color: '#10B981' }}>Completed</Text>
+              </View>
+            )}
+          </View>
           {isDownloading && (
             <View style={styles.progressContainer}>
               <View style={[styles.progressBar, { backgroundColor: colors.border }]}>

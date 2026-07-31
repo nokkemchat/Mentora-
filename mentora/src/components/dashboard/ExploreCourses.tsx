@@ -1,7 +1,5 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { View, Text, StyleSheet, Pressable, ActivityIndicator, Image } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { BlurView } from 'expo-blur';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { spacing, typography, borderRadius, useThemeColors } from '@/constants/theme';
@@ -78,12 +76,9 @@ export default function ExploreCourses({ searchQuery = '' }: { searchQuery?: str
         const board = user.user_metadata?.board;
 
         if (grade) {
-          const isOLevel = ['Form 1', 'Form 2', 'Form 3', 'Form 4'].includes(grade);
-          const isALevel = ['Lower 6', 'Upper 6'].includes(grade);
-          
-          if (isOLevel) {
+          if (['Form 3', 'Form 4'].includes(grade)) {
             query = query.in('level', [grade, 'O-Level', 'O Level']);
-          } else if (isALevel) {
+          } else if (['Lower 6', 'Upper 6'].includes(grade)) {
             query = query.in('level', [grade, 'A-Level', 'A Level']);
           } else {
             query = query.eq('level', grade);
@@ -91,7 +86,7 @@ export default function ExploreCourses({ searchQuery = '' }: { searchQuery?: str
         }
 
         if (board) {
-          query = query.eq('board', board);
+          query = query.ilike('board', board);
         }
       }
 
@@ -137,18 +132,15 @@ export default function ExploreCourses({ searchQuery = '' }: { searchQuery?: str
         style={styles.aiBanner}
         onPress={() => router.push('/papers')}
       >
-        <BlurView 
-          intensity={75} 
-          tint={colors.background === '#F8FAFC' ? "light" : "dark"}
-          style={StyleSheet.absoluteFillObject} 
-        />
         <View style={styles.aiBannerContent}>
-          <MaterialCommunityIcons name="robot-outline" size={32} color={colors.accent} />
+          <View style={styles.aiBannerIcon}>
+            <MaterialCommunityIcons name="robot-outline" size={24} color={colors.primary} />
+          </View>
           <View style={{ flex: 1, marginLeft: spacing.md }}>
             <Text style={styles.aiBannerTitle}>AI Exam Intelligence</Text>
             <Text style={styles.aiBannerSubtitle}>Past papers turned into an interactive AI tutor.</Text>
           </View>
-          <MaterialCommunityIcons name="chevron-right" size={24} color={colors.accent} />
+          <MaterialCommunityIcons name="chevron-right" size={20} color={colors.textSecondary} />
         </View>
       </Pressable>
 
@@ -178,14 +170,9 @@ export default function ExploreCourses({ searchQuery = '' }: { searchQuery?: str
             return filteredCourses.map((course) => (
               <Pressable 
                 key={course.id} 
-                style={styles.card}
+                style={[styles.card, { backgroundColor: colors.surface }]}
                 onPress={() => router.push(`/course/${course.id}`)}
               >
-                <BlurView 
-                  intensity={75} 
-                  tint={isLightMode ? "light" : "dark"}
-                  style={StyleSheet.absoluteFillObject} 
-                />
               <View style={styles.cardContent}>
                 <View style={styles.imageWrapper}>
                   {course.image_url && coverImages[course.image_url] ? (
@@ -261,49 +248,47 @@ const createStyles = (colors: any) => StyleSheet.create({
     marginTop: spacing.xs,
   },
   aiBanner: {
-    backgroundColor: 'transparent',
-    borderRadius: borderRadius.lg,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.md,
     padding: spacing.lg,
     marginBottom: spacing.xxl,
-    shadowColor: colors.accent,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 8,
     borderWidth: 1,
     borderColor: colors.border,
-    overflow: 'hidden',
   },
   aiBannerContent: {
     flexDirection: 'row',
     alignItems: 'center',
   },
+  aiBannerIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: borderRadius.sm,
+    backgroundColor: colors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   aiBannerTitle: {
-    color: colors.accent,
-    fontSize: typography.sizes.lg,
+    color: colors.text,
+    fontSize: typography.sizes.md,
     fontWeight: typography.weights.bold,
-    marginBottom: 4,
+    fontFamily: 'Outfit_600SemiBold',
+    marginBottom: 2,
   },
   aiBannerSubtitle: {
     color: colors.textSecondary,
     fontSize: typography.sizes.sm,
-    lineHeight: 20,
+    fontFamily: 'Outfit_400Regular',
+    lineHeight: 18,
   },
   grid: {
     flexDirection: 'column',
-    gap: spacing.md,
+    gap: spacing.lg,
   },
   card: {
     width: '100%', 
-    backgroundColor: 'transparent',
-    borderRadius: 24,
+    borderRadius: borderRadius.md,
     alignItems: 'flex-start',
     overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: colors.background === '#F8FAFC' ? 0.05 : 0.2,
-    shadowRadius: 20,
-    elevation: 10,
     borderWidth: 1,
     borderColor: colors.border,
   },

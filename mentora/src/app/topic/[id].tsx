@@ -10,6 +10,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as WebBrowser from 'expo-web-browser';
 import { decode } from 'base64-arraybuffer';
 import DownloadableMaterial from '@/components/DownloadableMaterial';
+import { markMaterialComplete } from '@/lib/progress';
 
 const STATUS_COLORS: Record<string, string> = {
   'Not Started': '#9CA3AF',
@@ -36,13 +37,14 @@ export default function TopicDetailScreen() {
   const [uploading, setUploading] = useState(false);
   const [generatingAI, setGeneratingAI] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
-  const [uploadType, setUploadType] = useState<string>(''); // 'video', 'notes_text', 'notes_pdf', 'past_paper'
+  const [uploadType, setUploadType] = useState<string>(''); // 'video', 'notes_text', 'notes_pdf', 'past_paper', etc.
   const [noteText, setNoteText] = useState('');
+  const [estimatedMinutes, setEstimatedMinutes] = useState('10');
   const isPickingRef = useRef(false);
 
   const fetchSubtopicData = async () => {
     if (!id || !user) return;
-    setLoading(true);
+    if (!subtopic) setLoading(true);
     
     try {
       // Fetch Subtopic details
@@ -65,10 +67,13 @@ export default function TopicDetailScreen() {
         setSubtopic(data);
       }
 
-      // Fetch subtopic materials
+      // Fetch subtopic materials and user progress
       const { data: materialsData, error: matError } = await supabase
         .from('subtopic_materials')
-        .select('*')
+        .select(`
+          *,
+          user_material_progress (status)
+        `)
         .eq('subtopic_id', id);
 
       if (!matError && materialsData) {
@@ -125,7 +130,6 @@ export default function TopicDetailScreen() {
 
   // Find existing materials
   const videoMaterials = materials.filter(m => m.type === 'video');
-  const pastPaperMaterials = materials.filter(m => m.type === 'past_paper');
   const notesMaterials = materials.filter(m => m.type === 'notes_text' || m.type === 'notes_pdf');
 
   const handleDeleteMaterial = async (materialId: string) => {
@@ -154,6 +158,14 @@ export default function TopicDetailScreen() {
         }
       ]
     );
+  };
+
+  const handleMarkComplete = async (materialId: string) => {
+    if (!user) return;
+    const success = await markMaterialComplete(user.id, materialId, subtopic.id);
+    if (success) {
+      fetchSubtopicData();
+    }
   };
 
   const handleAIGenerate = async () => {
@@ -222,7 +234,7 @@ export default function TopicDetailScreen() {
     return publicUrlData.publicUrl;
   };
 
-  const handlePickFile = async (type: string) => {
+  const handlePickFile = async (type: string, time: string) => {
     if (uploading) {
       Alert.alert('Please wait', 'An upload is already in progress.');
       return;
@@ -295,7 +307,8 @@ export default function TopicDetailScreen() {
           subtopic_id: subtopic.id,
           type: type,
           title: asset.name || (type === 'video' ? 'Video Lesson' : type === 'past_paper' ? 'Past Paper' : 'Study Notes'),
-          content_url: fileUrl
+          content_url: fileUrl,
+          estimated_minutes: parseInt(time) || 10
         });
 
       if (dbError) throw dbError;
@@ -327,7 +340,8 @@ export default function TopicDetailScreen() {
           subtopic_id: subtopic.id,
           type: 'notes_text',
           title: `Study Notes - ${new Date().toLocaleDateString()}`,
-          content_text: noteText
+          content_text: noteText,
+          estimated_minutes: parseInt(estimatedMinutes) || 10
         });
 
       if (dbError) throw dbError;
@@ -346,12 +360,18 @@ export default function TopicDetailScreen() {
 
   const openUploadModal = (type: string) => {
     setUploadType(type);
-    if (type === 'notes_text') {
+    if (type === 'notes_picker' || type === 'notes_text') {
       const existingText = materials.find(m => m.type === 'notes_text')?.content_text || '';
       setNoteText(existingText);
+      setEstimatedMinutes('10');
+    } else if (type === 'video_picker') {
+      setEstimatedMinutes('15');
     }
     setModalVisible(true);
   };
+
+  const totalMinutes = materials.reduce((acc, mat) => acc + (mat.estimated_minutes || 0), 0) + (questionsCount > 0 ? (subtopic.estimated_quiz_minutes || 15) : 0);
+  const timeDisplay = totalMinutes > 0 ? `${totalMinutes} mins` : subtopic.estimated_time;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -372,7 +392,7 @@ export default function TopicDetailScreen() {
           </View>
           <View style={styles.metaItem}>
             <Feather name="clock" size={14} color={colors.textSecondary} />
-            <Text style={styles.metaText}>{subtopic.estimated_time}</Text>
+            <Text style={styles.metaText}>{timeDisplay}</Text>
           </View>
         </View>
       </View>
@@ -397,7 +417,7 @@ export default function TopicDetailScreen() {
               <Text style={styles.categoryTitle}>Video Lessons</Text>
             </View>
             {isTeacher && (
-              <Pressable style={styles.categoryAddButton} onPress={() => handlePickFile('video')}>
+              <Pressable style={styles.categoryAddButton} onPress={() => openUploadModal('video_picker')}>
                 <Feather name="plus" size={16} color={colors.background} />
               </Pressable>
             )}
@@ -413,6 +433,7 @@ export default function TopicDetailScreen() {
                 onDelete={handleDeleteMaterial}
                 iconName="film"
                 colors={colors}
+                onMarkComplete={handleMarkComplete}
               />
             ))
           )}
@@ -444,6 +465,7 @@ export default function TopicDetailScreen() {
                 onDelete={handleDeleteMaterial}
                 iconName={mat.type === 'notes_pdf' ? 'file' : 'align-left'}
                 colors={colors}
+                onMarkComplete={handleMarkComplete}
                 onPressTextNotes={() => {
                   if (mat.type === 'notes_text') {
                     Alert.alert('Study Notes', mat.content_text || 'No content');
@@ -463,7 +485,14 @@ export default function TopicDetailScreen() {
               </View>
               <View>
                 <Text style={styles.categoryTitle}>Interactive Quiz</Text>
-                <Text style={{ fontSize: typography.sizes.xs, color: colors.textSecondary }}>{questionsCount} Questions</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: 2 }}>
+                  <Text style={{ fontSize: typography.sizes.xs, color: colors.textSecondary }}>{questionsCount} Questions</Text>
+                  {questionsCount > 0 && (
+                    <Text style={{ fontSize: 10, color: colors.textSecondary }}>
+                      <Feather name="clock" size={10} /> {subtopic.estimated_quiz_minutes || 15} mins
+                    </Text>
+                  )}
+                </View>
               </View>
             </View>
             <View style={{ flexDirection: 'row', gap: spacing.sm }}>
@@ -502,36 +531,6 @@ export default function TopicDetailScreen() {
           )}
         </View>
 
-        {/* Past Papers */}
-        <View style={styles.categoryCard}>
-          <View style={styles.categoryHeader}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-              <View style={[styles.categoryIcon, { backgroundColor: 'rgba(139, 92, 246, 0.1)' }]}>
-                <MaterialCommunityIcons name="book-open-variant" size={20} color="#8B5CF6" />
-              </View>
-              <Text style={styles.categoryTitle}>Past Papers</Text>
-            </View>
-            {isTeacher && (
-              <Pressable style={[styles.categoryAddButton, { backgroundColor: '#8B5CF6' }]} onPress={() => handlePickFile('past_paper')}>
-                <Feather name="plus" size={16} color={colors.background} />
-              </Pressable>
-            )}
-          </View>
-          {pastPaperMaterials.length === 0 ? (
-            <Text style={styles.emptyText}>{isTeacher ? 'No past papers' : 'Coming soon'}</Text>
-          ) : (
-            pastPaperMaterials.map(mat => (
-              <DownloadableMaterial
-                key={mat.id}
-                material={mat}
-                isTeacher={isTeacher}
-                onDelete={handleDeleteMaterial}
-                iconName="file-text"
-                colors={colors}
-              />
-            ))
-          )}
-        </View>
       </View>
 
 
@@ -552,6 +551,21 @@ export default function TopicDetailScreen() {
               </Pressable>
             </View>
 
+            {(uploadType.endsWith('_picker') || uploadType === 'notes_text') && (
+              <View style={{ marginBottom: spacing.lg }}>
+                <Text style={{ color: colors.textSecondary, marginBottom: spacing.xs, fontSize: typography.sizes.sm }}>
+                  Estimated time to complete (minutes)
+                </Text>
+                <TextInput
+                  style={[styles.textArea, { color: colors.text, borderColor: colors.border, minHeight: 44, marginBottom: 0 }]}
+                  keyboardType="numeric"
+                  value={estimatedMinutes}
+                  onChangeText={setEstimatedMinutes}
+                  placeholder="e.g. 15"
+                />
+              </View>
+            )}
+
             {uploadType === 'notes_picker' && (
               <View style={{ gap: spacing.md }}>
                 <Text style={{ color: colors.textSecondary, marginBottom: spacing.sm }}>
@@ -568,10 +582,21 @@ export default function TopicDetailScreen() {
 
                 <Pressable 
                   style={styles.modalOptionButton}
-                  onPress={() => handlePickFile('notes_pdf')}
+                  onPress={() => handlePickFile('notes_pdf', estimatedMinutes)}
                 >
                   <Feather name="upload-cloud" size={20} color={colors.primary} />
                   <Text style={[styles.modalOptionText, { color: colors.text }]}>Upload PDF Document</Text>
+                </Pressable>
+              </View>
+            )}
+
+            {uploadType === 'video_picker' && (
+              <View style={{ gap: spacing.md }}>
+                <Pressable 
+                  style={[styles.primaryButton, { backgroundColor: colors.primary }]}
+                  onPress={() => handlePickFile('video', estimatedMinutes)}
+                >
+                  <Text style={styles.primaryButtonText}>Select Video File</Text>
                 </Pressable>
               </View>
             )}

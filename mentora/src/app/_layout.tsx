@@ -9,6 +9,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AuthProvider } from '../context/AuthContext';
 import { ThemeProvider } from '../context/ThemeContext';
 import { useThemeColors } from '../constants/theme';
+import { GlobalAITutorButton } from '../components/GlobalAITutorButton';
 
 
 
@@ -23,7 +24,9 @@ function AppContent() {
         <Stack.Screen name="(auth)" />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="index" />
+        <Stack.Screen name="ai-tutor" options={{ presentation: 'modal', headerShown: false }} />
       </Stack>
+      <GlobalAITutorButton />
     </View>
   );
 }

@@ -1,34 +1,34 @@
 import { useColorScheme } from 'react-native';
 
 export const lightColors = {
-  background: '#F8FAFC',
-  text: '#111827',
-  textSecondary: '#6B7280',
-  textTertiary: '#9CA3AF',
-  primary: '#1E3A8A', // Navy Blue
-  primaryLight: '#60A5FA', // Sky Blue
-  accent: '#FBBF24', // Gold
-  primaryContrast: '#1E3A8A', // Used for text on primaryLight bg
-  border: '#E5E7EB',
-  surface: '#FFFFFF', 
-  surfaceHighlight: '#F8FAFC',
+  background: '#FFFFFF',
+  text: '#0F172A',
+  textSecondary: '#64748B',
+  textTertiary: '#94A3B8',
+  primary: '#4F46E5', // Deep Indigo
+  primaryLight: '#E0E7FF', // Soft Indigo
+  accent: '#F59E0B', // Amber
+  primaryContrast: '#FFFFFF',
+  border: '#F1F5F9',
+  surface: '#F8FAFC', 
+  surfaceHighlight: '#F1F5F9',
   error: '#EF4444',
   success: '#10B981',
   warning: '#F59E0B',
 };
 
 export const darkColors = {
-  background: '#09090B',
-  text: '#FAFAFA', 
-  textSecondary: '#D4D4D8', 
-  textTertiary: '#A1A1AA', 
-  primary: '#60A5FA', // Sky Blue for readability on dark
-  primaryLight: '#1E3A8A', // Navy Blue
-  accent: '#60A5FA', // Sky Blue
-  primaryContrast: '#FAFAFA', // White text on Navy pill
-  border: '#3F3F46', 
-  surface: '#18181B', 
-  surfaceHighlight: '#27272A', 
+  background: '#0F172A',
+  text: '#F8FAFC', 
+  textSecondary: '#94A3B8', 
+  textTertiary: '#64748B', 
+  primary: '#818CF8', // Light Indigo for dark mode
+  primaryLight: '#1E1B4B', // Very Dark Indigo
+  accent: '#F59E0B',
+  primaryContrast: '#FFFFFF',
+  border: '#1E293B', 
+  surface: '#1E293B', 
+  surfaceHighlight: '#334155', 
   error: '#EF4444',
   success: '#10B981',
   warning: '#F59E0B',
@@ -79,26 +79,33 @@ export const typography = {
 };
 
 export const borderRadius = {
-  sm: 8,
-  md: 16,
-  lg: 24,
-  xl: 32,
+  sm: 4,
+  md: 8,
+  lg: 12,
+  xl: 16,
   full: 9999,
 };
 
 export const shadows = {
   sm: {
-    shadowColor: '#000',
+    shadowColor: '#0F172A',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
+    shadowOpacity: 0.02,
     shadowRadius: 2,
-    elevation: 2,
+    elevation: 1,
   },
   md: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
-    elevation: 4,
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    elevation: 2,
   },
+  lg: {
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 16,
+    elevation: 4,
+  }
 };
