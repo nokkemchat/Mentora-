@@ -11,6 +11,7 @@ import Courses from './pages/Courses';
 import Subscriptions from './pages/Subscriptions';
 import Moderation from './pages/Moderation';
 import Papers from './pages/Papers';
+import CourseDetails from './pages/CourseDetails';
 
 const ProtectedRoute = () => {
   const { loading } = useAuth();
@@ -37,6 +38,7 @@ export default function App() {
             <Route path="/" element={<Dashboard />} />
             <Route path="/teachers" element={<Teachers />} />
             <Route path="/courses" element={<Courses />} />
+            <Route path="/courses/:id" element={<CourseDetails />} />
             <Route path="/subscriptions" element={<Subscriptions />} />
             <Route path="/moderation" element={<Moderation />} />
             <Route path="/papers" element={<Papers />} />

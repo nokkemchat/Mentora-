@@ -3,8 +3,10 @@ import { Search, Filter, Plus, Edit, Trash2, Eye, BarChart2, BookOpen, ChevronDo
 import { supabase } from '../lib/supabase';
 import PaperFormModal from '../components/PaperFormModal';
 import BulkUploadModal from '../components/BulkUploadModal';
+import { useAuth } from '../context/AuthContext';
 
 export default function Papers() {
+  const { user, isAdmin } = useAuth();
   const [search, setSearch] = useState('');
   const [showFormModal, setShowFormModal] = useState(false);
   const [showBulkModal, setShowBulkModal] = useState(false);
@@ -18,7 +20,24 @@ export default function Papers() {
 
   const fetchPapers = async () => {
     setLoading(true);
-    const { data, error } = await supabase.from('papers').select('*').order('created_at', { ascending: false });
+    let query = supabase.from('papers').select('*').order('created_at', { ascending: false });
+    
+    if (!isAdmin && user) {
+      const teacherName = `${user.user_metadata?.first_name || ''} ${user.user_metadata?.last_name || ''}`.trim();
+      if (teacherName) {
+        const { data: courses } = await supabase.from('courses').select('title').eq('teacher_name', teacherName);
+        if (courses && courses.length > 0) {
+          const subjects = Array.from(new Set(courses.map(c => c.title)));
+          query = query.in('subject', subjects);
+        } else {
+          setPapers([]);
+          setLoading(false);
+          return;
+        }
+      }
+    }
+
+    const { data, error } = await query;
     if (error) {
       console.error('Error fetching papers:', error);
     } else {

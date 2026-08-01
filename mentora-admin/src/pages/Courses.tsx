@@ -3,8 +3,12 @@ import { Search, Filter, Plus, Edit, Trash2, Eye, BarChart2, UserPlus, BookOpen,
 import CourseAnalytics from '../components/CourseAnalytics';
 import CreateCourseWizard from '../components/CreateCourseWizard';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../context/AuthContext';
+import { useNavigate } from 'react-router-dom';
 
 export default function Courses() {
+  const { user, isAdmin } = useAuth();
+  const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [expandedCourseId, setExpandedCourseId] = useState<string | null>(null);
   const [showWizard, setShowWizard] = useState(false);
@@ -18,7 +22,16 @@ export default function Courses() {
 
   const fetchCourses = async () => {
     setLoading(true);
-    const { data, error } = await supabase.from('courses').select('*').order('created_at', { ascending: false });
+    let query = supabase.from('courses').select('*').order('created_at', { ascending: false });
+    
+    if (!isAdmin && user) {
+      const teacherName = `${user.user_metadata?.first_name || ''} ${user.user_metadata?.last_name || ''}`.trim();
+      if (teacherName) {
+        query = query.eq('teacher_name', teacherName);
+      }
+    }
+    
+    const { data, error } = await query;
     if (error) {
       console.error('Error fetching courses:', error);
     } else {
@@ -180,7 +193,11 @@ export default function Courses() {
                     </td>
                     <td className="p-4 text-right">
                       <div className="flex items-center justify-end space-x-2">
-                        <button className="flex items-center space-x-1 p-2 text-textMuted hover:text-primary hover:bg-primary/10 rounded-xl transition-colors" title="View">
+                        <button 
+                          onClick={() => navigate(`/courses/${course.id}`)}
+                          className="flex items-center space-x-1 p-2 text-textMuted hover:text-primary hover:bg-primary/10 rounded-xl transition-colors" 
+                          title="View"
+                        >
                           <Eye className="w-4 h-4" />
                         </button>
                         <button 

@@ -2,48 +2,81 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { Users, BookOpen, Clock, TrendingUp } from 'lucide-react';
 import PendingApproval from '../components/PendingApproval';
+import { useAuth } from '../context/AuthContext';
 
 export default function Dashboard() {
+  const { user, isAdmin } = useAuth();
   const [stats, setStats] = useState({
     totalStudents: 0,
     totalTeachers: 0,
     pendingTeachers: 0,
     totalCourses: 0,
+    totalPapers: 0,
   });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     fetchStats();
-  }, []);
+  }, [isAdmin, user]);
 
   const fetchStats = async () => {
     setLoading(true);
     try {
-      // Very naive counting for MVP. In production, use RPCs.
-      const [{ count: studentsCount }, { count: teachersCount }, { count: pendingCount }, { count: coursesCount }] = await Promise.all([
-        supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'student'),
-        supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'teacher'),
-        supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'teacher').eq('is_approved', false),
-        supabase.from('courses').select('*', { count: 'exact', head: true }),
-      ]);
+      if (isAdmin) {
+        // Global admin stats
+        const [{ count: studentsCount }, { count: teachersCount }, { count: pendingCount }, { count: coursesCount }] = await Promise.all([
+          supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'student'),
+          supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'teacher'),
+          supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'teacher').eq('is_approved', false),
+          supabase.from('courses').select('*', { count: 'exact', head: true }),
+        ]);
 
-      setStats({
-        totalStudents: studentsCount || 0,
-        totalTeachers: teachersCount || 0,
-        pendingTeachers: pendingCount || 0,
-        totalCourses: coursesCount || 0,
-      });
+        setStats({
+          totalStudents: studentsCount || 0,
+          totalTeachers: teachersCount || 0,
+          pendingTeachers: pendingCount || 0,
+          totalCourses: coursesCount || 0,
+          totalPapers: 0,
+        });
+      } else {
+        // Teacher specific stats
+        const teacherName = user ? `${user.user_metadata?.first_name || ''} ${user.user_metadata?.last_name || ''}`.trim() : '';
+        let myCoursesCount = 0;
+        let myPapersCount = 0;
+
+        if (teacherName) {
+          const { data: courses } = await supabase.from('courses').select('title').eq('teacher_name', teacherName);
+          myCoursesCount = courses?.length || 0;
+
+          if (courses && courses.length > 0) {
+            const subjects = Array.from(new Set(courses.map(c => c.title)));
+            const { count } = await supabase.from('papers').select('*', { count: 'exact', head: true }).in('subject', subjects);
+            myPapersCount = count || 0;
+          }
+        }
+
+        setStats({
+          totalStudents: 0,
+          totalTeachers: 0,
+          pendingTeachers: 0,
+          totalCourses: myCoursesCount,
+          totalPapers: myPapersCount,
+        });
+      }
     } catch (e) {
       console.error(e);
     }
     setLoading(false);
   };
 
-  const statCards = [
+  const statCards = isAdmin ? [
     { label: 'Total Students', value: stats.totalStudents, icon: Users, color: 'text-blue-500', bg: 'bg-blue-500/10' },
     { label: 'Total Teachers', value: stats.totalTeachers, icon: BookOpen, color: 'text-purple-500', bg: 'bg-purple-500/10' },
     { label: 'Pending Approvals', value: stats.pendingTeachers, icon: Clock, color: 'text-amber-500', bg: 'bg-amber-500/10' },
     { label: 'Active Courses', value: stats.totalCourses, icon: TrendingUp, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
+  ] : [
+    { label: 'My Courses', value: stats.totalCourses, icon: BookOpen, color: 'text-blue-500', bg: 'bg-blue-500/10' },
+    { label: 'My Papers', value: stats.totalPapers, icon: TrendingUp, color: 'text-purple-500', bg: 'bg-purple-500/10' },
   ];
 
   if (loading) return <div>Loading dashboard...</div>;
@@ -52,7 +85,7 @@ export default function Dashboard() {
     <div className="max-w-6xl mx-auto">
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-text">Overview</h1>
-        <p className="text-textMuted mt-2">Welcome back to your Admin Console.</p>
+        <p className="text-textMuted mt-2">Welcome back to your {isAdmin ? 'Admin' : 'Teacher'} Console.</p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
@@ -75,11 +108,13 @@ export default function Dashboard() {
       </div>
       
       {/* Additional dashboard widgets can go here */}
-      <div className="grid grid-cols-1 gap-6">
-        <div className="h-[500px]">
-          <PendingApproval />
+      {isAdmin && (
+        <div className="grid grid-cols-1 gap-6">
+          <div className="h-[500px]">
+            <PendingApproval />
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
