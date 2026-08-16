@@ -3,6 +3,7 @@ import { Search, Filter, Plus, Edit, Trash2, Eye, BarChart2, BookOpen, ChevronDo
 import { supabase } from '../lib/supabase';
 import PaperFormModal from '../components/PaperFormModal';
 import BulkUploadModal from '../components/BulkUploadModal';
+import PaperViewModal from '../components/PaperViewModal';
 import { useAuth } from '../context/AuthContext';
 
 export default function Papers() {
@@ -10,6 +11,7 @@ export default function Papers() {
   const [search, setSearch] = useState('');
   const [showFormModal, setShowFormModal] = useState(false);
   const [showBulkModal, setShowBulkModal] = useState(false);
+  const [viewingPaperId, setViewingPaperId] = useState<string | null>(null);
   const [papers, setPapers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
@@ -20,7 +22,7 @@ export default function Papers() {
 
   const fetchPapers = async () => {
     setLoading(true);
-    let query = supabase.from('papers').select('*').order('created_at', { ascending: false });
+    let query = supabase.from('papers').select('*, ingestion_jobs(status)').order('created_at', { ascending: false });
     
     if (!isAdmin && user) {
       const teacherName = `${user.user_metadata?.first_name || ''} ${user.user_metadata?.last_name || ''}`.trim();
@@ -160,6 +162,7 @@ export default function Papers() {
                 <th className="p-4 font-medium">Details</th>
                 <th className="p-4 font-medium">Type</th>
                 <th className="p-4 font-medium">Year & Session</th>
+                <th className="p-4 font-medium">Status</th>
                 <th className="p-4 font-medium">PDF File</th>
                 <th className="p-4 font-medium text-right">Actions</th>
               </tr>
@@ -167,13 +170,13 @@ export default function Papers() {
             <tbody className="divide-y divide-border">
               {loading ? (
                  <tr>
-                 <td colSpan={6} className="p-8 text-center text-textMuted">
+                 <td colSpan={7} className="p-8 text-center text-textMuted">
                    Loading papers...
                  </td>
                </tr>
               ) : filteredPapers.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="p-8 text-center text-textMuted">
+                  <td colSpan={7} className="p-8 text-center text-textMuted">
                     No papers found matching your criteria.
                   </td>
                 </tr>
@@ -211,6 +214,21 @@ export default function Papers() {
                       <span className="text-xs">{paper.session || 'N/A'}</span>
                     </td>
                     <td className="p-4">
+                      {paper.ingestion_jobs && paper.ingestion_jobs.length > 0 ? (
+                        <span className={`inline-flex items-center px-2.5 py-1 rounded-xl text-xs font-medium ${
+                          paper.ingestion_jobs[0].status === 'completed' ? 'bg-[#10b981]/10 text-[#10b981] border border-[#10b981]/20' :
+                          paper.ingestion_jobs[0].status === 'failed' ? 'bg-error/10 text-error border border-error/20' :
+                          'bg-[#f59e0b]/10 text-[#f59e0b] border border-[#f59e0b]/20'
+                        }`}>
+                          {paper.ingestion_jobs[0].status.charAt(0).toUpperCase() + paper.ingestion_jobs[0].status.slice(1)}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-xl text-xs font-medium bg-surface text-textMuted border border-border">
+                          Legacy
+                        </span>
+                      )}
+                    </td>
+                    <td className="p-4">
                       {paper.pdf_url ? (
                         <a href={paper.pdf_url} target="_blank" rel="noreferrer" className="text-primary text-sm hover:underline">
                           View PDF
@@ -222,12 +240,12 @@ export default function Papers() {
                     <td className="p-4 text-right">
                       <div className="flex items-center justify-end space-x-3">
                         <button 
-                          onClick={() => alert('Edit Paper functionality coming soon')}
+                          onClick={() => setViewingPaperId(paper.id)}
                           className="flex items-center space-x-1 p-2 text-textMuted hover:text-primary hover:bg-primary/10 rounded-xl transition-colors" 
-                          title="Edit"
+                          title="View"
                         >
-                          <Edit className="w-4 h-4" />
-                          <span className="text-sm font-medium">Edit</span>
+                          <Eye className="w-4 h-4" />
+                          <span className="text-sm font-medium">View</span>
                         </button>
                         <button 
                           onClick={() => handleDelete(paper.id)}
@@ -259,6 +277,13 @@ export default function Papers() {
         <BulkUploadModal 
           onClose={() => setShowBulkModal(false)} 
           onSuccess={() => { setShowBulkModal(false); fetchPapers(); }}
+        />
+      )}
+
+      {viewingPaperId && (
+        <PaperViewModal 
+          paperId={viewingPaperId}
+          onClose={() => setViewingPaperId(null)}
         />
       )}
     </div>

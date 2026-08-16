@@ -371,7 +371,9 @@ export default function CourseDetailScreen() {
       {!course.topics || course.topics.length === 0 ? (
         <Text style={styles.emptyText}>No topics available yet.</Text>
       ) : (
-        course.topics.map((topic: any, index: number) => {
+        [...course.topics]
+          .sort((a: any, b: any) => a.title.localeCompare(b.title, undefined, { numeric: true }))
+          .map((topic: any, index: number) => {
           const isExpanded = expandedTopicId === topic.id;
           const totalSubtopics = topic.subtopics?.length || 0;
           
@@ -404,7 +406,9 @@ export default function CourseDetailScreen() {
 
               {isExpanded && (
                 <View style={styles.subtopicsContainer}>
-                  {topic.subtopics?.map((subtopic: any) => {
+                  {[...topic.subtopics]
+                    .sort((a: any, b: any) => a.title.localeCompare(b.title, undefined, { numeric: true }))
+                    .map((subtopic: any) => {
                     const status = subtopic.user_progress?.[0]?.status || 'Not Started';
                     const totalMins = (subtopic.subtopic_materials || []).reduce((acc: number, m: any) => acc + (m.estimated_minutes || 0), 0) + ((subtopic.questions || []).length > 0 ? (subtopic.estimated_quiz_minutes || 15) : 0);
                     const subtopicTimeStr = totalMins > 0 ? `${totalMins} mins` : subtopic.estimated_time;

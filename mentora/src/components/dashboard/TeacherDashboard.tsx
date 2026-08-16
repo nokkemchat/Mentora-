@@ -33,15 +33,18 @@ export default function TeacherDashboard() {
     if (!user) return;
 
     const fetchTeacherData = async () => {
-      // First get the teacher_stats_id for this user
+      // Upsert teacher_stats — creates a row if one doesn't exist yet
       const { data: statsData, error: statsError } = await supabase
         .from('teacher_stats')
+        .upsert(
+          { teacher_id: user.id, total_revenue: 0, pending_payout: 0, total_students: 0, average_rating: 0 },
+          { onConflict: 'teacher_id', ignoreDuplicates: true }
+        )
         .select('id')
-        .eq('teacher_id', user.id)
         .single();
 
       if (!statsError && statsData) {
-        // Then fetch their courses
+        // Fetch this teacher's courses
         const { data, error } = await supabase
           .from('teacher_courses')
           .select('*')
@@ -52,7 +55,7 @@ export default function TeacherDashboard() {
             id: tc.id,
             title: tc.title || 'Untitled Course',
             board: 'ZIMSEC',
-            level: 'A-Level',
+            level: 'O Level',
             icon: 'book-open-variant',
             color: '#3B82F6',
             ...tc
@@ -65,6 +68,7 @@ export default function TeacherDashboard() {
 
     fetchTeacherData();
   }, [user]);
+
 
   // Render Loading State
   if (loading) {

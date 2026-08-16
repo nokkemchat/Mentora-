@@ -35,6 +35,14 @@ export default function CreateCourseScreen() {
   const [selectedColor, setSelectedColor] = useState(AVAILABLE_COLORS[0]);
 
   const [loading, setLoading] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+
+  // Derived inline errors — only shown after first submit attempt
+  const errors = {
+    title: submitted && !title.trim() ? 'Course name is required' : '',
+    board: submitted && !board.trim() ? 'Exam board is required' : '',
+    level: submitted && !level.trim() ? 'Level is required' : '',
+  };
 
   const generateCourseId = (title: string, board: string, level: string) => {
     const raw = `${board}-${level}-${title}`.toLowerCase();
@@ -42,9 +50,9 @@ export default function CreateCourseScreen() {
   };
 
   async function handleCreateCourse() {
+    setSubmitted(true);
     if (!title.trim() || !board.trim() || !level.trim()) {
-      Alert.alert('Missing Fields', 'Please fill out all fields.');
-      return;
+      return; // inline errors will show automatically
     }
     if (!user) {
       Alert.alert('Error', 'Not authenticated.');
@@ -52,11 +60,11 @@ export default function CreateCourseScreen() {
     }
 
     setLoading(true);
-    
+
     // Generate an ID like "zimsec-o-level-math"
     const courseId = generateCourseId(title, board, level);
 
-    // 1. Insert into courses table
+    // 1. Insert into courses table (ignore duplicate)
     const { error: courseError } = await supabase
       .from('courses')
       .insert({
@@ -68,36 +76,53 @@ export default function CreateCourseScreen() {
         color: selectedColor
       });
 
-    if (courseError) {
+    if (courseError && courseError.code !== '23505') {
       setLoading(false);
-      // If it already exists, that's fine, we might just try adding the teacher link
-      // But usually it's an error we want to catch
-      if (courseError.code !== '23505') { // 23505 is unique violation
-        Alert.alert('Error creating course', courseError.message);
-        return;
-      }
+      Alert.alert('Error creating course', courseError.message);
+      return;
     }
 
-    // 2. Insert into teacher_courses linking table
+    // 2. Upsert teacher_stats row for this teacher (needed as FK for teacher_courses)
+    const { data: statsData, error: statsError } = await supabase
+      .from('teacher_stats')
+      .upsert(
+        { teacher_id: user.id, total_revenue: 0, pending_payout: 0, total_students: 0, average_rating: 0 },
+        { onConflict: 'teacher_id', ignoreDuplicates: false }
+      )
+      .select('id')
+      .single();
+
+    if (statsError || !statsData) {
+      setLoading(false);
+      Alert.alert('Error setting up teacher profile', statsError?.message ?? 'Unknown error');
+      return;
+    }
+
+    // 3. Insert into teacher_courses with the correct schema
     const { error: linkError } = await supabase
       .from('teacher_courses')
       .insert({
-        teacher_id: user.id,
-        course_id: courseId
+        id: courseId,                    // use the same generated ID
+        teacher_stats_id: statsData.id, // FK to teacher_stats
+        course_id: courseId,
+        title: title.trim(),
+        status: 'Draft',
+        active_students: 0,
+        revenue_generated: 0,
+        rating: 0,
       });
 
     setLoading(false);
 
-    if (linkError) {
-      // If the link already exists, it's fine
-      if (linkError.code !== '23505') {
-        Alert.alert('Error linking course', linkError.message);
-        return;
-      }
+    if (linkError && linkError.code !== '23505') {
+      Alert.alert('Error linking course', linkError.message);
+      return;
     }
 
-    // Success! Navigate to the course manager
-    router.replace(`/course/manage/${courseId}`);
+    // Success! Go back to dashboard so the new course shows up
+    Alert.alert('Course Created!', `"${title.trim()}" has been created as a draft.`, [
+      { text: 'OK', onPress: () => router.back() }
+    ]);
   }
 
   return (
@@ -117,39 +142,57 @@ export default function CreateCourseScreen() {
         
         {/* Title */}
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Course Title</Text>
+          <Text style={styles.label}>Course Title <Text style={styles.required}>*</Text></Text>
           <TextInput
-            style={styles.input}
+            style={[styles.input, !!errors.title && styles.inputError]}
             value={title}
-            onChangeText={setTitle}
+            onChangeText={(val) => { setTitle(val); }}
             placeholder="e.g. Mathematics, Biology"
             placeholderTextColor={colors.textSecondary}
           />
+          {!!errors.title && (
+            <View style={styles.errorRow}>
+              <Feather name="alert-circle" size={13} color={colors.error} />
+              <Text style={styles.errorText}>{errors.title}</Text>
+            </View>
+          )}
         </View>
 
         <View style={styles.row}>
           {/* Board */}
           <View style={[styles.inputGroup, { flex: 1, marginRight: spacing.md }]}>
-            <Text style={styles.label}>Exam Board</Text>
+            <Text style={styles.label}>Exam Board <Text style={styles.required}>*</Text></Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, !!errors.board && styles.inputError]}
               value={board}
-              onChangeText={setBoard}
+              onChangeText={(val) => { setBoard(val); }}
               placeholder="e.g. ZIMSEC, Cambridge"
               placeholderTextColor={colors.textSecondary}
             />
+            {!!errors.board && (
+              <View style={styles.errorRow}>
+                <Feather name="alert-circle" size={13} color={colors.error} />
+                <Text style={styles.errorText}>{errors.board}</Text>
+              </View>
+            )}
           </View>
 
           {/* Level */}
           <View style={[styles.inputGroup, { flex: 1 }]}>
-            <Text style={styles.label}>Level</Text>
+            <Text style={styles.label}>Level <Text style={styles.required}>*</Text></Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, !!errors.level && styles.inputError]}
               value={level}
-              onChangeText={setLevel}
+              onChangeText={(val) => { setLevel(val); }}
               placeholder="e.g. O Level, A Level"
               placeholderTextColor={colors.textSecondary}
             />
+            {!!errors.level && (
+              <View style={styles.errorRow}>
+                <Feather name="alert-circle" size={13} color={colors.error} />
+                <Text style={styles.errorText}>{errors.level}</Text>
+              </View>
+            )}
           </View>
         </View>
 
@@ -267,6 +310,24 @@ const createStyles = (colors: any) => StyleSheet.create({
     padding: spacing.md,
     fontSize: typography.sizes.md,
     color: colors.text,
+  },
+  inputError: {
+    borderColor: colors.error,
+    backgroundColor: `${colors.error}0D`, // 5% opacity tint
+  },
+  errorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: spacing.xs,
+  },
+  errorText: {
+    fontSize: typography.sizes.xs,
+    color: colors.error,
+    fontWeight: typography.weights.medium,
+  },
+  required: {
+    color: colors.error,
   },
   optionsContainer: {
     flexDirection: 'row',

@@ -14,10 +14,26 @@ export default function Dashboard() {
     totalPapers: 0,
   });
   const [loading, setLoading] = useState(true);
+  const [extractedQuestions, setExtractedQuestions] = useState<any[]>([]);
 
   useEffect(() => {
     fetchStats();
+    if (isAdmin) {
+      fetchExtractedQuestions();
+    }
   }, [isAdmin, user]);
+
+  const fetchExtractedQuestions = async () => {
+    const { data, error } = await supabase
+      .from('past_paper_questions')
+      .select('*, papers(subject, year, paper_number)')
+      .order('created_at', { ascending: false })
+      .limit(10);
+    
+    if (data && !error) {
+      setExtractedQuestions(data);
+    }
+  };
 
   const fetchStats = async () => {
     setLoading(true);
@@ -112,6 +128,53 @@ export default function Dashboard() {
         <div className="grid grid-cols-1 gap-6">
           <div className="h-[500px]">
             <PendingApproval />
+          </div>
+          
+          {/* DEVELOPMENT ONLY: Extracted Content Table */}
+          <div className="bg-surface border border-border rounded-3xl p-6 mt-6">
+            <h2 className="text-xl font-bold text-text mb-4">Development Only: Extracted Questions</h2>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-background border-b border-border text-textMuted text-sm">
+                    <th className="p-4 font-medium">Paper</th>
+                    <th className="p-4 font-medium">Q. No</th>
+                    <th className="p-4 font-medium">Content Preview</th>
+                    <th className="p-4 font-medium">Topic</th>
+                    <th className="p-4 font-medium">Difficulty</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {extractedQuestions.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="p-8 text-center text-textMuted">
+                        No questions extracted yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    extractedQuestions.map((q) => (
+                      <tr key={q.id} className="hover:bg-background transition-colors">
+                        <td className="p-4 text-sm text-text">
+                          {q.papers?.subject} {q.papers?.year} P{q.papers?.paper_number}
+                        </td>
+                        <td className="p-4 text-sm font-medium text-text">
+                          {q.question_number}
+                        </td>
+                        <td className="p-4 text-sm text-textMuted max-w-xs truncate">
+                          {q.content_text}
+                        </td>
+                        <td className="p-4 text-sm text-text">
+                          {q.topic || '-'}
+                        </td>
+                        <td className="p-4 text-sm text-text">
+                          {q.difficulty || '-'}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}

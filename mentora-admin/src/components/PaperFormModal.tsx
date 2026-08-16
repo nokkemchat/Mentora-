@@ -11,56 +11,18 @@ interface PaperFormModalProps {
 
 export default function PaperFormModal({ onClose, onSuccess }: PaperFormModalProps) {
   const [isUploading, setIsUploading] = useState(false);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [pdfFile, setPdfFile] = useState<File | null>(null);
+  const [msFile, setMsFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const msInputRef = useRef<HTMLInputElement>(null);
 
-  const [formData, setFormData] = useState({
-    curriculum: 'ZIMSEC',
-    subject: '',
-    grade_level: 'O-Level',
-    year: new Date().getFullYear().toString(),
-    session: 'November',
-    paper_number: '1',
-    variant: '',
-    type: 'qp'
-  });
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
-  };
-
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, isMs: boolean = false) => {
     if (e.target.files && e.target.files.length > 0) {
       const file = e.target.files[0];
-      setPdfFile(file);
-
-      setIsAnalyzing(true);
-      try {
-        const text = await extractFirstPageText(file);
-        const { data, error } = await supabase.functions.invoke('extract_pdf_metadata', {
-          body: { filename: file.name, text }
-        });
-        
-        if (error) throw error;
-        
-        if (data) {
-          setFormData(prev => ({
-            ...prev,
-            curriculum: data.curriculum && data.curriculum !== 'Unknown' ? data.curriculum : prev.curriculum,
-            subject: data.subject || prev.subject,
-            grade_level: data.grade_level && data.grade_level !== 'Unknown' ? data.grade_level : prev.grade_level,
-            year: data.year || prev.year,
-            session: data.session && data.session !== 'Unknown' ? data.session : prev.session,
-            paper_number: data.paper_number || prev.paper_number,
-            variant: data.variant || prev.variant,
-            type: data.type || prev.type,
-          }));
-        }
-      } catch (err) {
-        console.error("AI Analysis failed:", err);
-      } finally {
-        setIsAnalyzing(false);
+      if (isMs) {
+        setMsFile(file);
+      } else {
+        setPdfFile(file);
       }
     }
   };
@@ -71,12 +33,15 @@ export default function PaperFormModal({ onClose, onSuccess }: PaperFormModalPro
 
     try {
       let pdf_url = null;
+      let ms_url = null;
 
-      // Upload PDF if present
+      const randomId = Math.random().toString(36).substring(7);
+
+      // Upload QP PDF
       if (pdfFile) {
         const fileExt = pdfFile.name.split('.').pop();
-        const fileName = `${formData.curriculum}_${formData.subject}_${formData.year}_P${formData.paper_number}_${formData.type}.${fileExt}`;
-        const filePath = `${formData.curriculum}/${formData.subject}/${formData.year}/${fileName.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+        const fileName = `Pending_${randomId}_qp.${fileExt}`;
+        const filePath = `pending/${fileName}`;
         
         const { error: uploadError } = await supabase.storage
           .from('past_papers')
@@ -88,20 +53,46 @@ export default function PaperFormModal({ onClose, onSuccess }: PaperFormModalPro
         pdf_url = data.publicUrl;
       }
 
-      // Insert Database Record
-      const { error: dbError } = await supabase.from('papers').insert({
-        curriculum: formData.curriculum,
-        subject: formData.subject,
-        grade_level: formData.grade_level,
-        year: parseInt(formData.year),
-        session: formData.session,
-        paper_number: parseInt(formData.paper_number),
-        variant: formData.variant || null,
-        type: formData.type,
-        pdf_url
-      });
+      // Upload MS PDF
+      if (msFile) {
+        const fileExt = msFile.name.split('.').pop();
+        const fileName = `Pending_${randomId}_ms.${fileExt}`;
+        const filePath = `pending/${fileName}`;
+        
+        const { error: uploadError } = await supabase.storage
+          .from('past_papers')
+          .upload(filePath, msFile, { upsert: true });
+
+        if (uploadError) throw uploadError;
+
+        const { data } = supabase.storage.from('past_papers').getPublicUrl(filePath);
+        ms_url = data.publicUrl;
+      }
+
+      // Insert Database Record with placeholder data
+      const { data: insertedPaper, error: dbError } = await supabase.from('papers').insert({
+        curriculum: 'ZIMSEC', // Placeholder to satisfy DB constraint
+        subject: 'Extracting...',
+        grade_level: 'Pending',
+        year: new Date().getFullYear(),
+        session: 'Pending',
+        paper_number: 0,
+        variant: null,
+        type: 'qp',
+        pdf_url,
+        mark_scheme_url: ms_url
+      }).select().single();
 
       if (dbError) throw dbError;
+
+      // Create Ingestion Job
+      if (pdf_url && insertedPaper) {
+        await supabase.from('ingestion_jobs').insert({
+          paper_id: insertedPaper.id,
+          mark_scheme_url: ms_url,
+          status: 'uploaded'
+        });
+      }
 
       onSuccess();
     } catch (error: any) {
@@ -130,123 +121,20 @@ export default function PaperFormModal({ onClose, onSuccess }: PaperFormModalPro
         <div className="flex-1 overflow-y-auto p-6">
           <form id="paperForm" onSubmit={handleSubmit} className="space-y-6">
             
-            <div className="grid grid-cols-2 gap-6">
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-text">Curriculum</label>
-                <select name="curriculum" value={formData.curriculum} onChange={handleChange} className="w-full bg-surface border border-border text-text rounded-2xl px-4 py-3 focus:outline-none focus:border-primary">
-                  <option value="ZIMSEC">ZIMSEC</option>
-                  <option value="Cambridge">Cambridge</option>
-                </select>
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-text">Grade Level</label>
-                <select name="grade_level" value={formData.grade_level} onChange={handleChange} className="w-full bg-surface border border-border text-text rounded-2xl px-4 py-3 focus:outline-none focus:border-primary">
-                  <option value="O-Level">O-Level</option>
-                  <option value="A-Level">A-Level</option>
-                  <option value="IGCSE">IGCSE</option>
-                  <option value="AS-Level">AS-Level</option>
-                </select>
-              </div>
-            </div>
-
             <div className="space-y-2">
-              <label className="text-sm font-medium text-text">Subject Name</label>
-              <input 
-                type="text" 
-                name="subject" 
-                required 
-                value={formData.subject} 
-                onChange={handleChange} 
-                placeholder="e.g. Physics, Mathematics"
-                className="w-full bg-surface border border-border text-text rounded-2xl px-4 py-3 focus:outline-none focus:border-primary"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-6">
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-text">Year</label>
-                <input 
-                  type="number" 
-                  name="year" 
-                  required 
-                  value={formData.year} 
-                  onChange={handleChange} 
-                  className="w-full bg-surface border border-border text-text rounded-2xl px-4 py-3 focus:outline-none focus:border-primary"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-text">Session</label>
-                <input 
-                  type="text" 
-                  name="session" 
-                  value={formData.session} 
-                  onChange={handleChange} 
-                  placeholder="e.g. June, November"
-                  className="w-full bg-surface border border-border text-text rounded-2xl px-4 py-3 focus:outline-none focus:border-primary"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-6">
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-text">Paper Number</label>
-                <input 
-                  type="number" 
-                  name="paper_number" 
-                  required 
-                  value={formData.paper_number} 
-                  onChange={handleChange} 
-                  className="w-full bg-surface border border-border text-text rounded-2xl px-4 py-3 focus:outline-none focus:border-primary"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-text">Variant (Optional)</label>
-                <input 
-                  type="text" 
-                  name="variant" 
-                  value={formData.variant} 
-                  onChange={handleChange} 
-                  placeholder="e.g. 2, 41"
-                  className="w-full bg-surface border border-border text-text rounded-2xl px-4 py-3 focus:outline-none focus:border-primary"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-text">Type</label>
-              <select 
-                name="type" 
-                value={formData.type} 
-                onChange={handleChange} 
-                className="w-full bg-surface border border-border text-text rounded-2xl px-4 py-3 focus:outline-none focus:border-primary"
-              >
-                <option value="qp">Question Paper (QP)</option>
-                <option value="ms">Marking Scheme (MS)</option>
-              </select>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-text">PDF Document (Optional)</label>
+              <label className="text-sm font-medium text-text">Question Paper Document (PDF)</label>
               <div 
-                className={`border-2 border-dashed rounded-2xl p-6 flex flex-col items-center justify-center transition-colors cursor-pointer relative ${
-                  isAnalyzing ? 'border-primary bg-primary/5' : 'border-border hover:border-primary hover:bg-primary/5'
-                }`}
-                onClick={() => !isAnalyzing && fileInputRef.current?.click()}
+                className={`border-2 border-dashed rounded-2xl p-6 flex flex-col items-center justify-center transition-colors cursor-pointer relative border-border hover:border-primary hover:bg-primary/5`}
+                onClick={() => fileInputRef.current?.click()}
               >
                 <input 
                   type="file" 
                   accept=".pdf" 
                   className="hidden" 
                   ref={fileInputRef}
-                  onChange={handleFileChange}
-                  disabled={isAnalyzing}
+                  onChange={(e) => handleFileChange(e, false)}
                 />
-                {isAnalyzing ? (
-                  <div className="flex flex-col items-center justify-center space-y-3 py-2">
-                     <span className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
-                     <p className="text-sm font-medium text-text">AI is reading document...</p>
-                  </div>
-                ) : pdfFile ? (
+                {pdfFile ? (
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
                       <FileIcon className="w-5 h-5 text-primary" />
@@ -259,8 +147,40 @@ export default function PaperFormModal({ onClose, onSuccess }: PaperFormModalPro
                 ) : (
                   <>
                     <UploadCloud className="w-8 h-8 text-textMuted mb-2" />
-                    <p className="text-sm font-medium text-text">Click to upload PDF</p>
+                    <p className="text-sm font-medium text-text">Click to upload Question Paper</p>
                     <p className="text-xs text-textMuted mt-1">PDF format only (Max 50MB)</p>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-text">Marking Scheme (Optional PDF)</label>
+              <div 
+                className={`border-2 border-dashed rounded-2xl p-6 flex flex-col items-center justify-center transition-colors cursor-pointer relative border-border hover:border-primary hover:bg-primary/5`}
+                onClick={() => msInputRef.current?.click()}
+              >
+                <input 
+                  type="file" 
+                  accept=".pdf" 
+                  className="hidden" 
+                  ref={msInputRef}
+                  onChange={(e) => handleFileChange(e, true)}
+                />
+                {msFile ? (
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                      <FileIcon className="w-5 h-5 text-primary" />
+                    </div>
+                    <div className="flex-1 truncate max-w-[200px]">
+                      <p className="text-sm font-medium text-text truncate">{msFile.name}</p>
+                      <p className="text-xs text-textMuted">{(msFile.size / 1024 / 1024).toFixed(2)} MB</p>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <UploadCloud className="w-8 h-8 text-textMuted mb-2" />
+                    <p className="text-sm font-medium text-text">Click to upload Marking Scheme</p>
                   </>
                 )}
               </div>

@@ -196,7 +196,13 @@ export default function ExploreCourses({ searchQuery = '' }: { searchQuery?: str
                 
                 <View style={styles.cardTextContainer}>
                   <Text style={styles.courseTitle} numberOfLines={1}>{course.title}</Text>
-                  <Text style={styles.courseMeta}>{course.board} • {course.level}</Text>
+                  {(course.board || course.level) && (
+                    <Text style={styles.courseMeta}>
+                      {course.board ? course.board : ''}
+                      {course.board && course.level ? ' • ' : ''}
+                      {course.level ? course.level : ''}
+                    </Text>
+                  )}
                   
                   <View style={styles.teacherRow}>
                     <Ionicons name="person-circle" size={18} color={colors.textSecondary} />

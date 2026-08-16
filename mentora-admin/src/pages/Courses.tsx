@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Filter, Plus, Edit, Trash2, Eye, BarChart2, UserPlus, BookOpen, ChevronDown, ChevronUp } from 'lucide-react';
+import { Search, Filter, Plus, Edit, Trash2, Eye, BarChart2, UserPlus, BookOpen, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
 import CourseAnalytics from '../components/CourseAnalytics';
 import CreateCourseWizard from '../components/CreateCourseWizard';
 import { supabase } from '../lib/supabase';
@@ -173,13 +173,26 @@ export default function Courses() {
                         )}
                         <div>
                           <span className="font-medium text-text">{course.title}</span>
-                          {course.syllabus_code && <span className="text-xs text-textMuted block mt-0.5">Code: {course.syllabus_code}</span>}
+                          
+                          {course.is_syncing ? (
+                            <div className="flex items-center space-x-2 mt-1.5 bg-primary/10 px-2 py-1 rounded-lg w-max border border-primary/20">
+                              <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
+                              <span className="text-xs font-medium text-primary">
+                                {course.sync_status || 'Extracting Syllabus...'} {course.sync_progress ? `${course.sync_progress}%` : ''}
+                              </span>
+                            </div>
+                          ) : (
+                            <div className="flex items-center flex-wrap gap-x-2 gap-y-1 text-xs text-textMuted mt-1">
+                              {course.board && <span className="bg-surface px-2 py-0.5 rounded border border-border font-medium">{course.board}</span>}
+                              {course.level && <span className="bg-surface px-2 py-0.5 rounded border border-border">{course.level}</span>}
+                              {course.syllabus_code && <span className="bg-surface px-2 py-0.5 rounded border border-border">Code: {course.syllabus_code}</span>}
+                            </div>
+                          )}
                         </div>
                       </div>
                     </td>
                     <td className="p-4 text-textMuted">
                       <span className="block text-text">{course.subject_category || 'N/A'}</span>
-                      <span className="text-xs">{course.board} • {course.level}</span>
                     </td>
                     <td className="p-4 text-textMuted">0</td>
                     <td className="p-4">
@@ -199,14 +212,7 @@ export default function Courses() {
                           title="View"
                         >
                           <Eye className="w-4 h-4" />
-                        </button>
-                        <button 
-                          onClick={() => alert('Edit Course functionality coming soon')}
-                          className="flex items-center space-x-1 p-2 text-textMuted hover:text-primary hover:bg-primary/10 rounded-xl transition-colors" 
-                          title="Edit"
-                        >
-                          <Edit className="w-4 h-4" />
-                          <span className="text-sm font-medium">Edit</span>
+                          <span className="text-sm font-medium">View</span>
                         </button>
                         <button 
                           onClick={() => setExpandedCourseId(expandedCourseId === course.id ? null : course.id)}

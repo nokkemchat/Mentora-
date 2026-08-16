@@ -63,10 +63,6 @@ export default function TopicDetailScreen() {
         .eq('id', id)
         .single();
 
-      if (!error && data) {
-        setSubtopic(data);
-      }
-
       // Fetch subtopic materials and user progress
       const { data: materialsData, error: matError } = await supabase
         .from('subtopic_materials')
@@ -76,9 +72,52 @@ export default function TopicDetailScreen() {
         `)
         .eq('subtopic_id', id);
 
+      let mergedMaterials: any[] = [];
       if (!matError && materialsData) {
-        setMaterials(materialsData);
+        mergedMaterials = [...materialsData];
       }
+
+      if (!error && data) {
+        let tmpl = data.workspace_template;
+        if (typeof tmpl === 'string') {
+          try { tmpl = JSON.parse(tmpl); } catch(e) { tmpl = {}; }
+        }
+        
+        if (tmpl) {
+          const contentArr = tmpl.content || [];
+          if (contentArr.length === 0 && tmpl.placeholders) {
+            Object.keys(tmpl.placeholders).forEach(key => {
+              const files = tmpl.placeholders[key];
+              if (Array.isArray(files)) {
+                files.forEach((f: any) => {
+                  contentArr.push({ ...f, type: key });
+                });
+              }
+            });
+          }
+          
+          contentArr.forEach((file: any) => {
+            let type = 'notes_pdf';
+            if (file.type === 'videos') type = 'video';
+            else if (file.type === 'past_papers') type = 'past_paper';
+            else if (['lesson_notes', 'presentations', 'pdf_resources', 'exercises', 'homework', 'teacher_notes', 'quiz'].includes(file.type)) type = 'notes_pdf';
+            
+            mergedMaterials.push({
+              id: file.url, 
+              subtopic_id: id,
+              type: type,
+              title: file.display_name || file.file_name || 'Document',
+              content_url: file.url,
+              estimated_minutes: file.size ? Math.max(5, Math.ceil(file.size / (1024 * 1024 * 2))) : 5,
+              user_material_progress: [],
+              is_workspace_content: true 
+            });
+          });
+        }
+        setSubtopic(data);
+      }
+
+      setMaterials(mergedMaterials);
 
       // Fetch questions count
       const { count: qCount, error: qError } = await supabase
@@ -162,6 +201,10 @@ export default function TopicDetailScreen() {
 
   const handleMarkComplete = async (materialId: string) => {
     if (!user) return;
+    
+    // Skip progress tracking for dynamically injected workspace files (they use URLs as IDs)
+    if (materialId.startsWith('http')) return;
+
     const success = await markMaterialComplete(user.id, materialId, subtopic.id);
     if (success) {
       fetchSubtopicData();
