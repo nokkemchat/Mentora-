@@ -588,26 +588,52 @@ export default function TopicDetailScreen() {
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: colors.background }]}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Manage Study Notes</Text>
+              <Text style={styles.modalTitle}>
+                {uploadType === 'video_picker' ? 'Upload Video Lesson' : uploadType === 'notes_picker' || uploadType === 'notes_text' ? 'Upload Study Notes' : 'Upload Material'}
+              </Text>
               <Pressable onPress={() => setModalVisible(false)}>
                 <Feather name="x" size={24} color={colors.text} />
               </Pressable>
             </View>
 
-            {(uploadType.endsWith('_picker') || uploadType === 'notes_text') && (
-              <View style={{ marginBottom: spacing.lg }}>
-                <Text style={{ color: colors.textSecondary, marginBottom: spacing.xs, fontSize: typography.sizes.sm }}>
-                  Estimated time to complete (minutes)
-                </Text>
+            {/* Allocated Study Time Input */}
+            <View style={{ marginBottom: spacing.xl }}>
+              <Text style={{ color: colors.text, fontWeight: '700', marginBottom: spacing.xs, fontSize: typography.sizes.sm }}>
+                Allocated Study Time (Minutes) <Text style={{ color: colors.error }}>*</Text>
+              </Text>
+              <Text style={{ color: colors.textSecondary, marginBottom: spacing.sm, fontSize: typography.sizes.xs }}>
+                Type the number of minutes allocated for studying this content:
+              </Text>
+              
+              <View style={{ 
+                flexDirection: 'row', 
+                alignItems: 'center', 
+                backgroundColor: colors.surface, 
+                borderWidth: 1.5, 
+                borderColor: colors.primary, 
+                borderRadius: borderRadius.md, 
+                paddingHorizontal: spacing.md 
+              }}>
+                <Feather name="clock" size={20} color={colors.primary} style={{ marginRight: spacing.sm }} />
                 <TextInput
-                  style={[styles.textArea, { color: colors.text, borderColor: colors.border, minHeight: 44, marginBottom: 0 }]}
-                  keyboardType="numeric"
+                  style={{ 
+                    flex: 1, 
+                    height: 50, 
+                    fontSize: typography.sizes.lg, 
+                    color: colors.text, 
+                    fontWeight: '700' 
+                  }}
+                  keyboardType="number-pad"
                   value={estimatedMinutes}
                   onChangeText={setEstimatedMinutes}
-                  placeholder="e.g. 15"
+                  placeholder="e.g. 30"
+                  placeholderTextColor={colors.textTertiary}
                 />
+                <Text style={{ color: colors.textSecondary, fontWeight: '600', fontSize: typography.sizes.sm }}>
+                  mins
+                </Text>
               </View>
-            )}
+            </View>
 
             {uploadType === 'notes_picker' && (
               <View style={{ gap: spacing.md }}>
@@ -639,7 +665,7 @@ export default function TopicDetailScreen() {
                   style={[styles.primaryButton, { backgroundColor: colors.primary }]}
                   onPress={() => handlePickFile('video', estimatedMinutes)}
                 >
-                  <Text style={styles.primaryButtonText}>Select Video File</Text>
+                  <Text style={styles.primaryButtonText}>Select Video File ({estimatedMinutes} mins)</Text>
                 </Pressable>
               </View>
             )}
@@ -656,7 +682,7 @@ export default function TopicDetailScreen() {
                   onChangeText={setNoteText}
                 />
                 <Pressable style={[styles.primaryButton, { backgroundColor: colors.primary }]} onPress={handleSaveTextNotes}>
-                  <Text style={styles.primaryButtonText}>Save Notes</Text>
+                  <Text style={styles.primaryButtonText}>Save Notes ({estimatedMinutes} mins)</Text>
                 </Pressable>
               </View>
             )}

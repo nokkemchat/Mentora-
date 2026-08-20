@@ -6,7 +6,7 @@ import {
   ArrowLeft, BookOpen, UploadCloud, ChevronDown, ChevronUp,
   Plus, X, FileText, Video, Monitor, FileArchive, PenLine, Home,
   HelpCircle, ClipboardList, ExternalLink, Trash2, Loader2,
-  ChevronUp as MoveUp, ChevronDown as MoveDown
+  ChevronUp as MoveUp, ChevronDown as MoveDown, Clock
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -18,6 +18,7 @@ interface ContentFile {
   uploaded_at: string;
   size?: number;
   type: string;           // key of CONTENT_TYPES (e.g. 'lesson_notes')
+  estimated_minutes?: number;
 }
 
 interface WorkspaceTemplate {
@@ -72,6 +73,7 @@ export default function CourseDetails() {
   const [selectedContentType, setSelectedContentType] = useState<typeof CONTENT_TYPES[0] | null>(null);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [contentDisplayName, setContentDisplayName] = useState('');
+  const [contentEstimatedMinutes, setContentEstimatedMinutes] = useState('15');
 
   const [deletingFile, setDeletingFile] = useState<string | null>(null);
   const [reordering, setReordering] = useState(false);
@@ -182,6 +184,7 @@ export default function CourseDetails() {
     setSelectedContentType(null);
     setPendingFile(null);
     setContentDisplayName('');
+    setContentEstimatedMinutes('15');
     setModalStep('type');
     setUploadModalOpen(true);
   };
@@ -192,6 +195,7 @@ export default function CourseDetails() {
     setSelectedContentType(null);
     setPendingFile(null);
     setContentDisplayName('');
+    setContentEstimatedMinutes('15');
     setModalStep('type');
     if (contentFileInputRef.current) contentFileInputRef.current.value = '';
   };
@@ -268,6 +272,8 @@ export default function CourseDetails() {
         });
       }
 
+      const estimatedMins = parseInt(contentEstimatedMinutes, 10) || 15;
+
       const newFile: ContentFile = {
         display_name: contentDisplayName.trim(),
         file_name: pendingFile.name,
@@ -275,6 +281,7 @@ export default function CourseDetails() {
         uploaded_at: new Date().toISOString(),
         size: pendingFile.size,
         type: selectedContentType.key,
+        estimated_minutes: estimatedMins,
       };
       
       // Use array spread to ensure React detects the change
@@ -283,6 +290,20 @@ export default function CourseDetails() {
       const { error: updateErr } = await supabase.from('subtopics')
         .update({ workspace_template: template }).eq('id', uploadModalSubtopicId);
       if (updateErr) throw updateErr;
+
+      // Also insert into subtopic_materials for mobile app table synchronization
+      let matType = selectedContentType.key;
+      if (matType === 'lesson_notes' || matType === 'teacher_notes' || matType === 'pdf_resources') matType = 'notes_pdf';
+      if (matType === 'videos') matType = 'video';
+      if (matType === 'exercises' || matType === 'homework') matType = 'past_paper';
+
+      await supabase.from('subtopic_materials').insert({
+        subtopic_id: uploadModalSubtopicId,
+        type: matType,
+        title: contentDisplayName.trim(),
+        content_url: fileUrl,
+        estimated_minutes: estimatedMins,
+      });
 
       // Optimistic local update
       updateSubtopicTemplate(uploadModalSubtopicId, template);
@@ -552,7 +573,9 @@ export default function CourseDetails() {
                                                   </div>
                                                   <div className="min-w-0 ml-1">
                                                     <p className="text-sm font-medium text-text truncate">{f.display_name}</p>
-                                                    <p className="text-xs text-textMuted truncate">{f.file_name}{f.size ? ` · ${formatFileSize(f.size)}` : ''}</p>
+                                                    <p className="text-xs text-textMuted truncate">
+                                                      {f.file_name}{f.size ? ` · ${formatFileSize(f.size)}` : ''}{f.estimated_minutes ? ` · ⏱️ ${f.estimated_minutes} mins` : ''}
+                                                    </p>
                                                   </div>
                                                 </div>
 
@@ -696,9 +719,31 @@ export default function CourseDetails() {
                     placeholder="e.g. Newton's Laws - Lesson Notes Part 1"
                     className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm text-text placeholder:text-textMuted focus:outline-none focus:border-primary transition-colors"
                     autoFocus
-                    onKeyDown={e => { if (e.key === 'Enter' && contentDisplayName.trim()) handleConfirmUpload(); }}
                   />
                   <p className="text-xs text-textMuted mt-1.5">This is the name students will see. Make it descriptive.</p>
+                </div>
+
+                {/* Allocated Study Time Input */}
+                <div>
+                  <label className="block text-sm font-semibold text-text mb-2 flex items-center gap-1.5">
+                    <Clock className="w-4 h-4 text-primary" />
+                    Allocated Study Time (Minutes) <span className="text-red-400">*</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      min="1"
+                      value={contentEstimatedMinutes}
+                      onChange={e => setContentEstimatedMinutes(e.target.value)}
+                      placeholder="e.g. 30"
+                      className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm text-text placeholder:text-textMuted focus:outline-none focus:border-primary transition-colors pr-16 font-semibold"
+                      onKeyDown={e => { if (e.key === 'Enter' && contentDisplayName.trim() && contentEstimatedMinutes) handleConfirmUpload(); }}
+                    />
+                    <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-semibold text-textMuted pointer-events-none">
+                      mins
+                    </span>
+                  </div>
+                  <p className="text-xs text-textMuted mt-1.5">Type the number of study minutes allocated for this content.</p>
                 </div>
 
                 {/* Actions */}

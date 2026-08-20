@@ -12,8 +12,11 @@ const FORM_OPTIONS = [
   'Form 2',
   'Form 3',
   'Form 4',
+  'IGCSE',
   'Lower 6',
   'Upper 6',
+  'A-Level',
+  'AS Level',
   'Grade 7',
   'Other',
 ];

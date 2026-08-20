@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { View, Text, StyleSheet, TextInput, Pressable, Alert, Platform } from 'react-native';
+import { View, Text, StyleSheet, TextInput, Pressable, Alert, Platform, ScrollView, KeyboardAvoidingView } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { spacing, typography, borderRadius, useThemeColors } from '@/constants/theme';
@@ -91,96 +91,116 @@ export default function AuthScreen() {
   }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Pressable onPress={() => router.back()} style={styles.backButton}>
-          <Feather name="arrow-left" size={24} color={colors.text} />
-        </Pressable>
-        <Text style={styles.title}>{isLogin ? 'Welcome Back' : 'Create Account'}</Text>
-        <Text style={styles.subtitle}>
-          {isLogin ? 'Sign in to continue to Mentora.' : 'Join Mentora to start learning.'}
-        </Text>
-      </View>
-
-      <View style={styles.form}>
-        <View style={styles.inputContainer}>
-          <Text style={styles.label}>Email Address</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="you@example.com"
-            placeholderTextColor={colors.textTertiary}
-            value={email}
-            onChangeText={setEmail}
-            autoCapitalize="none"
-            keyboardType="email-address"
-          />
-        </View>
-
-        <View style={styles.inputContainer}>
-          <Text style={styles.label}>Password</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="••••••••"
-            placeholderTextColor={colors.textTertiary}
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-          />
-        </View>
-
-        <Pressable 
-          style={[styles.primaryButton, loading && styles.buttonDisabled]} 
-          onPress={isLogin ? signInWithEmail : signUpWithEmail}
-          disabled={loading}
+    <View style={styles.safeContainer}>
+      <KeyboardAvoidingView
+        style={styles.flexOne}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+      >
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          bounces={true}
+          overScrollMode="always"
         >
-          <Text style={styles.primaryButtonText}>
-            {loading ? 'Please wait...' : isLogin ? 'Sign In' : 'Create Account'}
-          </Text>
-        </Pressable>
+          <View style={styles.header}>
+            <Pressable onPress={() => router.back()} style={styles.backButton}>
+              <Feather name="arrow-left" size={24} color={colors.text} />
+            </Pressable>
+            <Text style={styles.title}>{isLogin ? 'Welcome Back' : 'Create Account'}</Text>
+            <Text style={styles.subtitle}>
+              {isLogin ? 'Sign in to continue to Mentora.' : 'Join Mentora to start learning.'}
+            </Text>
+          </View>
 
-        <View style={styles.dividerContainer}>
-          <View style={styles.dividerLine} />
-          <Text style={styles.dividerText}>OR</Text>
-          <View style={styles.dividerLine} />
-        </View>
+          <View style={styles.form}>
+            <View style={styles.inputContainer}>
+              <Text style={styles.label}>Email Address</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="you@example.com"
+                placeholderTextColor={colors.textTertiary}
+                value={email}
+                onChangeText={setEmail}
+                autoCapitalize="none"
+                keyboardType="email-address"
+              />
+            </View>
 
-        <View style={styles.socialButtonsContainer}>
-          <Pressable 
-            style={[styles.socialButton, loading && styles.buttonDisabled]} 
-            onPress={() => performOAuth('google')}
-            disabled={loading}
-          >
-            <FontAwesome5 name="google" size={20} color={colors.text} />
-            <Text style={styles.socialButtonText}>Continue with Google</Text>
-          </Pressable>
-          
-          {Platform.OS === 'ios' && (
+            <View style={styles.inputContainer}>
+              <Text style={styles.label}>Password</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="••••••••"
+                placeholderTextColor={colors.textTertiary}
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry
+              />
+            </View>
+
             <Pressable 
-              style={[styles.socialButton, loading && styles.buttonDisabled]} 
-              onPress={() => performOAuth('apple')}
+              style={[styles.primaryButton, loading && styles.buttonDisabled]} 
+              onPress={isLogin ? signInWithEmail : signUpWithEmail}
               disabled={loading}
             >
-              <FontAwesome5 name="apple" size={22} color={colors.text} />
-              <Text style={styles.socialButtonText}>Continue with Apple</Text>
+              <Text style={styles.primaryButtonText}>
+                {loading ? 'Please wait...' : isLogin ? 'Sign In' : 'Create Account'}
+              </Text>
             </Pressable>
-          )}
-        </View>
 
-        <Pressable style={styles.switchModeButton} onPress={() => setIsLogin(!isLogin)}>
-          <Text style={styles.switchModeText}>
-            {isLogin ? "Don't have an account? Sign up" : "Already have an account? Sign in"}
-          </Text>
-        </Pressable>
-      </View>
+            <View style={styles.dividerContainer}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>OR</Text>
+              <View style={styles.dividerLine} />
+            </View>
+
+            <View style={styles.socialButtonsContainer}>
+              <Pressable 
+                style={[styles.socialButton, loading && styles.buttonDisabled]} 
+                onPress={() => performOAuth('google')}
+                disabled={loading}
+              >
+                <FontAwesome5 name="google" size={20} color={colors.text} />
+                <Text style={styles.socialButtonText}>Continue with Google</Text>
+              </Pressable>
+              
+              {Platform.OS === 'ios' && (
+                <Pressable 
+                  style={[styles.socialButton, loading && styles.buttonDisabled]} 
+                  onPress={() => performOAuth('apple')}
+                  disabled={loading}
+                >
+                  <FontAwesome5 name="apple" size={22} color={colors.text} />
+                  <Text style={styles.socialButtonText}>Continue with Apple</Text>
+                </Pressable>
+              )}
+            </View>
+
+            <Pressable style={styles.switchModeButton} onPress={() => setIsLogin(!isLogin)}>
+              <Text style={styles.switchModeText}>
+                {isLogin ? "Don't have an account? Sign up" : "Already have an account? Sign in"}
+              </Text>
+            </Pressable>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 }
 
 const createStyles = (colors: any) => StyleSheet.create({
-  container: {
+  safeContainer: {
     flex: 1,
     backgroundColor: colors.background,
-    padding: spacing.xl,
+  },
+  flexOne: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: spacing.xl,
+    paddingBottom: 60,
   },
   header: {
     marginTop: spacing.xxxl,
@@ -200,7 +220,7 @@ const createStyles = (colors: any) => StyleSheet.create({
     color: colors.textSecondary,
   },
   form: {
-    flex: 1,
+    paddingBottom: spacing.xxl,
   },
   inputContainer: {
     marginBottom: spacing.lg,
@@ -282,3 +302,4 @@ const createStyles = (colors: any) => StyleSheet.create({
     fontWeight: typography.weights.medium,
   },
 });
+

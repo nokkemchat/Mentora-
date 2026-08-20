@@ -4,10 +4,7 @@ import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withSpring,
-  withTiming,
-  useDerivedValue,
   interpolate,
-  interpolateColor,
   Extrapolation,
 } from 'react-native-reanimated';
 import { BlurView } from 'expo-blur';
@@ -17,26 +14,25 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '@/context/ThemeContext';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const BAR_WIDTH = Math.min(SCREEN_WIDTH - 40, 390);
+const BAR_WIDTH = Math.min(SCREEN_WIDTH - 32, 380);
 const TAB_COUNT = 4;
 const ITEM_WIDTH = BAR_WIDTH / TAB_COUNT;
-const PILL_WIDTH = ITEM_WIDTH - 24; // Generous padding inside
-const PILL_HEIGHT = 56;
-const BAR_HEIGHT = 72;
+const PILL_WIDTH = ITEM_WIDTH - 10;
+const PILL_HEIGHT = 52;
+const BAR_HEIGHT = 68;
 
-// The physics requested by the user
 const SPRING_CONFIG = {
-  stiffness: 380,
-  damping: 30,
-  mass: 0.9,
+  stiffness: 340,
+  damping: 28,
+  mass: 0.8,
   overshootClamping: false,
 };
 
 const TABS = [
-  { name: 'index',      label: 'Explore', activeIcon: 'compass',           inactiveIcon: 'compass-outline' },
-  { name: 'my-classes', label: 'Classes', activeIcon: 'library',           inactiveIcon: 'library-outline' },
-  { name: 'rooms',      label: 'Rooms',   activeIcon: 'chatbubbles',       inactiveIcon: 'chatbubbles-outline' },
-  { name: 'profile',    label: 'Profile', activeIcon: 'person-circle',     inactiveIcon: 'person-circle-outline' },
+  { name: 'index',      label: 'Explore', activeIcon: 'compass',       inactiveIcon: 'compass-outline' },
+  { name: 'my-classes', label: 'Classes', activeIcon: 'book',          inactiveIcon: 'book-outline' },
+  { name: 'rooms',      label: 'Rooms',   activeIcon: 'chatbubbles',   inactiveIcon: 'chatbubbles-outline' },
+  { name: 'profile',    label: 'Profile', activeIcon: 'person',        inactiveIcon: 'person-outline' },
 ] as const;
 
 type TabItemProps = {
@@ -48,56 +44,67 @@ type TabItemProps = {
 };
 
 function TabItem({ tab, isActive, onPress, themeColors, isDark }: TabItemProps) {
-  // Shared values for transitions
   const activeProgress = useSharedValue(isActive ? 1 : 0);
+  const pressScale = useSharedValue(1);
 
   useEffect(() => {
     activeProgress.value = withSpring(isActive ? 1 : 0, SPRING_CONFIG);
   }, [isActive]);
 
-  // Active Icon color depends on theme
-  // Made monochrome (colorless) for maximum readability as requested
-  const activeIconColor = isDark ? '#FFFFFF' : '#1C1C1E';
-  const inactiveIconColor = isDark ? '#A1A1AA' : '#71717A';
+  const activeColor = themeColors.primary;
+  const inactiveColor = isDark ? 'rgba(148, 163, 184, 0.7)' : 'rgba(100, 116, 139, 0.8)';
 
   const iconAnimStyle = useAnimatedStyle(() => {
     const scale = interpolate(activeProgress.value, [0, 1], [1, 1.15], Extrapolation.CLAMP);
+    const translateY = interpolate(activeProgress.value, [0, 1], [0, -2], Extrapolation.CLAMP);
     
     return {
       transform: [
-        { scale }
+        { scale: scale * pressScale.value },
+        { translateY },
       ],
     };
   });
 
   const labelAnimStyle = useAnimatedStyle(() => {
-    const translateY = interpolate(activeProgress.value, [0, 1], [10, 0], Extrapolation.CLAMP);
-    const opacity = interpolate(activeProgress.value, [0, 1], [0, 1], Extrapolation.CLAMP);
+    const scale = interpolate(activeProgress.value, [0, 1], [0.95, 1.05], Extrapolation.CLAMP);
+    const opacity = interpolate(activeProgress.value, [0, 1], [0.65, 1], Extrapolation.CLAMP);
     
     return {
       opacity,
-      transform: [{ translateY }],
+      transform: [{ scale }],
     };
   });
 
-  // Ionicons doesn't have strokeWidth, we just rely on the bold filled variant
   const iconName = isActive ? tab.activeIcon : tab.inactiveIcon;
 
   return (
     <Pressable
       style={styles.tabItem}
       onPress={onPress}
+      onPressIn={() => {
+        pressScale.value = withSpring(0.9, { stiffness: 400, damping: 25 });
+      }}
+      onPressOut={() => {
+        pressScale.value = withSpring(1, SPRING_CONFIG);
+      }}
       accessibilityRole="tab"
       accessibilityState={{ selected: isActive }}
     >
-      <Animated.View style={[styles.iconWrapper, iconAnimStyle]}>
+      <Animated.View style={[styles.tabContent, iconAnimStyle]}>
         <Ionicons
           name={iconName as any}
-          size={24}
-          color={isActive ? activeIconColor : inactiveIconColor}
+          size={22}
+          color={isActive ? activeColor : inactiveColor}
         />
-        <Animated.View style={[styles.labelContainer, labelAnimStyle]}>
-          <Text style={[styles.label, { color: isActive ? activeIconColor : inactiveIconColor }]}>
+        <Animated.View style={labelAnimStyle}>
+          <Text style={[
+            styles.label, 
+            { 
+              color: isActive ? activeColor : inactiveColor,
+              fontWeight: isActive ? '700' : '500',
+            }
+          ]}>
             {tab.label}
           </Text>
         </Animated.View>
@@ -113,9 +120,6 @@ export function MentoraTabBar({ state, navigation }: any) {
   const pillX = useSharedValue(
     activeIndex * ITEM_WIDTH + (ITEM_WIDTH - PILL_WIDTH) / 2
   );
-  
-  // To calculate the stretch based on velocity
-  const prevX = useSharedValue(pillX.value);
 
   useEffect(() => {
     const target = activeIndex * ITEM_WIDTH + (ITEM_WIDTH - PILL_WIDTH) / 2;
@@ -123,70 +127,58 @@ export function MentoraTabBar({ state, navigation }: any) {
   }, [activeIndex]);
 
   const pillAnimStyle = useAnimatedStyle(() => {
-    // Calculate pseudo-velocity (distance moved per frame)
-    const diff = Math.abs(pillX.value - prevX.value);
-    prevX.value = pillX.value;
-    
-    // Stretch horizontally based on speed, max 30% stretch
-    const scaleX = 1 + Math.min(diff / 25, 0.3);
-    
-    // Compress vertically slightly based on speed
-    const scaleY = 1 - Math.min(diff / 100, 0.1);
-
     return {
-      transform: [
-        { translateX: pillX.value },
-        { scaleX },
-        { scaleY },
-      ],
+      transform: [{ translateX: pillX.value }],
     };
   });
 
-  // Make the background translucent to let the blur show through
-  const barBgColor = isDark ? 'rgba(28, 28, 30, 0.65)' : 'rgba(255, 255, 255, 0.75)';
-  const barBorderColor = isDark ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.08)';
+  const barBgColor = isDark ? 'rgba(15, 23, 42, 0.85)' : 'rgba(255, 255, 255, 0.85)';
+  const barBorderColor = isDark ? 'rgba(51, 65, 85, 0.5)' : 'rgba(226, 232, 240, 0.8)';
   
-  // Indicator color: Light = Navy (#1E3A8A), Dark = Gold (#FBBF24)
-  const indicatorColor = isDark ? colors.accent : colors.primary;
+  const pillGradient = isDark
+    ? ['#818CF838', '#4F46E51E']
+    : ['#EEF2FF', '#E0E7FF'];
 
-  // Shadow styles based on theme
+  const pillBorderColor = isDark
+    ? 'rgba(129, 140, 248, 0.35)'
+    : '#C7D2FE';
+
   const shadowStyle = isDark
     ? {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.2,
-        shadowRadius: 8,
-        elevation: 8,
+        shadowColor: '#000000',
+        shadowOffset: { width: 0, height: 12 },
+        shadowOpacity: 0.45,
+        shadowRadius: 18,
+        elevation: 12,
       }
     : {
-        shadowColor: '#64748B',
-        shadowOffset: { width: 0, height: 12 },
-        shadowOpacity: 0.15,
-        shadowRadius: 24,
-        elevation: 12,
+        shadowColor: '#4F46E5',
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.12,
+        shadowRadius: 20,
+        elevation: 10,
       };
 
   return (
     <View style={[styles.outerContainer, shadowStyle]} pointerEvents="box-none">
       <BlurView
-        intensity={isDark ? 50 : 80}
+        intensity={isDark ? 45 : 75}
         tint={isDark ? 'dark' : 'light'}
         style={[
           styles.barContainer,
           { backgroundColor: barBgColor, borderColor: barBorderColor },
         ]}
       >
-        {/* Continuous Active Indicator (Water Bubble / Liquid Glass) */}
+        {/* Animated Active Tab Capsule */}
         <Animated.View style={[styles.activePillContainer, pillAnimStyle]}>
-          <View style={[styles.activePill, { backgroundColor: 'transparent' }]}>
-            {/* Glass Curvature Gradient */}
+          <View style={[styles.activePill, { borderColor: pillBorderColor }]}>
             <LinearGradient
-              colors={['rgba(255, 255, 255, 0.45)', 'rgba(255, 255, 255, 0.05)', 'rgba(255, 255, 255, 0.25)']}
-              locations={[0, 0.5, 1]}
-              start={{ x: 0.2, y: 0.1 }}
-              end={{ x: 0.8, y: 0.9 }}
+              colors={pillGradient as [string, string]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
               style={StyleSheet.absoluteFillObject}
             />
+            <View style={[styles.topGlowDot, { backgroundColor: colors.primary }]} />
           </View>
         </Animated.View>
 
@@ -225,15 +217,15 @@ export function MentoraTabBar({ state, navigation }: any) {
 const styles = StyleSheet.create({
   outerContainer: {
     position: 'absolute',
-    bottom: Platform.OS === 'ios' ? 36 : 24,
+    bottom: Platform.OS === 'ios' ? 28 : 20,
     alignSelf: 'center',
     width: BAR_WIDTH,
   },
   barContainer: {
     width: '100%',
     height: BAR_HEIGHT,
-    borderRadius: 9999, // Perfect pill shape
-    borderWidth: 1,
+    borderRadius: 34,
+    borderWidth: 1.5,
     flexDirection: 'row',
     alignItems: 'center',
     overflow: 'hidden',
@@ -247,35 +239,17 @@ const styles = StyleSheet.create({
   activePill: {
     width: '100%',
     height: '100%',
-    borderRadius: 9999,
-    borderWidth: 1.5,
-    borderColor: 'rgba(255, 255, 255, 0.5)',
+    borderRadius: 26,
+    borderWidth: 1,
     overflow: 'hidden',
-    shadowColor: '#FFFFFF',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.4,
-    shadowRadius: 10,
-    elevation: 5,
+    alignItems: 'center',
   },
-  bubbleSpecular: {
+  topGlowDot: {
     position: 'absolute',
-    top: 6,
-    left: 12,
-    width: 20,
-    height: 10,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    transform: [{ rotate: '-25deg' }],
-  },
-  bubbleBottomGlow: {
-    position: 'absolute',
-    bottom: -8,
-    left: 8,
-    right: 8,
-    height: 18,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255, 255, 255, 0.4)',
-    transform: [{ scaleY: 0.6 }],
+    top: 3,
+    width: 14,
+    height: 3,
+    borderRadius: 2,
   },
   tabsRow: {
     flex: 1,
@@ -288,19 +262,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  iconWrapper: {
+  tabContent: {
     alignItems: 'center',
     justifyContent: 'center',
-    height: '100%',
-  },
-  labelContainer: {
-    position: 'absolute',
-    bottom: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
+    gap: 3,
   },
   label: {
-    fontSize: 10,
-    fontFamily: 'Outfit_600SemiBold',
+    fontSize: 11,
   },
 });
+

@@ -30,6 +30,49 @@ type CourseType = {
   topics: { id: string }[];
 };
 
+function getEquivalentLevels(grade?: string): string[] {
+  if (!grade) return [];
+  const g = grade.trim().toLowerCase();
+
+  // IGCSE / O-Level Tier (Form 3, Form 4, IGCSE, O-Level, GCSE)
+  if (['form 3', 'form 4', 'igcse', 'o-level', 'o level', 'gcse'].includes(g)) {
+    return [
+      'Form 3', 'Form 4', 'form 3', 'form 4',
+      'IGCSE', 'igcse', 'Igcse',
+      'O-Level', 'O Level', 'o-level', 'o level', 'O-level', 'O level',
+      'IGCSE / O-Level', 'O-Level / IGCSE', 'GCSE', 'gcse'
+    ];
+  }
+
+  // A-Level Tier (Lower 6, Upper 6, A-Level, A Level, AS Level, A2)
+  if (['lower 6', 'upper 6', 'a-level', 'a level', 'as level', 'as-level', 'a2', 'a2 level', 'as & a level'].includes(g)) {
+    return [
+      'Lower 6', 'Upper 6', 'lower 6', 'upper 6',
+      'A-Level', 'A Level', 'a-level', 'a level', 'A-level', 'A level',
+      'AS Level', 'AS-Level', 'as level', 'as-level',
+      'A2', 'A2 Level', 'a2 level',
+      'AS & A Level', 'A-Level / AS Level', 'A Level / AS Level'
+    ];
+  }
+
+  // Lower Secondary / Form 1 & 2 / Checkpoint Tier
+  if (['form 1', 'form 2', 'checkpoint', 'lower secondary'].includes(g)) {
+    return [
+      'Form 1', 'Form 2', 'form 1', 'form 2',
+      'Checkpoint', 'checkpoint',
+      'Lower Secondary', 'lower secondary',
+      'Form 1 & 2', 'Form 1-2'
+    ];
+  }
+
+  // Grade 7 / Primary Tier
+  if (['grade 7', 'primary'].includes(g)) {
+    return ['Grade 7', 'Primary', 'grade 7', 'primary'];
+  }
+
+  return [grade];
+}
+
 export default function ExploreCourses({ searchQuery = '' }: { searchQuery?: string }) {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -76,17 +119,19 @@ export default function ExploreCourses({ searchQuery = '' }: { searchQuery?: str
         const board = user.user_metadata?.board;
 
         if (grade) {
-          if (['Form 3', 'Form 4'].includes(grade)) {
-            query = query.in('level', [grade, 'O-Level', 'O Level']);
-          } else if (['Lower 6', 'Upper 6'].includes(grade)) {
-            query = query.in('level', [grade, 'A-Level', 'A Level']);
-          } else {
-            query = query.eq('level', grade);
+          const matchingLevels = getEquivalentLevels(grade);
+          if (matchingLevels.length > 0) {
+            query = query.in('level', matchingLevels);
           }
         }
 
         if (board) {
-          query = query.ilike('board', board);
+          const b = board.trim().toLowerCase();
+          if (b.includes('cambridge') || b.includes('cie')) {
+            query = query.or('board.ilike.%cambridge%,board.ilike.%cie%');
+          } else {
+            query = query.ilike('board', `%${board}%`);
+          }
         }
       }
 

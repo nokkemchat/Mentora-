@@ -38,6 +38,18 @@ const DIFFICULTY_COLORS: Record<string, string> = {
   'Hard': '#EF4444'
 };
 
+function formatStudyTime(totalMinutes: number, fallbackTime?: string): string {
+  if (!totalMinutes || totalMinutes <= 0) {
+    return fallbackTime || '15 mins';
+  }
+  const hours = Math.floor(totalMinutes / 60);
+  const mins = totalMinutes % 60;
+  if (hours > 0) {
+    return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+  }
+  return `${mins} mins`;
+}
+
 export default function CourseDetailScreen() {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -80,23 +92,7 @@ export default function CourseDetailScreen() {
       }
     }
 
-    // Check subscription (TEMPORARILY BYPASSED FOR TESTING)
     setHasSubscription(true);
-    /*
-    if (user?.user_metadata?.role !== 'teacher') {
-      const { data: subData } = await supabase
-        .from('subscriptions')
-        .select('*')
-        .eq('course_id', id)
-        .eq('user_id', user?.id)
-        .eq('status', 'active')
-        .single();
-      
-      setHasSubscription(!!subData);
-    } else {
-      setHasSubscription(true); // Teachers have access to everything
-    }
-    */
 
     // Fetch teachers who teach this subject
     if (data?.title) {
@@ -150,15 +146,12 @@ export default function CourseDetailScreen() {
       let fileBody: any;
       
       if (Platform.OS === 'web') {
-        // On web, the actual file object is available in asset.file
         fileBody = asset.file;
         if (!fileBody) {
-            // Fallback for web if file object is somehow missing
             const response = await fetch(asset.uri);
             fileBody = await response.blob();
         }
       } else {
-        // On mobile, read the file into base64 and decode to ArrayBuffer
         const base64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: 'base64' });
         fileBody = decode(base64);
       }
@@ -189,7 +182,6 @@ export default function CourseDetailScreen() {
       });
 
       if (processError) {
-        // processError is usually a FunctionsHttpError, which contains the raw response context
         let errorMessage = processError.message;
         try {
           if (processError.context && typeof processError.context.json === 'function') {
@@ -198,9 +190,7 @@ export default function CourseDetailScreen() {
                errorMessage = errJson.error;
              }
           }
-        } catch (e) {
-          // fallback to default message
-        }
+        } catch (e) {}
         throw new Error(`AI Processing Failed: ${errorMessage}`);
       } 
       
@@ -245,6 +235,10 @@ export default function CourseDetailScreen() {
     setExpandedTopicId(prev => prev === topicId ? null : topicId);
   };
 
+  const safeColor = (course?.color && typeof course.color === 'string' && course.color.startsWith('#'))
+    ? course.color.slice(0, 7)
+    : colors.primary;
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Pressable onPress={() => router.back()} style={styles.backNav}>
@@ -252,7 +246,7 @@ export default function CourseDetailScreen() {
       </Pressable>
 
       <LinearGradient 
-        colors={[`${course.color}20`, `${course.color}05`, colors.background]} 
+        colors={[`${safeColor}20`, `${safeColor}05`, colors.background || '#FFFFFF']} 
         style={styles.headerGradient}
       >
         <View style={[styles.iconContainerSm, { backgroundColor: course.color }]}>
@@ -274,7 +268,7 @@ export default function CourseDetailScreen() {
         
         {user?.user_metadata?.role === 'teacher' && (
           <Pressable 
-            style={styles.backButton}
+            style={[styles.backButton, { paddingHorizontal: spacing.xl, backgroundColor: colors.primary }, uploadingSyllabus && { opacity: 0.7 }]} 
             onPress={handleUploadSyllabus}
             disabled={uploadingSyllabus}
           >
@@ -282,40 +276,33 @@ export default function CourseDetailScreen() {
               <ActivityIndicator color={colors.background} size="small" />
             ) : (
               <Text style={styles.backButtonText}>
-                {course.syllabus_url ? 'Replace Syllabus' : 'Upload Syllabus (PDF)'}
+                {course.syllabus_url ? 'Re-Upload & Re-Scan Syllabus' : 'Upload Syllabus (PDF)'}
               </Text>
             )}
           </Pressable>
         )}
       </View>
 
-      {/* Teachers who teach this subject */}
-      {teachers.length > 0 && user?.user_metadata?.role !== 'teacher' && (
-        <View style={styles.teachersSection}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.md }}>
-            <Ionicons name="school" size={20} color={colors.primary} />
-            <Text style={styles.sectionTitle}>Educators</Text>
-          </View>
-          {teachers.map((teacher) => (
-            <Pressable
-              key={teacher.id}
-              style={styles.teacherRow}
-              onPress={() => router.push(`/teacher/${teacher.id}`)}
+      {/* Teachers Section */}
+      {teachers.length > 0 && (
+        <View style={{ marginBottom: spacing.xxl }}>
+          <Text style={styles.sectionTitle}>Educators Teaching This Course</Text>
+          {teachers.map((t) => (
+            <Pressable 
+              key={t.id} 
+              style={[styles.backButton, { width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-start', padding: spacing.md, marginBottom: spacing.sm, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}
+              onPress={() => router.push(`/teacher/${t.id}`)}
             >
-              {teacher.avatar_url ? (
-                <Image source={{ uri: teacher.avatar_url }} style={styles.teacherAvatar} />
-              ) : (
-                <View style={styles.teacherAvatarFallback}>
-                  <Ionicons name="person" size={20} color={colors.primary} />
-                </View>
-              )}
+              <Ionicons name="person-circle" size={36} color={colors.primary} style={{ marginRight: spacing.md }} />
               <View style={{ flex: 1 }}>
-                <Text style={styles.teacherName}>{teacher.first_name} {teacher.last_name}</Text>
-                {teacher.school && (
-                  <Text style={styles.teacherSchool}>{teacher.school}</Text>
+                <Text style={[styles.backButtonText, { color: colors.text, fontSize: typography.sizes.md, textAlign: 'left' }]}>
+                  {t.first_name} {t.last_name}
+                </Text>
+                {t.school && (
+                  <Text style={{ fontSize: typography.sizes.xs, color: colors.textSecondary }}>{t.school}</Text>
                 )}
               </View>
-              <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
+              <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
             </Pressable>
           ))}
         </View>
@@ -323,15 +310,12 @@ export default function CourseDetailScreen() {
 
       {/* Past Papers Section */}
       {pastPapers.length > 0 && (
-        <View style={styles.teachersSection}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.md }}>
-            <MaterialCommunityIcons name="book-open-variant" size={20} color={colors.primary} />
-            <Text style={styles.sectionTitle}>Past Papers</Text>
-          </View>
+        <View style={{ marginBottom: spacing.xxl }}>
+          <Text style={styles.sectionTitle}>Past Exam Papers</Text>
           {pastPapers.map((paper) => (
-            <Pressable
-              key={paper.id}
-              style={styles.teacherRow}
+            <Pressable 
+              key={paper.id} 
+              style={[styles.backButton, { width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-start', padding: spacing.md, marginBottom: spacing.sm, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}
               onPress={() => {
                 if (paper.pdf_url) {
                   WebBrowser.openBrowserAsync(paper.pdf_url);
@@ -340,9 +324,7 @@ export default function CourseDetailScreen() {
                 }
               }}
             >
-              <View style={styles.teacherAvatarFallback}>
-                <Feather name="file-text" size={20} color={colors.primary} />
-              </View>
+              <Ionicons name="document-text" size={32} color={colors.secondary} style={{ marginRight: spacing.md }} />
               <View style={{ flex: 1 }}>
                 <Text style={styles.teacherName}>{paper.title || `${paper.subject} Paper ${paper.paper_number || ''}`}</Text>
                 <Text style={styles.teacherSchool}>{paper.year} • {paper.level} • {paper.curriculum}</Text>
@@ -377,10 +359,17 @@ export default function CourseDetailScreen() {
           const isExpanded = expandedTopicId === topic.id;
           const totalSubtopics = topic.subtopics?.length || 0;
           
-          // Calculate mastered count based on user_progress
           const masteredCount = topic.subtopics?.filter((st: any) => 
             st.user_progress?.[0]?.status === 'Mastered'
           ).length || 0;
+
+          // Calculate Total Topic Study Minutes
+          const topicTotalMins = (topic.subtopics || []).reduce((topicAcc: number, st: any) => {
+            const stMins = (st.subtopic_materials || []).reduce((mAcc: number, m: any) => mAcc + (m.estimated_minutes || 0), 0) + ((st.questions || []).length > 0 ? (st.estimated_quiz_minutes || 15) : 0);
+            return topicAcc + stMins;
+          }, 0);
+
+          const topicTimeStr = formatStudyTime(topicTotalMins);
 
           return (
             <View key={topic.id} style={styles.topicCard}>
@@ -392,9 +381,18 @@ export default function CourseDetailScreen() {
                   <Text style={styles.topicIndex}>{index + 1}</Text>
                   <View style={styles.topicInfo}>
                     <Text style={styles.topicTitle}>{topic.title}</Text>
-                    <Text style={styles.topicSubtitle}>
-                      {masteredCount}/{totalSubtopics} Mastered
-                    </Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                      <Text style={styles.topicSubtitle}>
+                        {masteredCount}/{totalSubtopics} Mastered
+                      </Text>
+                      <Text style={{ color: colors.textTertiary, fontSize: typography.sizes.xs }}>•</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                        <Feather name="clock" size={11} color={colors.primary} />
+                        <Text style={{ color: colors.primary, fontSize: typography.sizes.xs, fontWeight: '600' }}>
+                          {topicTimeStr} total
+                        </Text>
+                      </View>
+                    </View>
                   </View>
                 </View>
                 <Feather 
@@ -411,7 +409,7 @@ export default function CourseDetailScreen() {
                     .map((subtopic: any) => {
                     const status = subtopic.user_progress?.[0]?.status || 'Not Started';
                     const totalMins = (subtopic.subtopic_materials || []).reduce((acc: number, m: any) => acc + (m.estimated_minutes || 0), 0) + ((subtopic.questions || []).length > 0 ? (subtopic.estimated_quiz_minutes || 15) : 0);
-                    const subtopicTimeStr = totalMins > 0 ? `${totalMins} mins` : subtopic.estimated_time;
+                    const subtopicTimeStr = formatStudyTime(totalMins, subtopic.estimated_time);
                     
                     return (
                       <Pressable

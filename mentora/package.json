@@ -59,7 +59,7 @@
   "scripts": {
     "start": "cross-env EXPO_NO_DOCTOR=1 expo start --lan",
     "start:clean": "cross-env EXPO_NO_DOCTOR=1 expo start -c --lan",
-    "start:force-lan": "cross-env REACT_NATIVE_PACKAGER_HOSTNAME=192.168.1.41 EXPO_NO_DOCTOR=1 expo start -c",
+    "start:force-lan": "cross-env REACT_NATIVE_PACKAGER_HOSTNAME=10.81.28.79 EXPO_NO_DOCTOR=1 expo start -c",
     "tunnel": "cross-env EXPO_NO_DOCTOR=1 expo start --tunnel",
     "tunnel:clean": "cross-env EXPO_NO_DOCTOR=1 expo start -c --tunnel",
     "reset-project": "node ./scripts/reset-project.js",
