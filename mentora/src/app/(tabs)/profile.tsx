@@ -2,14 +2,11 @@ import React, { useMemo, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Pressable, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { LinearGradient } from 'expo-linear-gradient';
-import { BlurView } from 'expo-blur';
 import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { spacing, typography, borderRadius, useThemeColors } from '@/constants/theme';
 import { useAppTheme } from '@/context/ThemeContext';
 import { Feather } from '@expo/vector-icons';
-import { GlobalWatermark } from '@/components/GlobalWatermark';
 
 type ProfileType = {
   first_name: string | null;
@@ -20,9 +17,9 @@ type ProfileType = {
 };
 
 export default function ProfileScreen() {
-  const { themePreference, setThemePreference } = useAppTheme();
+  const { themePreference, setThemePreference, isDark } = useAppTheme();
   const colors = useThemeColors();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createStyles(colors, isDark), [colors, isDark]);
 
   const { user } = useAuth();
   const router = useRouter();
@@ -31,18 +28,30 @@ export default function ProfileScreen() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    async function fetchProfile() {
-      if (!user) return;
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('first_name, last_name, school, grade, role')
-        .eq('id', user.id)
-        .single();
-        
-      if (data && !error) {
-        setProfile(data);
-      }
+    if (!user) {
       setLoading(false);
+      return;
+    }
+
+    const failsafe = setTimeout(() => setLoading(false), 1500);
+
+    async function fetchProfile() {
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('first_name, last_name, school, grade, role')
+          .eq('id', user?.id)
+          .single();
+          
+        if (data && !error) {
+          setProfile(data);
+        }
+      } catch (err) {
+        console.warn('Profile fetch error:', err);
+      } finally {
+        clearTimeout(failsafe);
+        setLoading(false);
+      }
     }
     
     fetchProfile();
@@ -67,25 +76,20 @@ export default function ProfileScreen() {
   const roleText = profile?.role === 'teacher' ? 'Teacher Account' : 'Student Account';
   const schoolText = profile?.school ? `${profile.school} • ${profile.grade || ''}` : 'No school listed';
 
-  const isLightMode = colors.background === '#F8FAFC';
-
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <GlobalWatermark />
+      {/* Profile Header Card */}
       <View style={styles.header}>
-        <BlurView 
-          intensity={75} 
-          tint={isLightMode ? "light" : "dark"} 
-          style={StyleSheet.absoluteFillObject} 
-        />
         <View style={styles.avatarPlaceholder}>
           <Text style={styles.avatarText}>
-            {profile?.first_name ? profile.first_name[0].toUpperCase() : <Feather name="user" size={40} color={colors.primary} />}
+            {profile?.first_name ? profile.first_name[0].toUpperCase() : <Feather name="user" size={32} color={colors.primary} />}
           </Text>
         </View>
         <Text style={styles.nameText}>{displayName}</Text>
         <Text style={styles.schoolText}>{schoolText}</Text>
-        <Text style={styles.roleText}>{roleText}</Text>
+        <View style={styles.roleBadge}>
+          <Text style={styles.roleText}>{roleText}</Text>
+        </View>
         
         {profile?.role === 'teacher' && (
           <Pressable 
@@ -98,89 +102,74 @@ export default function ProfileScreen() {
         )}
       </View>
 
-      {/* Theme Settings */}
+      {/* Theme Settings Card */}
       <View style={styles.section}>
-        <BlurView 
-          intensity={75} 
-          tint={isLightMode ? "light" : "dark"} 
-          style={StyleSheet.absoluteFillObject}
-        />
-        {/* Edge highlight */}
-        <View style={styles.glassHighlight} />
         <View style={styles.sectionHeader}>
-          <Feather name="moon" size={20} color={colors.text} />
+          <Feather name="moon" size={18} color={colors.text} />
           <Text style={styles.sectionTitleText}>App Theme</Text>
         </View>
         <View style={styles.themeToggleContainer}>
-          {(['system', 'light', 'dark'] as const).map((pref) => (
-            <Pressable
-              key={pref}
-              style={[
-                styles.themeOption,
-                themePreference === pref && styles.themeOptionActive
-              ]}
-              onPress={() => setThemePreference(pref)}
-            >
-              <Text style={[
-                styles.themeOptionText,
-                themePreference === pref && styles.themeOptionTextActive
-              ]}>
-                {pref.charAt(0).toUpperCase() + pref.slice(1)}
-              </Text>
-            </Pressable>
-          ))}
+          {(['system', 'light', 'dark'] as const).map((pref) => {
+            const isSelected = themePreference === pref;
+            return (
+              <Pressable
+                key={pref}
+                style={[
+                  styles.themeOption,
+                  isSelected && styles.themeOptionActive
+                ]}
+                onPress={() => setThemePreference(pref)}
+              >
+                <Text style={[
+                  styles.themeOptionText,
+                  isSelected && styles.themeOptionTextActive
+                ]}>
+                  {pref.charAt(0).toUpperCase() + pref.slice(1)}
+                </Text>
+              </Pressable>
+            );
+          })}
         </View>
       </View>
 
-      {/* Account Settings */}
+      {/* Account Settings Menu */}
       <View style={styles.section}>
-        <BlurView 
-          intensity={75} 
-          tint={isLightMode ? "light" : "dark"} 
-          style={StyleSheet.absoluteFillObject}
-        />
-        {/* Edge highlight */}
-        <View style={styles.glassHighlight} />
         <Pressable 
           style={styles.menuItem}
           onPress={() => router.push('/settings/account')}
         >
-          <Feather name="settings" size={20} color={colors.text} />
+          <Feather name="settings" size={18} color={colors.text} />
           <Text style={styles.menuItemText}>Account Settings</Text>
-          <Feather name="chevron-right" size={20} color={colors.textSecondary} />
+          <Feather name="chevron-right" size={18} color={colors.textSecondary} />
         </Pressable>
         <Pressable 
           style={styles.menuItem}
           onPress={() => router.push('/settings/notifications')}
         >
-          <Feather name="bell" size={20} color={colors.text} />
+          <Feather name="bell" size={18} color={colors.text} />
           <Text style={styles.menuItemText}>Notifications</Text>
-          <Feather name="chevron-right" size={20} color={colors.textSecondary} />
+          <Feather name="chevron-right" size={18} color={colors.textSecondary} />
         </Pressable>
         <Pressable 
-          style={styles.menuItem}
+          style={[styles.menuItem, { borderBottomWidth: 0 }]}
           onPress={() => router.push('/settings/support')}
         >
-          <Feather name="help-circle" size={20} color={colors.text} />
+          <Feather name="help-circle" size={18} color={colors.text} />
           <Text style={styles.menuItemText}>Help & Support</Text>
-          <Feather name="chevron-right" size={20} color={colors.textSecondary} />
+          <Feather name="chevron-right" size={18} color={colors.textSecondary} />
         </Pressable>
       </View>
 
+      {/* Sign Out Action */}
       <Pressable style={styles.signOutButton} onPress={handleSignOut}>
-        <BlurView 
-          intensity={75} 
-          tint={isLightMode ? "light" : "dark"} 
-          style={StyleSheet.absoluteFillObject} 
-        />
-        <Feather name="log-out" size={20} color={colors.error} />
+        <Feather name="log-out" size={18} color="#EF4444" />
         <Text style={styles.signOutText}>Sign Out</Text>
       </Pressable>
     </SafeAreaView>
   );
 }
 
-const createStyles = (colors: any) => StyleSheet.create({
+const createStyles = (colors: any, isDark: boolean) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
@@ -189,48 +178,59 @@ const createStyles = (colors: any) => StyleSheet.create({
   },
   header: {
     alignItems: 'center',
-    marginBottom: spacing.xxl,
-    backgroundColor: 'transparent',
+    marginBottom: spacing.xl,
+    backgroundColor: colors.card,
     padding: spacing.xl,
-    borderRadius: borderRadius.lg,
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: colors.border,
-    overflow: 'hidden',
+    borderColor: colors.cardBorder,
   },
   avatarPlaceholder: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: colors.primaryLight,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: isDark ? colors.surfaceHighlight : colors.primaryLight,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
   },
   avatarText: {
-    fontSize: 32,
-    fontWeight: typography.weights.bold,
+    fontSize: 28,
+    fontFamily: 'Outfit_700Bold',
+    fontWeight: '700',
     color: colors.primary,
   },
   nameText: {
-    fontSize: typography.sizes.xl,
-    fontWeight: typography.weights.bold,
+    fontSize: 18,
+    fontFamily: 'Outfit_700Bold',
+    fontWeight: '700',
     color: colors.text,
   },
   schoolText: {
-    fontSize: typography.sizes.md,
+    fontSize: 13,
+    fontFamily: 'Outfit_400Regular',
     color: colors.textSecondary,
-    marginTop: 4,
+    marginTop: 3,
+  },
+  roleBadge: {
+    marginTop: spacing.sm,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 12,
+    backgroundColor: isDark ? 'rgba(59, 130, 246, 0.12)' : '#EFF6FF',
   },
   roleText: {
-    fontSize: typography.sizes.sm,
+    fontSize: 12,
+    fontFamily: 'Outfit_600SemiBold',
     color: colors.primary,
-    marginTop: spacing.xs,
-    fontWeight: typography.weights.semibold,
+    fontWeight: '600',
   },
   teacherSwitchButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.primaryLight,
+    backgroundColor: isDark ? colors.surfaceHighlight : colors.primaryLight,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
     borderRadius: borderRadius.full,
@@ -243,99 +243,91 @@ const createStyles = (colors: any) => StyleSheet.create({
     fontSize: typography.sizes.sm,
   },
   section: {
-    backgroundColor: 'transparent',
-    borderRadius: 32, // extra smooth corners
+    backgroundColor: colors.card,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    marginBottom: spacing.xl,
     overflow: 'hidden',
-    marginBottom: spacing.xxl,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: colors.background === '#F8FAFC' ? 0.05 : 0.2,
-    shadowRadius: 20,
-    elevation: 10,
-  },
-  glassHighlight: {
-    position: 'absolute',
-    top: 0,
-    left: '5%',
-    right: '5%',
-    height: '40%',
-    backgroundColor: colors.background === '#F8FAFC' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(255, 255, 255, 0.08)',
-    borderBottomLeftRadius: 100,
-    borderBottomRightRadius: 100,
-    transform: [{ scaleX: 1.2 }],
   },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: spacing.lg,
-    paddingBottom: spacing.md,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.sm,
   },
   sectionTitleText: {
-    marginLeft: spacing.md,
-    fontSize: typography.sizes.md,
-    fontWeight: typography.weights.semibold,
+    marginLeft: spacing.sm,
+    fontSize: 14,
+    fontFamily: 'Outfit_600SemiBold',
+    fontWeight: '600',
     color: colors.text,
   },
   themeToggleContainer: {
     flexDirection: 'row',
     backgroundColor: colors.surfaceHighlight,
-    borderRadius: borderRadius.md,
+    borderRadius: 12,
     margin: spacing.lg,
-    marginTop: 0,
-    padding: 4,
+    marginTop: spacing.xs,
+    padding: 3,
   },
   themeOption: {
     flex: 1,
-    paddingVertical: spacing.sm,
+    paddingVertical: 8,
     alignItems: 'center',
-    borderRadius: borderRadius.sm,
+    borderRadius: 9,
   },
   themeOptionActive: {
-    backgroundColor: colors.surface,
-    shadowColor: '#000',
+    backgroundColor: colors.card,
+    shadowColor: '#000000',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
+    shadowOpacity: isDark ? 0.3 : 0.08,
+    shadowRadius: 3,
     elevation: 2,
   },
   themeOptionText: {
-    fontSize: typography.sizes.sm,
+    fontSize: 13,
+    fontFamily: 'Outfit_500Medium',
     color: colors.textSecondary,
-    fontWeight: typography.weights.medium,
+    fontWeight: '500',
   },
   themeOptionTextActive: {
     color: colors.text,
-    fontWeight: typography.weights.bold,
+    fontFamily: 'Outfit_600SemiBold',
+    fontWeight: '600',
   },
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: spacing.lg,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 15,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
   menuItemText: {
     flex: 1,
     marginLeft: spacing.md,
-    fontSize: typography.sizes.md,
+    fontSize: 14,
+    fontFamily: 'Outfit_500Medium',
     color: colors.text,
-    fontWeight: typography.weights.medium,
   },
   signOutButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: spacing.lg,
-    backgroundColor: 'transparent',
-    borderRadius: borderRadius.md,
+    paddingVertical: 14,
+    paddingHorizontal: spacing.lg,
+    backgroundColor: isDark ? 'rgba(239, 68, 68, 0.08)' : '#FEE2E2',
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: colors.error,
+    borderColor: isDark ? 'rgba(239, 68, 68, 0.2)' : '#FECACA',
     gap: spacing.sm,
-    overflow: 'hidden',
   },
   signOutText: {
-    color: colors.error,
-    fontSize: typography.sizes.md,
-    fontWeight: typography.weights.bold,
+    color: '#EF4444',
+    fontSize: 14,
+    fontFamily: 'Outfit_600SemiBold',
+    fontWeight: '600',
   },
 });

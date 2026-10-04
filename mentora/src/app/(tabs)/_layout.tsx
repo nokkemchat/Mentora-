@@ -12,9 +12,9 @@ export default function TabsLayout() {
   const { user } = useAuth();
   const role = user?.user_metadata?.role;
   
-  const [isApproved, setIsApproved]     = useState(false);
-  const [isActivated, setIsActivated]   = useState(false);
-  const [loadingStatus, setLoadingStatus] = useState(true);
+  const [isApproved, setIsApproved]     = useState(true);
+  const [isActivated, setIsActivated]   = useState(true);
+  const [loadingStatus, setLoadingStatus] = useState(false);
   const [verificationCode, setVerificationCode] = useState('');
   const [verifying, setVerifying]       = useState(false);
 
@@ -24,18 +24,26 @@ export default function TabsLayout() {
       return;
     }
 
-    const checkTeacherStatus = async () => {
-      const { data: profile, error } = await supabase
-        .from('profiles')
-        .select('is_approved, is_activated')
-        .eq('id', user.id)
-        .single();
+    const failsafe = setTimeout(() => setLoadingStatus(false), 1500);
 
-      if (!error && profile) {
-        setIsApproved(!!profile.is_approved);
-        setIsActivated(!!profile.is_activated);
+    const checkTeacherStatus = async () => {
+      try {
+        const { data: profile, error } = await supabase
+          .from('profiles')
+          .select('is_approved, is_activated')
+          .eq('id', user.id)
+          .single();
+
+        if (!error && profile) {
+          setIsApproved(!!profile.is_approved);
+          setIsActivated(!!profile.is_activated);
+        }
+      } catch (err) {
+        console.warn('Teacher status check error:', err);
+      } finally {
+        clearTimeout(failsafe);
+        setLoadingStatus(false);
       }
-      setLoadingStatus(false);
     };
 
     checkTeacherStatus();

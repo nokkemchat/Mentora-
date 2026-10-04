@@ -1,38 +1,6 @@
 import { useColorScheme } from 'react-native';
-
-export const lightColors = {
-  background: '#FFFFFF',
-  text: '#0F172A',
-  textSecondary: '#64748B',
-  textTertiary: '#94A3B8',
-  primary: '#4F46E5', // Deep Indigo
-  primaryLight: '#E0E7FF', // Soft Indigo
-  accent: '#F59E0B', // Amber
-  primaryContrast: '#FFFFFF',
-  border: '#F1F5F9',
-  surface: '#F8FAFC', 
-  surfaceHighlight: '#F1F5F9',
-  error: '#EF4444',
-  success: '#10B981',
-  warning: '#F59E0B',
-};
-
-export const darkColors = {
-  background: '#0F172A',
-  text: '#F8FAFC', 
-  textSecondary: '#94A3B8', 
-  textTertiary: '#64748B', 
-  primary: '#818CF8', // Light Indigo for dark mode
-  primaryLight: '#1E1B4B', // Very Dark Indigo
-  accent: '#F59E0B',
-  primaryContrast: '#FFFFFF',
-  border: '#1E293B', 
-  surface: '#1E293B', 
-  surfaceHighlight: '#334155', 
-  error: '#EF4444',
-  success: '#10B981',
-  warning: '#F59E0B',
-};
+import { lightColors, darkColors, ThemeColor } from './themeColors';
+export { lightColors, darkColors, ThemeColor };
 
 import { useAppTheme } from '@/context/ThemeContext';
 
@@ -49,6 +17,11 @@ export function useThemeColors() {
 
 // Fallback for non-React contexts if needed (will not auto-update)
 export const colors = lightColors;
+export const Colors = {
+  light: lightColors,
+  dark: darkColors,
+};
+
 
 export const spacing = {
   xs: 4,
@@ -59,6 +32,22 @@ export const spacing = {
   xxl: 32,
   xxxl: 48,
 };
+
+export const Spacing = {
+  ...spacing,
+  none: 0,
+  half: 4,
+  one: 8,
+  two: 16,
+  three: 24,
+  four: 32,
+  five: 40,
+  six: 48,
+  seven: 56,
+  eight: 64,
+};
+
+export const MaxContentWidth = 1200;
 
 export const typography = {
   sizes: {
@@ -78,11 +67,23 @@ export const typography = {
   },
 };
 
+export const Fonts = {
+  regular: 'Outfit_400Regular',
+  medium: 'Outfit_500Medium',
+  semiBold: 'Outfit_600SemiBold',
+  bold: 'Outfit_700Bold',
+  mono: 'monospace',
+};
+
 export const borderRadius = {
-  sm: 4,
-  md: 8,
-  lg: 12,
-  xl: 16,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 20,
+  xxl: 24,
+  card: 24,
+  pill: 9999,
+  round: 9999,
   full: 9999,
 };
 
@@ -90,22 +91,36 @@ export const shadows = {
   sm: {
     shadowColor: '#0F172A',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.02,
-    shadowRadius: 2,
+    shadowOpacity: 0.03,
+    shadowRadius: 3,
     elevation: 1,
   },
   md: {
     shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.05,
     shadowRadius: 8,
     elevation: 2,
   },
   lg: {
     shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.06,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.07,
     shadowRadius: 16,
     elevation: 4,
-  }
+  },
+  tactile: {
+    shadowColor: '#102A6B',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.07,
+    shadowRadius: 14,
+    elevation: 4,
+  },
+  floating: {
+    shadowColor: '#102A6B',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.12,
+    shadowRadius: 20,
+    elevation: 8,
+  },
 };

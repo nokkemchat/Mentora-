@@ -4,7 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts"
   },
   "keywords": [],
   "author": "",
@@ -16,6 +17,7 @@
     "gm": "^1.25.1",
     "openai": "^7.4.0",
     "pdf2pic": "^3.2.0",
+    "pdfjs-dist": "^6.3.289",
     "sharp": "^0.35.3"
   },
   "devDependencies": {

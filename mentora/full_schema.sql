@@ -69,6 +69,7 @@ CREATE TABLE public.courses (
   icon TEXT NOT NULL,
   color TEXT NOT NULL,
   price NUMERIC(10, 2) DEFAULT 0.00,
+  available_forms TEXT[] DEFAULT '{}',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
@@ -77,6 +78,8 @@ CREATE TABLE public.topics (
   id TEXT PRIMARY KEY,
   course_id TEXT NOT NULL REFERENCES public.courses(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
+  form TEXT DEFAULT NULL,
+  order_index INTEGER DEFAULT 0,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 

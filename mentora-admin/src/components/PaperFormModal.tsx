@@ -85,13 +85,38 @@ export default function PaperFormModal({ onClose, onSuccess }: PaperFormModalPro
 
       if (dbError) throw dbError;
 
-      // Create Ingestion Job
+      // Create Ingestion Job and trigger Edge Function extraction
       if (pdf_url && insertedPaper) {
         await supabase.from('ingestion_jobs').insert({
           paper_id: insertedPaper.id,
           mark_scheme_url: ms_url,
           status: 'uploaded'
         });
+
+        // Trigger extraction: Try local visual agent first, fallback to Supabase Edge Function
+        (async () => {
+          let triggered = false;
+          try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 1000);
+            const res = await fetch('http://localhost:3005/process', { method: 'POST', signal: controller.signal });
+            clearTimeout(timeoutId);
+            if (res.ok) triggered = true;
+          } catch (e) {}
+
+          if (!triggered) {
+            console.log('Triggering cloud edge function extraction for paper', insertedPaper.id);
+            supabase.functions.invoke('process-paper', {
+              body: { paper_id: insertedPaper.id, mark_scheme_url: ms_url || undefined }
+            }).catch(err => console.error('Cloud auto-extraction error:', err));
+
+            if (ms_url) {
+              supabase.functions.invoke('process-marking-scheme', {
+                body: { paper_id: insertedPaper.id, mark_scheme_url: ms_url }
+              }).catch(err => console.warn('Cloud MS extraction error:', err));
+            }
+          }
+        })();
       }
 
       onSuccess();

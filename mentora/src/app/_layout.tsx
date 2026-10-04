@@ -1,8 +1,8 @@
 import * as ScreenCapture from 'expo-screen-capture';
-import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
 import { useFonts, Outfit_300Light, Outfit_400Regular, Outfit_500Medium, Outfit_600SemiBold, Outfit_700Bold } from '@expo-google-fonts/outfit';
+import { Ionicons, Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { View, Image, Platform } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -15,7 +15,7 @@ import { GlobalAITutorButton } from '../components/GlobalAITutorButton';
 
 SplashScreen.preventAutoHideAsync();
 
-// Global watermark moved to individual screens
+import { Stack, usePathname, useSegments } from 'expo-router';
 
 function AppContent() {
   return (
@@ -47,6 +47,9 @@ export default function RootLayout() {
     Outfit_500Medium,
     Outfit_600SemiBold,
     Outfit_700Bold,
+    ...Ionicons.font,
+    ...Feather.font,
+    ...MaterialCommunityIcons.font,
   });
 
   useEffect(() => {

@@ -1,0 +1,29 @@
+{
+  "name": "mentora-serverless-marking",
+  "version": "1.0.0",
+  "description": "Serverless Open-Source GPU Marking Pipeline (SDXL/Flux on Fal.ai/Replicate) for Mentora",
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "node --loader ts-node/esm test/test-run.ts",
+    "build": "tsc"
+  },
+  "keywords": [
+    "mentora",
+    "serverless",
+    "sdxl",
+    "flux",
+    "fal-ai",
+    "replicate",
+    "exam-marking"
+  ],
+  "author": "Mentora Team",
+  "license": "MIT",
+  "dependencies": {
+    "@fal-ai/serverless-client": "^0.14.0",
+    "replicate": "^1.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^5.3.3"
+  }
+}

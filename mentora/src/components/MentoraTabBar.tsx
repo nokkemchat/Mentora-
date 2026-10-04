@@ -1,189 +1,128 @@
-import React, { useEffect } from 'react';
-import { View, Text, Pressable, StyleSheet, Platform, Dimensions } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Pressable, StyleSheet, Platform, Dimensions } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withSpring,
-  interpolate,
-  Extrapolation,
 } from 'react-native-reanimated';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
-import { Ionicons } from '@expo/vector-icons';
+import { Compass, BookOpen, Users, User } from 'lucide-react-native';
 import { useAppTheme } from '@/context/ThemeContext';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const BAR_WIDTH = Math.min(SCREEN_WIDTH - 32, 380);
+// Sleek, compact floating capsule dock matching modern iOS luxury aesthetics
+const BAR_WIDTH = Math.min(SCREEN_WIDTH - 64, 300);
+const BAR_HEIGHT = 64;
 const TAB_COUNT = 4;
-const ITEM_WIDTH = BAR_WIDTH / TAB_COUNT;
-const PILL_WIDTH = ITEM_WIDTH - 10;
-const PILL_HEIGHT = 52;
-const BAR_HEIGHT = 68;
+const CIRCLE_SIZE = 48;
 
 const SPRING_CONFIG = {
-  stiffness: 340,
-  damping: 28,
-  mass: 0.8,
+  stiffness: 380,
+  damping: 30,
+  mass: 0.7,
   overshootClamping: false,
 };
 
 const TABS = [
-  { name: 'index',      label: 'Explore', activeIcon: 'compass',       inactiveIcon: 'compass-outline' },
-  { name: 'my-classes', label: 'Classes', activeIcon: 'book',          inactiveIcon: 'book-outline' },
-  { name: 'rooms',      label: 'Rooms',   activeIcon: 'chatbubbles',   inactiveIcon: 'chatbubbles-outline' },
-  { name: 'profile',    label: 'Profile', activeIcon: 'person',        inactiveIcon: 'person-outline' },
+  { name: 'index',      Icon: Compass,  label: 'Explore' },
+  { name: 'my-classes', Icon: BookOpen, label: 'Classes' },
+  { name: 'rooms',      Icon: Users,    label: 'Rooms' },
+  { name: 'profile',    Icon: User,     label: 'Profile' },
 ] as const;
 
 type TabItemProps = {
   tab: typeof TABS[number];
   isActive: boolean;
   onPress: () => void;
-  themeColors: any;
   isDark: boolean;
 };
 
-function TabItem({ tab, isActive, onPress, themeColors, isDark }: TabItemProps) {
-  const activeProgress = useSharedValue(isActive ? 1 : 0);
-  const pressScale = useSharedValue(1);
-
-  useEffect(() => {
-    activeProgress.value = withSpring(isActive ? 1 : 0, SPRING_CONFIG);
-  }, [isActive]);
-
-  const activeColor = themeColors.primary;
-  const inactiveColor = isDark ? 'rgba(148, 163, 184, 0.7)' : 'rgba(100, 116, 139, 0.8)';
-
-  const iconAnimStyle = useAnimatedStyle(() => {
-    const scale = interpolate(activeProgress.value, [0, 1], [1, 1.15], Extrapolation.CLAMP);
-    const translateY = interpolate(activeProgress.value, [0, 1], [0, -2], Extrapolation.CLAMP);
-    
-    return {
-      transform: [
-        { scale: scale * pressScale.value },
-        { translateY },
-      ],
-    };
-  });
-
-  const labelAnimStyle = useAnimatedStyle(() => {
-    const scale = interpolate(activeProgress.value, [0, 1], [0.95, 1.05], Extrapolation.CLAMP);
-    const opacity = interpolate(activeProgress.value, [0, 1], [0.65, 1], Extrapolation.CLAMP);
-    
-    return {
-      opacity,
-      transform: [{ scale }],
-    };
-  });
-
-  const iconName = isActive ? tab.activeIcon : tab.inactiveIcon;
+function TabItem({ tab, isActive, onPress, isDark }: TabItemProps) {
+  const IconComponent = tab.Icon;
+  const iconColor = isActive 
+    ? '#FFFFFF' 
+    : isDark ? '#A1A1AA' : '#64748B';
 
   return (
     <Pressable
-      style={styles.tabItem}
+      style={styles.tabSlot}
       onPress={onPress}
-      onPressIn={() => {
-        pressScale.value = withSpring(0.9, { stiffness: 400, damping: 25 });
-      }}
-      onPressOut={() => {
-        pressScale.value = withSpring(1, SPRING_CONFIG);
-      }}
       accessibilityRole="tab"
       accessibilityState={{ selected: isActive }}
     >
-      <Animated.View style={[styles.tabContent, iconAnimStyle]}>
-        <Ionicons
-          name={iconName as any}
-          size={22}
-          color={isActive ? activeColor : inactiveColor}
-        />
-        <Animated.View style={labelAnimStyle}>
-          <Text style={[
-            styles.label, 
-            { 
-              color: isActive ? activeColor : inactiveColor,
-              fontWeight: isActive ? '700' : '500',
-            }
-          ]}>
-            {tab.label}
-          </Text>
-        </Animated.View>
-      </Animated.View>
+      {({ pressed }) => (
+        <View style={[styles.iconCircleSlot, { transform: [{ scale: pressed ? 0.92 : 1 }] }]}>
+          <IconComponent
+            size={22}
+            color={iconColor}
+            strokeWidth={isActive ? 2.4 : 1.8}
+          />
+        </View>
+      )}
     </Pressable>
   );
 }
 
 export function MentoraTabBar({ state, navigation }: any) {
-  const { colors, isDark } = useAppTheme();
-  const activeIndex = state.index;
+  const { isDark } = useAppTheme();
+  const activeIndex = state.index ?? 0;
 
-  const pillX = useSharedValue(
-    activeIndex * ITEM_WIDTH + (ITEM_WIDTH - PILL_WIDTH) / 2
-  );
+  const [slotLayouts, setSlotLayouts] = useState<{ [key: number]: { x: number; width: number } }>({});
+  
+  const fallbackSlotW = BAR_WIDTH / TAB_COUNT;
+  const initialX = activeIndex * fallbackSlotW + (fallbackSlotW - CIRCLE_SIZE) / 2;
+  const indicatorX = useSharedValue(initialX);
 
   useEffect(() => {
-    const target = activeIndex * ITEM_WIDTH + (ITEM_WIDTH - PILL_WIDTH) / 2;
-    pillX.value = withSpring(target, SPRING_CONFIG);
-  }, [activeIndex]);
+    const layout = slotLayouts[activeIndex];
+    if (layout && layout.width > 0) {
+      const targetX = layout.x + (layout.width - CIRCLE_SIZE) / 2;
+      indicatorX.value = withSpring(targetX, SPRING_CONFIG);
+    } else {
+      const targetX = activeIndex * fallbackSlotW + (fallbackSlotW - CIRCLE_SIZE) / 2;
+      indicatorX.value = withSpring(targetX, SPRING_CONFIG);
+    }
+  }, [activeIndex, slotLayouts]);
 
-  const pillAnimStyle = useAnimatedStyle(() => {
+  const indicatorAnimStyle = useAnimatedStyle(() => {
     return {
-      transform: [{ translateX: pillX.value }],
+      transform: [{ translateX: indicatorX.value }],
     };
   });
 
-  const barBgColor = isDark ? 'rgba(15, 23, 42, 0.85)' : 'rgba(255, 255, 255, 0.85)';
-  const barBorderColor = isDark ? 'rgba(51, 65, 85, 0.5)' : 'rgba(226, 232, 240, 0.8)';
-  
-  const pillGradient = isDark
-    ? ['#818CF838', '#4F46E51E']
-    : ['#EEF2FF', '#E0E7FF'];
-
-  const pillBorderColor = isDark
-    ? 'rgba(129, 140, 248, 0.35)'
-    : '#C7D2FE';
-
-  const shadowStyle = isDark
-    ? {
-        shadowColor: '#000000',
-        shadowOffset: { width: 0, height: 12 },
-        shadowOpacity: 0.45,
-        shadowRadius: 18,
-        elevation: 12,
-      }
-    : {
-        shadowColor: '#4F46E5',
-        shadowOffset: { width: 0, height: 10 },
-        shadowOpacity: 0.12,
-        shadowRadius: 20,
-        elevation: 10,
-      };
+  const barBgColor = isDark ? 'rgba(24, 24, 27, 0.88)' : 'rgba(255, 255, 255, 0.88)';
+  const barBorderColor = isDark ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.08)';
 
   return (
-    <View style={[styles.outerContainer, shadowStyle]} pointerEvents="box-none">
+    <View style={styles.outerContainer} pointerEvents="box-none">
       <BlurView
-        intensity={isDark ? 45 : 75}
+        intensity={Platform.OS === 'ios' ? 85 : 100}
         tint={isDark ? 'dark' : 'light'}
         style={[
-          styles.barContainer,
+          styles.dockBar,
           { backgroundColor: barBgColor, borderColor: barBorderColor },
         ]}
       >
-        {/* Animated Active Tab Capsule */}
-        <Animated.View style={[styles.activePillContainer, pillAnimStyle]}>
-          <View style={[styles.activePill, { borderColor: pillBorderColor }]}>
+        <View style={styles.tabsRow}>
+          {/* Smooth Gliding Active Glowing Gradient Disc (positioned underneath tab icons) */}
+          <Animated.View 
+            pointerEvents="none"
+            style={[
+              styles.activeIndicatorContainer, 
+              indicatorAnimStyle
+            ]} 
+          >
             <LinearGradient
-              colors={pillGradient as [string, string]}
+              colors={isDark ? ['#3B82F6', '#1D4ED8'] : ['#2563EB', '#1D4ED8']}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
-              style={StyleSheet.absoluteFillObject}
+              style={styles.activeIndicatorGradient}
             />
-            <View style={[styles.topGlowDot, { backgroundColor: colors.primary }]} />
-          </View>
-        </Animated.View>
+          </Animated.View>
 
-        {/* Navigation Items */}
-        <View style={styles.tabsRow}>
+          {/* Tab Items Row with higher zIndex so icons sit crisply on top */}
           {TABS.map((tab, index) => {
             const isActive = index === activeIndex;
             const onPress = () => {
@@ -194,18 +133,28 @@ export function MentoraTabBar({ state, navigation }: any) {
                 canPreventDefault: true,
               });
               if (!isActive && !event.defaultPrevented) {
-                navigation.navigate(state.routes[index].name);
+                navigation.navigate(state.routes[index]?.name || tab.name);
               }
             };
             return (
-              <TabItem
+              <View
                 key={tab.name}
-                tab={tab}
-                isActive={isActive}
-                onPress={onPress}
-                themeColors={colors}
-                isDark={isDark}
-              />
+                style={styles.slotWrapper}
+                onLayout={(e) => {
+                  const { x, width } = e.nativeEvent.layout;
+                  setSlotLayouts((prev) => {
+                    if (prev[index]?.x === x && prev[index]?.width === width) return prev;
+                    return { ...prev, [index]: { x, width } };
+                  });
+                }}
+              >
+                <TabItem
+                  tab={tab}
+                  isActive={isActive}
+                  onPress={onPress}
+                  isDark={isDark}
+                />
+              </View>
             );
           })}
         </View>
@@ -217,58 +166,70 @@ export function MentoraTabBar({ state, navigation }: any) {
 const styles = StyleSheet.create({
   outerContainer: {
     position: 'absolute',
-    bottom: Platform.OS === 'ios' ? 28 : 20,
+    bottom: Platform.OS === 'ios' ? 30 : 20,
     alignSelf: 'center',
     width: BAR_WIDTH,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.16,
+    shadowRadius: 24,
+    elevation: 14,
   },
-  barContainer: {
+  dockBar: {
     width: '100%',
     height: BAR_HEIGHT,
-    borderRadius: 34,
-    borderWidth: 1.5,
-    flexDirection: 'row',
-    alignItems: 'center',
-    overflow: 'hidden',
-  },
-  activePillContainer: {
-    position: 'absolute',
-    top: (BAR_HEIGHT - PILL_HEIGHT) / 2,
-    width: PILL_WIDTH,
-    height: PILL_HEIGHT,
-  },
-  activePill: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 26,
+    borderRadius: 36,
     borderWidth: 1,
     overflow: 'hidden',
-    alignItems: 'center',
-  },
-  topGlowDot: {
-    position: 'absolute',
-    top: 3,
-    width: 14,
-    height: 3,
-    borderRadius: 2,
   },
   tabsRow: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
+    height: '100%',
+    position: 'relative',
   },
-  tabItem: {
+  activeIndicatorContainer: {
+    position: 'absolute',
+    left: 0,
+    top: (BAR_HEIGHT - CIRCLE_SIZE) / 2,
+    width: CIRCLE_SIZE,
+    height: CIRCLE_SIZE,
+    borderRadius: CIRCLE_SIZE / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1,
+    shadowColor: '#2563EB',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.45,
+    shadowRadius: 12,
+    elevation: 4,
+  },
+  activeIndicatorGradient: {
+    width: '100%',
+    height: '100%',
+    borderRadius: CIRCLE_SIZE / 2,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.4)',
+  },
+  slotWrapper: {
     flex: 1,
-    height: BAR_HEIGHT,
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2,
+  },
+  tabSlot: {
+    width: '100%',
+    height: '100%',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  tabContent: {
+  iconCircleSlot: {
+    width: CIRCLE_SIZE,
+    height: CIRCLE_SIZE,
+    borderRadius: CIRCLE_SIZE / 2,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 3,
-  },
-  label: {
-    fontSize: 11,
   },
 });
-

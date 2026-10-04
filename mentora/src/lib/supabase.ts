@@ -4,8 +4,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
 
 // Add actual credentials as fallback in case Metro bundler fails to load .env
-const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://jmyunhtqcjkvqwpdwtve.supabase.co';
-const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpteXVuaHRxY2prdnF3cGR3dHZlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMwMzU2OTMsImV4cCI6MjA5ODYxMTY5M30.2txxKAQsewgevnDj_6qfHo0-vDPkUxsggYUXiSIJTzM';
+const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://akjbejexhdawelrfygub.supabase.co';
+const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFramJlamV4aGRhd2VscmZ5Z3ViIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ3MjAwMTgsImV4cCI6MjEwMDI5NjAxOH0.L2t-AiTbkMOtadI6rNVII9QZ9qLVZqD3ep9ekHqvI7Y';
 
 // Custom storage to handle SSR in Expo web
 const customStorage = {

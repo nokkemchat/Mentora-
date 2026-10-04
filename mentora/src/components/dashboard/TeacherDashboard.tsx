@@ -6,8 +6,8 @@ import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { spacing, typography, borderRadius, useThemeColors } from '@/constants/theme';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
-import { GlobalWatermark } from '@/components/GlobalWatermark';
 import { BlurView } from 'expo-blur';
+import { getSubjectVisuals } from '@/lib/subjectVisuals';
 
 type Course = {
   id: string;
@@ -30,40 +30,51 @@ export default function TeacherDashboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+
+    const failsafe = setTimeout(() => setLoading(false), 1500);
 
     const fetchTeacherData = async () => {
-      // Upsert teacher_stats — creates a row if one doesn't exist yet
-      const { data: statsData, error: statsError } = await supabase
-        .from('teacher_stats')
-        .upsert(
-          { teacher_id: user.id, total_revenue: 0, pending_payout: 0, total_students: 0, average_rating: 0 },
-          { onConflict: 'teacher_id', ignoreDuplicates: true }
-        )
-        .select('id')
-        .single();
+      try {
+        // Upsert teacher_stats — creates a row if one doesn't exist yet
+        const { data: statsData, error: statsError } = await supabase
+          .from('teacher_stats')
+          .upsert(
+            { teacher_id: user.id, total_revenue: 0, pending_payout: 0, total_students: 0, average_rating: 0 },
+            { onConflict: 'teacher_id', ignoreDuplicates: true }
+          )
+          .select('id')
+          .single();
 
-      if (!statsError && statsData) {
-        // Fetch this teacher's courses
-        const { data, error } = await supabase
-          .from('teacher_courses')
-          .select('*')
-          .eq('teacher_stats_id', statsData.id);
+        if (!statsError && statsData) {
+          // Fetch this teacher's courses
+          const { data, error } = await supabase
+            .from('teacher_courses')
+            .select('*')
+            .eq('teacher_stats_id', statsData.id);
 
-        if (!error && data) {
-          const formattedCourses = data.map((tc: any) => ({
-            id: tc.id,
-            title: tc.title || 'Untitled Course',
-            board: 'ZIMSEC',
-            level: 'O Level',
-            icon: 'book-open-variant',
-            color: '#3B82F6',
-            ...tc
-          }));
-          setCourses(formattedCourses);
+          if (!error && data) {
+            const formattedCourses = data.map((tc: any) => ({
+              id: tc.id,
+              title: tc.title || 'Untitled Course',
+              board: 'ZIMSEC',
+              level: 'O Level',
+              icon: 'book-open-variant',
+              color: '#3B82F6',
+              ...tc
+            }));
+            setCourses(formattedCourses);
+          }
         }
+      } catch (err) {
+        console.warn('TeacherDashboard fetch error:', err);
+      } finally {
+        clearTimeout(failsafe);
+        setLoading(false);
       }
-      setLoading(false);
     };
 
     fetchTeacherData();
@@ -82,7 +93,6 @@ export default function TeacherDashboard() {
   // Render Dashboard
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <GlobalWatermark />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={styles.header}>
@@ -125,29 +135,31 @@ export default function TeacherDashboard() {
               <Text style={styles.emptyStateSubtitle}>Create your first course to start teaching!</Text>
             </View>
           ) : (
-            courses.map((course) => (
-              <Pressable 
-                key={course.id}
-                style={styles.courseCard}
-                onPress={() => router.push(`/course/${course.id}`)}
-              >
-                <BlurView 
-                  intensity={75} 
-                  tint={isLightMode ? "light" : "dark"} 
-                  style={StyleSheet.absoluteFillObject} 
-                />
-                <View style={[styles.courseIconContainer, { backgroundColor: course.color }]}>
-                  <MaterialCommunityIcons name={course.icon as any} size={32} color={colors.background} />
-                </View>
-                <View style={styles.courseInfo}>
-                  <Text style={styles.courseSubject}>{course.board} • {course.level}</Text>
-                  <Text style={styles.courseTopic}>{course.title}</Text>
-                </View>
-                <Feather name="edit-2" size={20} color={colors.textSecondary} />
+            courses.map((course) => {
+              const { color: accentColor, icon: subjectIcon } = getSubjectVisuals(course.title, course.color, course.icon);
+              return (
+                <Pressable 
+                  key={course.id}
+                  style={styles.courseCard}
+                  onPress={() => router.push(`/course/${course.id}`)}
+                >
+                  <BlurView 
+                    intensity={75} 
+                    tint={isLightMode ? "light" : "dark"} 
+                    style={StyleSheet.absoluteFillObject} 
+                  />
+                  <View style={[styles.courseIconContainer, { backgroundColor: accentColor }]}>
+                    <MaterialCommunityIcons name={subjectIcon as any} size={32} color="#FFFFFF" />
+                  </View>
+                  <View style={styles.courseInfo}>
+                    <Text style={styles.courseSubject}>{course.board} • {course.level}</Text>
+                    <Text style={styles.courseTopic}>{course.title}</Text>
+                  </View>
               </Pressable>
-            ))
-          )}
-        </View>
+            );
+          })
+        )}
+      </View>
 
         {/* Upcoming Classes / Live Rooms */}
         <View style={styles.section}>

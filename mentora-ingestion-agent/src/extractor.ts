@@ -133,12 +133,29 @@ Accurately capture all nested sub-questions (parts like a, b, c, and sub_parts l
 CRITICAL: Questions can be deeply nested! Use \`sub_parts\` recursively! (e.g., \`parts\` contains \`sub_parts\`, which can contain another level of \`sub_parts\` for sub-sub-parts). DO NOT skip any text or nested question.
 Identify any visual assets (images, diagrams, graphs, tables) embedded within the text and provide their type, description, page_number (1-indexed based on the order of cropped images provided here), and bounding_box [ymin, xmin, ymax, xmax] relative to the specific cropped image (0.0 to 1.0).
 
-CRITICAL FOR BOUNDING BOX: To help you achieve 100% millimeter-perfect accuracy, the provided images have a red and blue visual coordinate grid overlaid on them!
-- Red lines represent the Y axis (0.05, 0.10, ..., 0.95).
-- Blue lines represent the X axis (0.05, 0.10, ..., 0.95).
-Simply read the numbers off the grid lines to determine exactly where the visual asset starts and ends!
-For example, if a gas syringe diagram starts near the red line labeled Y:0.25 and ends near the red line labeled Y:0.60, your ymin is 0.25 and ymax is 0.60. Interpolate between the lines.
-Ensure your bounding_box completely surrounds the ENTIRE visual asset. Include all titles, headers, axes, and labels. Be very generous and expand the box outward to ensure absolutely nothing is cut off.
+COORDINATE GRID SYSTEM (HIGH PRECISION):
+Each input image has an overlaid coordinate grid with:
+- Red horizontal lines marking Y from 0.05 to 0.95 (e.g., Y:0.10, Y:0.20, Y:0.30...)
+- Blue vertical lines marking X from 0.05 to 0.95 (e.g., X:0.10, X:0.20, X:0.30...)
+Use these grid markings to read the exact fractional coordinates (0.0 to 1.0) of each visual asset.
+
+VISUAL ASSET PLACEMENT RULES:
+1. QUESTION STEM APPARATUS / DIAGRAMS (Root "visual_assets"):
+   - Any diagram or experimental apparatus that appears BEFORE or ABOVE sub-question (a) (e.g., Fig. 1.1 showing the experimental setup) belongs to the question STEM.
+   - You MUST place it in the root "visual_assets" array of the question, NOT inside parts[0]!
+2. PART-SPECIFIC VISUAL ASSETS (Inside the respective part in "parts"):
+   - If a graph, diagram, circuit, or table is part of a sub-question (e.g., part (c) has "Fig. 1.2 is the speed-time graph for the falling ball"), you MUST place that visual asset in that specific part's "visual_assets" array (e.g. inside part 'c').
+   - Do NOT include the sub-question label "(c)" or question prompt text inside the visual asset bounding box! The bounding box should start cleanly at the top of the diagram/graph itself (e.g. top of the y-axis or apparatus) and stop after the figure caption (e.g. "Fig. 1.2").
+
+STRICT BOUNDING BOX RULES:
+1. COMPLETE VERTICAL COVERAGE (NEVER CUT OFF APPARATUS TOPS):
+   - For ymin: Must encompass the introductory figure sentence (e.g., "Fig. 1.1 shows the ball falling through the oil.") OR start cleanly above the topmost rim, meniscus, opening, or stand of the apparatus/container. Under NO circumstance start halfway down or cut off the top of a test tube, beaker, circuit, or object.
+   - For ymax: Must include the figure caption line (e.g., "Fig. 1.1", "Fig. 3.1") located directly below the drawing.
+   - STRICTLY STOP BEFORE SUBQUESTIONS: Do NOT include question text like "(a) Define acceleration", dotted answer lines, or mark numbers "[1]". The visual asset stops immediately below the "Fig. X.X" caption!
+2. COMPLETE HORIZONTAL COVERAGE (NEVER CUT OFF LABELS/ARROWS):
+   - It MUST include all external pointer lines, arrows, leader lines, and callout text annotations pointing into or labeling parts of the diagram (e.g., "ball", "oil", "block of ice", "water", "ammeter", "pivot", "scale", "normal", "incident ray").
+   - If there is label text to the left of the diagram, your 'xmin' MUST extend far enough to the left to fully encompass the entire word(s) of that label.
+   - If there is label text to the right of the diagram, your 'xmax' MUST extend far enough to the right to fully encompass the entire word(s) of that label.
 
 Ensure your response is valid JSON matching this exact schema:
 {

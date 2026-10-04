@@ -19,7 +19,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const segments = useSegments();
+  const segments = useSegments() as unknown as string[];
   const router = useRouter();
 
   useEffect(() => {

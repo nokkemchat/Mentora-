@@ -19,15 +19,23 @@ export default function RoomsScreen() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    const failsafe = setTimeout(() => setLoading(false), 1500);
+
     const fetchRooms = async () => {
-      setLoading(true);
-      const { data, error } = await supabase.from('study_rooms').select('*');
-      
-      if (!error && data) {
-        setPublicRooms(data.filter(r => r.type === 'Public'));
-        setSchoolRooms(data.filter(r => r.type === 'School'));
+      try {
+        setLoading(true);
+        const { data, error } = await supabase.from('study_rooms').select('*');
+        
+        if (!error && data) {
+          setPublicRooms(data.filter(r => r.type === 'Public'));
+          setSchoolRooms(data.filter(r => r.type === 'School'));
+        }
+      } catch (err) {
+        console.warn('Rooms fetch error:', err);
+      } finally {
+        clearTimeout(failsafe);
+        setLoading(false);
       }
-      setLoading(false);
     };
 
     fetchRooms();

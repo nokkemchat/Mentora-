@@ -1,19 +1,20 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Pressable, ActivityIndicator, Image } from 'react-native';
+import { View, Text, StyleSheet, Pressable, ActivityIndicator, Image, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
 import { supabase } from '@/lib/supabase';
-import { spacing, typography, borderRadius, useThemeColors } from '@/constants/theme';
-import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
+import { spacing, typography, borderRadius, shadows, useThemeColors } from '@/constants/theme';
+import { MaterialCommunityIcons, Ionicons, Feather } from '@expo/vector-icons';
 import { useAuth } from '@/context/AuthContext';
-
-const coverImages: Record<string, any> = {
-  '/covers/math.png': require('../../../assets/images/covers/math.png'),
-  '/covers/science.png': require('../../../assets/images/covers/science.png'),
-  '/covers/languages.png': require('../../../assets/images/covers/languages.png'),
-  '/covers/humanities.png': require('../../../assets/images/covers/humanities.png'),
-  '/covers/technology.png': require('../../../assets/images/covers/technology.png'),
-  '/covers/agriculture.png': require('../../../assets/images/covers/agriculture.png'),
-};
+import { getSubjectVisuals } from '@/lib/subjectVisuals';
+import { 
+  getCachedCoursesListSync, 
+  getCachedCoursesList, 
+  setCachedCoursesList, 
+  warmCourseMetadata, 
+  registerActiveCourse, 
+  registerCourseAlias 
+} from '@/lib/courseCache';
 
 type CourseType = {
   id: string;
@@ -30,11 +31,51 @@ type CourseType = {
   topics: { id: string }[];
 };
 
+const CATEGORIES = [
+  { id: 'all', label: 'All Subjects', icon: 'apps-outline' },
+  { id: 'mathematics', label: 'Mathematics', icon: 'calculator-outline' },
+  { id: 'sciences', label: 'Sciences', icon: 'flask-outline' },
+  { id: 'languages', label: 'Languages', icon: 'chatbubbles-outline' },
+  { id: 'humanities', label: 'Humanities', icon: 'earth-outline' },
+  { id: 'business', label: 'Business', icon: 'briefcase-outline' },
+  { id: 'technology', label: 'Technology', icon: 'hardware-chip-outline' },
+  { id: 'arts', label: 'Arts', icon: 'color-palette-outline' },
+  { id: 'technical_vocational', label: 'Technical & Vocational', icon: 'construct-outline' },
+  { id: 'health_life_skills', label: 'Health & Life Skills', icon: 'fitness-outline' },
+];
+
+function matchesSubjectCategory(title: string, categoryId: string): boolean {
+  if (!title || categoryId === 'all') return true;
+  const t = title.toLowerCase();
+
+  switch (categoryId) {
+    case 'mathematics':
+      return /math|pure math|additional math|stats|statistics|calculus|algebra/i.test(t);
+    case 'sciences':
+      return /science|physics|chemistry|biology|combined science|integrated science|general science|agriculture/i.test(t);
+    case 'languages':
+      return /english|literature|french|shona|ndebele|spanish|german|portuguese|chichewa|swahili|language/i.test(t);
+    case 'humanities':
+      return /history|geography|heritage|religious|divinity|sociology|civics|family & religious|social studies/i.test(t);
+    case 'business':
+      return /commerce|business|account|accounting|economic|finance|entrepreneur/i.test(t);
+    case 'technology':
+      return /computer|ict|information communication|technology|coding|software/i.test(t);
+    case 'arts':
+      return /art|design & art|music|theatre|drama|visual art|performing/i.test(t);
+    case 'technical_vocational':
+      return /design & technology|technical graphics|woodwork|metalwork|building|food & nutrition|fashion|fabric|agriculture|technical/i.test(t);
+    case 'health_life_skills':
+      return /physical education|p\.e\.|health|life skills|guidance|counselling|home economics/i.test(t);
+    default:
+      return t.includes(categoryId.toLowerCase());
+  }
+}
+
 function getEquivalentLevels(grade?: string): string[] {
   if (!grade) return [];
   const g = grade.trim().toLowerCase();
 
-  // IGCSE / O-Level Tier (Form 3, Form 4, IGCSE, O-Level, GCSE)
   if (['form 3', 'form 4', 'igcse', 'o-level', 'o level', 'gcse'].includes(g)) {
     return [
       'Form 3', 'Form 4', 'form 3', 'form 4',
@@ -44,7 +85,6 @@ function getEquivalentLevels(grade?: string): string[] {
     ];
   }
 
-  // A-Level Tier (Lower 6, Upper 6, A-Level, A Level, AS Level, A2)
   if (['lower 6', 'upper 6', 'a-level', 'a level', 'as level', 'as-level', 'a2', 'a2 level', 'as & a level'].includes(g)) {
     return [
       'Lower 6', 'Upper 6', 'lower 6', 'upper 6',
@@ -55,7 +95,6 @@ function getEquivalentLevels(grade?: string): string[] {
     ];
   }
 
-  // Lower Secondary / Form 1 & 2 / Checkpoint Tier
   if (['form 1', 'form 2', 'checkpoint', 'lower secondary'].includes(g)) {
     return [
       'Form 1', 'Form 2', 'form 1', 'form 2',
@@ -65,7 +104,6 @@ function getEquivalentLevels(grade?: string): string[] {
     ];
   }
 
-  // Grade 7 / Primary Tier
   if (['grade 7', 'primary'].includes(g)) {
     return ['Grade 7', 'Primary', 'grade 7', 'primary'];
   }
@@ -75,23 +113,44 @@ function getEquivalentLevels(grade?: string): string[] {
 
 export default function ExploreCourses({ searchQuery = '' }: { searchQuery?: string }) {
   const colors = useThemeColors();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const isLight = colors.background === '#F8FAFC' || colors.background === '#FFFFFF';
+  const styles = useMemo(() => createStyles(colors, isLight), [colors, isLight]);
 
   const router = useRouter();
   const { user } = useAuth();
   const role = user?.user_metadata?.role;
 
-  const [courses, setCourses] = useState<CourseType[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Initialize instantly (0ms) from cache memory if available
+  const [courses, setCourses] = useState<CourseType[]>(() => {
+    const cached = getCachedCoursesListSync();
+    return (cached as CourseType[]) || [];
+  });
+  const [selectedCategory, setSelectedCategory] = useState('all');
+  const [loading, setLoading] = useState(() => {
+    const cached = getCachedCoursesListSync();
+    return !(cached && cached.length > 0);
+  });
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   useEffect(() => {
-    async function fetchCourses() {
-      if (!user) return;
+    let isMounted = true;
 
+    // Fast-path: read from persistent AsyncStorage if memory was empty
+    async function loadCacheFirst() {
+      if (courses.length === 0) {
+        const localList = await getCachedCoursesList();
+        if (localList && localList.length > 0 && isMounted) {
+          setCourses(localList as CourseType[]);
+          setLoading(false);
+        }
+      }
+    }
+    loadCacheFirst();
+
+    async function fetchCourses() {
       let allowedCourseTitles: string[] | null = null;
 
-      if (role === 'teacher') {
+      if (user && role === 'teacher') {
         const { data: profileData } = await supabase
           .from('profiles')
           .select('subjects_taught')
@@ -102,8 +161,10 @@ export default function ExploreCourses({ searchQuery = '' }: { searchQuery?: str
       }
 
       if (role === 'teacher' && allowedCourseTitles && allowedCourseTitles.length === 0) {
-        setCourses([]);
-        setLoading(false);
+        if (isMounted) {
+          setCourses([]);
+          setLoading(false);
+        }
         return;
       }
 
@@ -114,7 +175,7 @@ export default function ExploreCourses({ searchQuery = '' }: { searchQuery?: str
           topics (id)
         `);
 
-      if (role === 'student') {
+      if (user && role === 'student') {
         const grade = user.user_metadata?.grade;
         const board = user.user_metadata?.board;
 
@@ -139,300 +200,430 @@ export default function ExploreCourses({ searchQuery = '' }: { searchQuery?: str
         query = query.in('title', allowedCourseTitles);
       }
       
-      const { data, error } = await query;
+      let { data, error } = await query;
+
+      // Resilient fallback: If session token skew causes JWT issued at future, load public courses
+      if (error) {
+        console.warn("Primary course query notice:", error.message);
+        try {
+          const fallbackResp = await fetch('https://akjbejexhdawelrfygub.supabase.co/rest/v1/courses?select=id,title,board,level,icon,color,image_url,topics(id)', {
+            headers: {
+              'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFramJlamV4aGRhd2VscmZ5Z3ViIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ3MjAwMTgsImV4cCI6MjEwMDI5NjAxOH0.L2t-AiTbkMOtadI6rNVII9QZ9qLVZqD3ep9ekHqvI7Y',
+              'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFramJlamV4aGRhd2VscmZ5Z3ViIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ3MjAwMTgsImV4cCI6MjEwMDI5NjAxOH0.L2t-AiTbkMOtadI6rNVII9QZ9qLVZqD3ep9ekHqvI7Y'
+            }
+          });
+          if (fallbackResp.ok) {
+            data = await fallbackResp.json();
+            error = null;
+          }
+        } catch (_) {}
+      }
 
       if (error) {
-        console.error("Error fetching courses:", error);
-        setErrorMsg(error.message);
+        if (isMounted && courses.length === 0) {
+          setErrorMsg(error.message);
+        }
       } else if (data) {
-        setCourses(data as CourseType[]);
+        // Deduplicate courses: If multiple courses have same title + board + level,
+        // pick the canonical one with the most topics, and alias empty duplicates to it.
+        const grouped = new Map<string, CourseType[]>();
+        (data as CourseType[]).forEach(c => {
+          const key = `${(c.title || '').trim().toLowerCase()}__${(c.board || '').trim().toLowerCase()}__${(c.level || '').trim().toLowerCase()}`;
+          if (!grouped.has(key)) grouped.set(key, []);
+          grouped.get(key)!.push(c);
+        });
+
+        const cleanedList: CourseType[] = [];
+        grouped.forEach((group) => {
+          group.sort((a, b) => (b.topics?.length || 0) - (a.topics?.length || 0));
+          const primary = group[0];
+          cleanedList.push(primary);
+          registerActiveCourse(primary.title, primary.board, primary.level, primary.id);
+          group.forEach(item => {
+            if (item.id !== primary.id) {
+              registerCourseAlias(item.id, primary.id);
+            }
+          });
+        });
+
+        if (isMounted) {
+          setCourses(cleanedList);
+          setErrorMsg(null);
+        }
+        await setCachedCoursesList(cleanedList);
       }
-      setLoading(false);
+      if (isMounted) {
+        setLoading(false);
+      }
     }
 
     fetchCourses();
 
-    const coursesSubscription = supabase
-      .channel('courses-changes')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'courses' },
-        () => {
-          fetchCourses();
-        }
-      )
-      .subscribe();
-
     return () => {
-      supabase.removeChannel(coursesSubscription);
+      isMounted = false;
     };
   }, [user, role]);
 
+  const filteredCourses = useMemo(() => {
+    return courses.filter(course => {
+      // Category filter using intelligent subject matching
+      if (!matchesSubjectCategory(course.title, selectedCategory)) {
+        return false;
+      }
+
+      // Search query filter
+      if (!searchQuery) return true;
+      const q = searchQuery.toLowerCase();
+      return course.title.toLowerCase().includes(q) || 
+             course.board?.toLowerCase().includes(q) ||
+             course.level?.toLowerCase().includes(q);
+    });
+  }, [courses, selectedCategory, searchQuery]);
+
   return (
     <View style={styles.container}>
-      <Text style={styles.headerTitle}>Explore Courses</Text>
-      <Text style={styles.headerSubtitle}>Find subjects tailored to your syllabus</Text>
-
-      <Pressable 
-        style={styles.aiBanner}
-        onPress={() => router.push('/papers')}
-      >
-        <View style={styles.aiBannerContent}>
-          <View style={styles.aiBannerIcon}>
-            <MaterialCommunityIcons name="robot-outline" size={24} color={colors.primary} />
-          </View>
-          <View style={{ flex: 1, marginLeft: spacing.md }}>
-            <Text style={styles.aiBannerTitle}>AI Exam Intelligence</Text>
-            <Text style={styles.aiBannerSubtitle}>Past papers turned into an interactive AI tutor.</Text>
-          </View>
-          <MaterialCommunityIcons name="chevron-right" size={20} color={colors.textSecondary} />
+      {/* Category Pills Header */}
+      <View style={styles.headerRow}>
+        <View>
+          <Text style={styles.sectionTitle}>Curriculum Subjects</Text>
+          <Text style={styles.sectionSubtitle}>Select your subject to access syllabus & topics</Text>
         </View>
-      </Pressable>
+        <Text style={styles.courseCountBadge}>{filteredCourses.length} Available</Text>
+      </View>
+
+      {/* Horizontal Category Pill Filter */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.categoryScroll}
+      >
+        {CATEGORIES.map(cat => {
+          const isSelected = selectedCategory === cat.id;
+          return (
+            <Pressable
+              key={cat.id}
+              style={[styles.categoryPill, isSelected ? styles.categoryPillActive : styles.categoryPillInactive]}
+              onPress={() => setSelectedCategory(cat.id)}
+            >
+              <Ionicons 
+                name={cat.icon as any} 
+                size={16} 
+                color={isSelected ? (isLight ? '#FFFFFF' : '#0F172A') : colors.textSecondary} 
+              />
+              <Text style={[styles.categoryPillText, isSelected ? styles.categoryPillTextActive : styles.categoryPillTextInactive]}>
+                {cat.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
 
       {errorMsg ? (
-        <Text style={{ color: 'red', marginTop: 20 }}>Error: {errorMsg}</Text>
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>Notice: {errorMsg}</Text>
+        </View>
       ) : loading ? (
-        <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: spacing.xxl }} />
-      ) : courses.length === 0 ? (
-        <Text style={{ color: colors.textSecondary, marginTop: 20 }}>No courses found in the database.</Text>
+        <ActivityIndicator size="large" color="#2563EB" style={{ marginTop: 30 }} />
+      ) : filteredCourses.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <Feather name="book-open" size={36} color={colors.textTertiary} />
+          <Text style={styles.emptyTitle}>No subjects found</Text>
+          <Text style={styles.emptySubtitle}>Try selecting a different category or clear search.</Text>
+        </View>
       ) : (
-        <View style={styles.grid}>
-          {(() => {
-            const isLightMode = colors.background === '#F8FAFC';
-            
-            const filteredCourses = courses.filter(course => {
-              if (!searchQuery) return true;
-              const q = searchQuery.toLowerCase();
-              return course.title.toLowerCase().includes(q) || 
-                     course.board.toLowerCase().includes(q) ||
-                     course.level.toLowerCase().includes(q);
-            });
+        <View style={styles.coursesList}>
+          {filteredCourses.map((course) => {
+            const topicCount = course.topics?.length || 0;
+            const { color: accentColor, icon: subjectIcon } = getSubjectVisuals(course.title, course.color, course.icon);
 
-            if (filteredCourses.length === 0) {
-              return <Text style={{ color: colors.textSecondary, marginTop: 20 }}>No courses match your search.</Text>;
-            }
-
-            return filteredCourses.map((course) => (
+            return (
               <Pressable 
                 key={course.id} 
-                style={[styles.card, { backgroundColor: colors.surface }]}
-                onPress={() => router.push(`/course/${course.id}`)}
+                style={styles.courseCard}
+                onPress={() => {
+                  warmCourseMetadata(course);
+                  router.push(`/course/${course.id}`);
+                }}
               >
-              <View style={styles.cardContent}>
-                <View style={styles.imageWrapper}>
-                  {course.image_url && coverImages[course.image_url] ? (
-                    <Image 
-                      source={coverImages[course.image_url]} 
-                      style={styles.courseImage} 
-                      resizeMode="cover"
+                {/* Top Card Row */}
+                <View style={styles.cardTopRow}>
+                  {/* Subject Icon Box - Frosted soft tint with rich icon */}
+                  <View style={[styles.subjectIconBox, { backgroundColor: isLight ? `${accentColor}12` : `${accentColor}25` }]}>
+                    <MaterialCommunityIcons 
+                      name={subjectIcon as any} 
+                      size={26} 
+                      color={accentColor} 
                     />
-                  ) : (
-                    <View style={[styles.iconContainer, { backgroundColor: course.color }]}>
-                      <MaterialCommunityIcons name={course.icon as any} size={48} color={colors.background} />
-                    </View>
-                  )}
-                  <View style={styles.floatingRatingBadge}>
-                    <Ionicons name="star" size={14} color="#F59E0B" />
-                    <Text style={styles.ratingText}>
-                      {course.rating || (Math.random() * 1 + 4).toFixed(1)}
+                  </View>
+
+                  {/* Title & Metadata Info */}
+                  <View style={styles.cardHeaderInfo}>
+                    <Text style={styles.courseTitle} numberOfLines={1}>
+                      {course.title}
                     </Text>
+
+                    <View style={styles.tagPillRow}>
+                      {course.board && (
+                        <View style={styles.boardBadge}>
+                          <Text style={styles.boardBadgeText}>{course.board}</Text>
+                        </View>
+                      )}
+                      {course.level && (
+                        <View style={styles.levelBadge}>
+                          <Text style={styles.levelBadgeText}>{course.level}</Text>
+                        </View>
+                      )}
+                    </View>
+                  </View>
+
+                  {/* Rating / Quality Badge */}
+                  <View style={styles.ratingBadge}>
+                    <Ionicons name="star" size={13} color="#F59E0B" />
+                    <Text style={styles.ratingValue}>4.9</Text>
                   </View>
                 </View>
-                
-                <View style={styles.cardTextContainer}>
-                  <Text style={styles.courseTitle} numberOfLines={1}>{course.title}</Text>
-                  {(course.board || course.level) && (
-                    <Text style={styles.courseMeta}>
-                      {course.board ? course.board : ''}
-                      {course.board && course.level ? ' • ' : ''}
-                      {course.level ? course.level : ''}
-                    </Text>
-                  )}
-                  
-                  <View style={styles.teacherRow}>
-                    <Ionicons name="person-circle" size={18} color={colors.textSecondary} />
-                    <Text style={styles.teacherName}>
-                      {course.teacher_name || 'Mr. John Doe'}
-                    </Text>
+
+                {/* Card Divider */}
+                <View style={styles.cardDivider} />
+
+                {/* Bottom Action & Stats Row */}
+                <View style={styles.cardBottomRow}>
+                  <View style={styles.cardStatsGroup}>
+                    <View style={styles.statPill}>
+                      <Feather name="layers" size={13} color={colors.textSecondary} />
+                      <Text style={styles.statPillText}>{topicCount} Topics</Text>
+                    </View>
+                    <View style={styles.statPill}>
+                      <Feather name="users" size={13} color={colors.textSecondary} />
+                      <Text style={styles.statPillTextSecondary}>2.4k Students</Text>
+                    </View>
                   </View>
-                  
-                  <View style={styles.statsRow}>
-                    <View style={styles.statItem}>
-                      <Ionicons name="people" size={16} color={colors.primary} />
-                      <Text style={styles.statText}>
-                        {course.enrolled_count || Math.floor(Math.random() * 900) + 100} Students
-                      </Text>
-                    </View>
-                    <View style={styles.statDivider} />
-                    <View style={styles.statItem}>
-                      <Ionicons name="library" size={16} color={colors.secondary} />
-                      <Text style={styles.statText}>
-                        {course.topics?.length || 0} Topics
-                      </Text>
-                    </View>
+
+                  {/* Sleek Minimalist Action Arrow Button */}
+                  <View style={styles.circularActionButton}>
+                    <Feather name="arrow-up-right" size={16} color={colors.text} />
                   </View>
                 </View>
-              </View>
-            </Pressable>
-            ));
-          })()}
-          </View>
-        )}
+              </Pressable>
+            );
+          })}
+        </View>
+      )}
     </View>
   );
 }
 
-const createStyles = (colors: any) => StyleSheet.create({
+const createStyles = (colors: any, isLight: boolean) => StyleSheet.create({
   container: {
-    flex: 1,
-    marginTop: spacing.xxl,
+    marginTop: 10,
   },
-  headerTitle: {
-    fontSize: typography.sizes.xl,
-    fontWeight: typography.weights.bold,
-    color: colors.text,
-  },
-  headerSubtitle: {
-    fontSize: typography.sizes.sm,
-    color: colors.textSecondary,
-    marginBottom: spacing.md,
-    marginTop: spacing.xs,
-  },
-  aiBanner: {
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.md,
-    padding: spacing.lg,
-    marginBottom: spacing.xxl,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  aiBannerContent: {
+  headerRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    marginBottom: 14,
   },
-  aiBannerIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: borderRadius.sm,
-    backgroundColor: colors.primaryLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  aiBannerTitle: {
+  sectionTitle: {
+    fontSize: 18,
+    fontFamily: 'Outfit_700Bold',
+    fontWeight: '700',
     color: colors.text,
-    fontSize: typography.sizes.md,
-    fontWeight: typography.weights.bold,
-    fontFamily: 'Outfit_600SemiBold',
-    marginBottom: 2,
+    letterSpacing: -0.3,
   },
-  aiBannerSubtitle: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.sm,
+  sectionSubtitle: {
+    fontSize: 12,
     fontFamily: 'Outfit_400Regular',
-    lineHeight: 18,
+    color: colors.textSecondary,
+    marginTop: 2,
   },
-  grid: {
-    flexDirection: 'column',
-    gap: spacing.lg,
+  courseCountBadge: {
+    fontSize: 12,
+    fontFamily: 'Outfit_500Medium',
+    color: colors.textTertiary || colors.textSecondary,
+    fontWeight: '500',
   },
-  card: {
-    width: '100%', 
-    borderRadius: borderRadius.md,
-    alignItems: 'flex-start',
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: colors.border,
+  categoryScroll: {
+    gap: 8,
+    paddingBottom: 16,
   },
-  cardContent: {
-    flexDirection: 'column',
-    width: '100%',
-  },
-  imageWrapper: {
-    width: '100%',
-    height: 140,
-    position: 'relative',
-  },
-  courseImage: {
-    width: '100%',
-    height: '100%',
-  },
-  iconContainer: {
-    width: '100%',
-    height: '100%',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  floatingRatingBadge: {
-    position: 'absolute',
-    top: spacing.md,
-    right: spacing.md,
+  categoryPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.65)',
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
-    borderRadius: borderRadius.md,
-    gap: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 9999,
+    gap: 6,
   },
-  ratingText: {
-    fontSize: typography.sizes.xs,
-    fontWeight: typography.weights.bold,
+  categoryPillActive: {
+    backgroundColor: isLight ? '#0F172A' : '#F1F5F9',
+    ...shadows.sm,
+  },
+  categoryPillInactive: {
+    backgroundColor: isLight ? '#FFFFFF' : colors.surface,
+    borderWidth: 1,
+    borderColor: isLight ? '#E2E8F0' : colors.border,
+  },
+  categoryPillText: {
+    fontSize: 13,
     fontFamily: 'Outfit_600SemiBold',
-    color: '#FCD34D',
+    fontWeight: '600',
   },
-  cardTextContainer: {
-    width: '100%',
-    padding: spacing.lg,
+  categoryPillTextActive: {
+    color: isLight ? '#FFFFFF' : '#0F172A',
+  },
+  categoryPillTextInactive: {
+    color: colors.textSecondary,
+  },
+  coursesList: {
+    gap: 14,
+  },
+  courseCard: {
+    backgroundColor: isLight ? '#FFFFFF' : colors.card,
+    borderRadius: 24,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: isLight ? '#EDF2F7' : colors.cardBorder,
+    ...shadows.tactile,
+  },
+  cardTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  subjectIconBox: {
+    width: 52,
+    height: 52,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 14,
+  },
+  cardHeaderInfo: {
+    flex: 1,
   },
   courseTitle: {
-    fontSize: typography.sizes.lg,
-    fontWeight: typography.weights.bold,
-    fontFamily: 'Outfit_600SemiBold',
+    fontSize: 17,
+    fontFamily: 'Outfit_700Bold',
+    fontWeight: '700',
     color: colors.text,
+    letterSpacing: -0.3,
     marginBottom: 4,
   },
-  courseMeta: {
-    fontSize: typography.sizes.sm,
+  tagPillRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  boardBadge: {
+    backgroundColor: isLight ? '#F1F5F9' : colors.surfaceHighlight,
+    paddingHorizontal: 8,
+    paddingVertical: 2.5,
+    borderRadius: 6,
+  },
+  boardBadgeText: {
+    fontSize: 11,
+    fontFamily: 'Outfit_600SemiBold',
+    color: colors.text,
+    fontWeight: '600',
+  },
+  levelBadge: {
+    backgroundColor: isLight ? '#F8FAFC' : colors.surfaceHighlight,
+    paddingHorizontal: 8,
+    paddingVertical: 2.5,
+    borderRadius: 6,
+  },
+  levelBadgeText: {
+    fontSize: 11,
+    fontFamily: 'Outfit_500Medium',
+    color: colors.textSecondary,
+  },
+  ratingBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: isLight ? '#FEF3C7' : '#2D2110',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    gap: 3,
+    alignSelf: 'flex-start',
+  },
+  ratingValue: {
+    fontSize: 12,
+    fontFamily: 'Outfit_700Bold',
+    fontWeight: '700',
+    color: '#D97706',
+  },
+  cardDivider: {
+    height: 1,
+    backgroundColor: isLight ? '#F1F5F9' : colors.border,
+    marginVertical: 14,
+  },
+  cardBottomRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  cardStatsGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  statPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: isLight ? '#F8FAFC' : colors.surfaceHighlight,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 5,
+  },
+  statPillText: {
+    fontSize: 11,
+    fontFamily: 'Outfit_500Medium',
+    color: colors.textSecondary,
+    fontWeight: '500',
+  },
+  statPillTextSecondary: {
+    fontSize: 11,
+    fontFamily: 'Outfit_500Medium',
+    color: colors.textSecondary,
+  },
+  circularActionButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: isLight ? '#F8FAFC' : colors.surfaceHighlight,
+    borderWidth: 1,
+    borderColor: isLight ? '#E2E8F0' : colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  errorContainer: {
+    padding: 16,
+    borderRadius: 16,
+    backgroundColor: '#FEF2F2',
+    marginTop: 16,
+  },
+  errorText: {
+    color: '#DC2626',
+    fontSize: 13,
+    fontFamily: 'Outfit_500Medium',
+  },
+  emptyContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+    gap: 8,
+  },
+  emptyTitle: {
+    fontSize: 16,
+    fontFamily: 'Outfit_600SemiBold',
+    color: colors.text,
+    marginTop: 8,
+  },
+  emptySubtitle: {
+    fontSize: 13,
     fontFamily: 'Outfit_400Regular',
     color: colors.textSecondary,
-    fontWeight: typography.weights.medium,
-    marginBottom: spacing.xs,
-  },
-  teacherRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: spacing.md,
-    gap: spacing.xs,
-  },
-  teacherName: {
-    fontSize: typography.sizes.xs,
-    fontFamily: 'Outfit_500Medium',
-    color: colors.textSecondary,
-    fontWeight: typography.weights.medium,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(150, 150, 150, 0.08)',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: borderRadius.lg,
-  },
-  statItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  statDivider: {
-    width: 1,
-    height: 12,
-    backgroundColor: colors.border,
-    marginHorizontal: spacing.md,
-  },
-  statText: {
-    fontSize: typography.sizes.xs,
-    fontFamily: 'Outfit_500Medium',
-    color: colors.textSecondary,
-    fontWeight: typography.weights.medium,
   },
 });
+

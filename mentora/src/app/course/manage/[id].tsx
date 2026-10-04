@@ -5,8 +5,12 @@ import { supabase } from '@/lib/supabase';
 import { spacing, typography, borderRadius, useThemeColors } from '@/constants/theme';
 import { Feather, MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system';
+import * as DocumentPicker from 'expo-document-picker';
+import * as WebBrowser from 'expo-web-browser';
+import * as FileSystem from 'expo-file-system/legacy';
+import { FileSystemUploadType } from 'expo-file-system/legacy';
 import { decode } from 'base64-arraybuffer';
+import { calculateSubtopicMinutes, calculateTopicMinutes, formatStudyTime } from '@/lib/time';
 
 type Topic = {
   id: string;
@@ -56,10 +60,14 @@ export default function ManageCourseScreen() {
     const { data, error } = await supabase
       .from('courses')
       .select(`
-        id, title, board, level, icon, color,
+        *,
         topics (
-          id, title,
-          subtopics ( id, title )
+          *,
+          subtopics (
+            id, title, difficulty, estimated_time, estimated_quiz_minutes, workspace_template,
+            subtopic_materials (estimated_minutes),
+            questions (id)
+          )
         )
       `)
       .eq('id', id)
@@ -97,6 +105,89 @@ export default function ManageCourseScreen() {
       setNewTopicTitle('');
       setAddTopicVisible(false);
       fetchCourseData(); // Refresh list
+    }
+  };
+
+  const [uploadingChapterId, setUploadingChapterId] = useState<string | null>(null);
+
+  const handleUploadChapterSummary = async (topicId: string) => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: 'application/pdf',
+        copyToCacheDirectory: true,
+      });
+
+      if (result.canceled || !result.assets || result.assets.length === 0) return;
+
+      const asset = result.assets[0];
+      setUploadingChapterId(topicId);
+
+      const fileExt = asset.name.split('.').pop() || 'pdf';
+      const fileName = `chapter_${topicId}_${Date.now()}.${fileExt}`;
+
+      let fileBody: any;
+      if (Platform.OS === 'web') {
+        fileBody = asset.file;
+        if (!fileBody) {
+          const response = await fetch(asset.uri);
+          fileBody = await response.blob();
+        }
+      } else {
+        const base64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: 'base64' });
+        fileBody = decode(base64);
+      }
+
+      const { error: uploadError } = await supabase.storage
+        .from('syllabuses')
+        .upload(fileName, fileBody, {
+          contentType: asset.mimeType || 'application/pdf',
+          upsert: true
+        });
+
+      if (uploadError) throw uploadError;
+
+      const { data: publicUrlData } = supabase.storage.from('syllabuses').getPublicUrl(fileName);
+      const fileUrl = publicUrlData.publicUrl;
+
+      const topic = course?.topics?.find((t: any) => t.id === topicId);
+      let existingTemplate = (topic as any)?.workspace_template;
+      if (typeof existingTemplate === 'string') {
+        try { existingTemplate = JSON.parse(existingTemplate); } catch (e) { existingTemplate = {}; }
+      } else if (!existingTemplate || typeof existingTemplate !== 'object') {
+        existingTemplate = {};
+      }
+
+      const newFile = {
+        display_name: asset.name.replace(/\.[^/.]+$/, '') || 'Chapter Document',
+        file_name: asset.name,
+        url: fileUrl,
+        uploaded_at: new Date().toISOString(),
+        size: asset.size,
+        type: 'pdf_resources',
+        estimated_minutes: 15,
+      };
+      const existingContent = Array.isArray(existingTemplate.content) ? existingTemplate.content : [];
+
+      const updatedTemplate = {
+        ...existingTemplate,
+        content: [...existingContent.filter((f: any) => f.url !== fileUrl), newFile],
+        chapter_pdf_url: fileUrl,
+        chapter_pdf_name: asset.name || 'Chapter Document'
+      };
+
+      const { error: dbError } = await supabase
+        .from('topics')
+        .update({ workspace_template: updatedTemplate })
+        .eq('id', topicId);
+
+      if (dbError) throw dbError;
+
+      Alert.alert('Success', 'Chapter document uploaded successfully!');
+      fetchCourseData();
+    } catch (err: any) {
+      Alert.alert('Upload Failed', err.message || 'Could not upload document');
+    } finally {
+      setUploadingChapterId(null);
     }
   };
 
@@ -160,7 +251,7 @@ export default function ManageCourseScreen() {
           selectedVideo.uri,
           {
             httpMethod: 'POST',
-            uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+            uploadType: FileSystemUploadType.BINARY_CONTENT,
             headers: {
               Authorization: `Bearer ${session?.access_token ?? supabaseKey}`,
               apikey: supabaseKey as string,
@@ -278,27 +369,78 @@ export default function ManageCourseScreen() {
             </Pressable>
           </View>
         ) : (
-          course.topics?.map((topic, index) => (
-            <View key={topic.id} style={styles.topicCard}>
-              <View style={styles.topicHeader}>
-                <View style={styles.topicTitleRow}>
-                  <View style={styles.topicNumberBadge}>
-                    <Text style={styles.topicNumberText}>{index + 1}</Text>
-                  </View>
-                  <Text style={styles.topicTitle}>{topic.title}</Text>
-                </View>
-                <Pressable>
-                  <Feather name="more-vertical" size={20} color={colors.textSecondary} />
-                </Pressable>
-              </View>
+          course.topics?.map((topic, index) => {
+            const topicTotalMins = calculateTopicMinutes(topic);
+            const topicTimeStr = formatStudyTime(topicTotalMins);
 
-              <View style={styles.subtopicsContainer}>
-                {topic.subtopics?.map((sub) => (
-                  <Pressable key={sub.id} style={styles.subtopicItem}>
-                    <Feather name="file-text" size={16} color={colors.textSecondary} />
-                    <Text style={styles.subtopicTitle}>{sub.title}</Text>
+            return (
+              <View key={topic.id} style={styles.topicCard}>
+                <View style={styles.topicHeader}>
+                  <View style={styles.topicTitleRow}>
+                    <View style={styles.topicNumberBadge}>
+                      <Text style={styles.topicNumberText}>{index + 1}</Text>
+                    </View>
+                    <View>
+                      <Text style={styles.topicTitle}>{topic.title}</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
+                        <Feather name="clock" size={11} color={colors.primary} />
+                        <Text style={{ color: colors.primary, fontSize: typography.sizes.xs, fontWeight: '600' }}>
+                          {topicTimeStr} total
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                  <Pressable>
+                    <Feather name="more-vertical" size={20} color={colors.textSecondary} />
                   </Pressable>
-                ))}
+                </View>
+
+                {/* Chapter Materials / Overview Resources Block */}
+                <View style={styles.chapterSummaryBox}>
+                  <View style={styles.chapterSummaryInfo}>
+                    <Ionicons name="folder-open" size={18} color={colors.primary} />
+                    <View style={{ flex: 1, marginLeft: 8 }}>
+                      <Text style={styles.chapterSummaryTitle}>Chapter Materials & Resources</Text>
+                      <Text style={styles.chapterSummarySub} numberOfLines={1}>
+                        {(topic as any).workspace_template?.chapter_pdf_name || (topic as any).workspace_template?.content?.[0]?.display_name || 'Upload overview notes & revision guide for this chapter'}
+                      </Text>
+                    </View>
+                  </View>
+                  <Pressable 
+                    style={styles.uploadChapterBtn}
+                    onPress={() => handleUploadChapterSummary(topic.id)}
+                    disabled={uploadingChapterId === topic.id}
+                  >
+                    {uploadingChapterId === topic.id ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <>
+                        <Feather name="upload" size={12} color="#FFFFFF" style={{ marginRight: 4 }} />
+                        <Text style={styles.uploadChapterBtnText}>
+                          {(topic as any).workspace_template?.chapter_pdf_url ? 'Replace Notes' : 'Upload PDF'}
+                        </Text>
+                      </>
+                    )}
+                  </Pressable>
+                </View>
+
+                <View style={styles.subtopicsContainer}>
+                  {topic.subtopics?.map((sub) => {
+                    const subMins = calculateSubtopicMinutes(sub);
+                    const subTimeStr = formatStudyTime(subMins, sub.estimated_time);
+
+                    return (
+                      <Pressable key={sub.id} style={styles.subtopicItem}>
+                        <Feather name="file-text" size={16} color={colors.textSecondary} />
+                        <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <Text style={styles.subtopicTitle}>{sub.title}</Text>
+                          <Text style={{ fontSize: typography.sizes.xs, color: colors.textSecondary, marginLeft: spacing.sm }}>
+                            <Feather name="clock" size={10} color={colors.textSecondary} /> {subTimeStr}
+                          </Text>
+                        </View>
+                      </Pressable>
+                    );
+                  })}
                 
                 <Pressable 
                   style={styles.addSubtopicBtn}
@@ -312,7 +454,8 @@ export default function ManageCourseScreen() {
                 </Pressable>
               </View>
             </View>
-          ))
+          );
+        })
         )}
       </ScrollView>
 
@@ -710,5 +853,47 @@ const createStyles = (colors: any) => StyleSheet.create({
     color: colors.background,
     fontSize: typography.sizes.md,
     fontWeight: typography.weights.semibold,
+  },
+  chapterSummaryBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 12,
+    marginHorizontal: 16,
+    marginBottom: 10,
+    borderRadius: 12,
+    backgroundColor: colors.surfaceHighlight,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  chapterSummaryInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    marginRight: 10,
+  },
+  chapterSummaryTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.text,
+    fontFamily: 'Outfit_600SemiBold',
+  },
+  chapterSummarySub: {
+    fontSize: 11,
+    color: colors.textSecondary,
+    marginTop: 1,
+  },
+  uploadChapterBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: colors.primary,
+  },
+  uploadChapterBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
 });

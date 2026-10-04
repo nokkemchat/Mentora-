@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useColorScheme } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { lightColors, darkColors } from '@/constants/theme';
+import { lightColors, darkColors } from '@/constants/themeColors';
 
 export type ThemePreference = 'system' | 'light' | 'dark';
 
@@ -26,6 +26,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
         const storedTheme = await AsyncStorage.getItem('@app_theme');
         if (storedTheme === 'light' || storedTheme === 'dark' || storedTheme === 'system') {
           setThemePreferenceState(storedTheme as ThemePreference);
+        } else {
+          setThemePreferenceState('system');
         }
       } catch (e) {
         console.error('Failed to load theme preference', e);

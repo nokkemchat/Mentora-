@@ -124,8 +124,31 @@ export default function AuthScreen() {
                 value={email}
                 onChangeText={setEmail}
                 autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="email"
+                textContentType="emailAddress"
                 keyboardType="email-address"
               />
+              {email.length > 0 && !email.includes('@') && (
+                <View style={{ flexDirection: 'row', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+                  {['@', '@gmail.com', '@outlook.com', '@icloud.com'].map(suffix => (
+                    <Pressable
+                      key={suffix}
+                      onPress={() => setEmail(prev => prev + suffix)}
+                      style={{
+                        backgroundColor: colors.surfaceHighlight || colors.card,
+                        borderWidth: 1,
+                        borderColor: colors.border,
+                        borderRadius: 8,
+                        paddingHorizontal: 10,
+                        paddingVertical: 5,
+                      }}
+                    >
+                      <Text style={{ fontSize: 12, fontWeight: '600', color: colors.primary }}>{suffix}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              )}
             </View>
 
             <View style={styles.inputContainer}>

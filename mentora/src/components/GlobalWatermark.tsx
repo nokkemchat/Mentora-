@@ -1,9 +1,12 @@
 import React from 'react';
 import { View, ImageBackground } from 'react-native';
-import { useThemeColors } from '../constants/theme';
+import { useAppTheme } from '../context/ThemeContext';
 
 export function GlobalWatermark() {
-  const colors = useThemeColors();
+  const { isDark } = useAppTheme();
+  
+  // In ChatGPT dark mode, keep the canvas pure, sleek, and distraction-free
+  if (isDark) return null;
   
   return (
     <View 
@@ -11,7 +14,7 @@ export function GlobalWatermark() {
         position: 'absolute', 
         top: 0, left: 0, right: 0, bottom: 0, 
         pointerEvents: 'none', 
-        opacity: colors.background === '#F8FAFC' ? 0.08 : 0.05, // Slightly higher opacity in light mode
+        opacity: 0.06, 
         zIndex: 0 
       }}
       pointerEvents="none"

@@ -147,8 +147,8 @@ export default function QuizScreen() {
 
         <View style={styles.optionsContainer}>
           {currentQuestion.options.map((option: any) => {
-            let optionStyle = styles.optionButton;
-            let textStyle = styles.optionText;
+            let optionStyle: any = styles.optionButton;
+            let textStyle: any = styles.optionText;
             let icon = null;
 
             if (isAnswerChecked) {

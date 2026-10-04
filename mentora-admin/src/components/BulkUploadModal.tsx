@@ -22,6 +22,7 @@ interface ParsedFile {
   type: string;
   status: 'analyzing' | 'pending' | 'uploading' | 'success' | 'error';
   errorMessage?: string;
+  publicUrl?: string;
 }
 
 export default function BulkUploadModal({ onClose, onSuccess }: BulkUploadModalProps) {
@@ -175,8 +176,29 @@ export default function BulkUploadModal({ onClose, onSuccess }: BulkUploadModalP
           .from('past_papers')
           .getPublicUrl(filePath);
 
+        // Check for matching marking scheme or question paper
+        let initialMsUrl: string | null = null;
+        if (fileObj.type === 'qp') {
+          const batchMs = newFiles.find((f, idx) => idx !== i && f.status === 'success' && f.type === 'ms' && f.subject === fileObj.subject && f.year === fileObj.year && f.paper_number === fileObj.paper_number);
+          if (batchMs?.publicUrl) {
+            initialMsUrl = batchMs.publicUrl;
+          } else {
+            const { data: existingMs } = await supabase
+              .from('papers')
+              .select('pdf_url')
+              .eq('subject', fileObj.subject)
+              .eq('year', parseInt(fileObj.year))
+              .eq('paper_number', parseInt(fileObj.paper_number))
+              .eq('type', 'ms')
+              .maybeSingle();
+            if (existingMs?.pdf_url) {
+              initialMsUrl = existingMs.pdf_url;
+            }
+          }
+        }
+
         // 2. Insert Database Record
-        const { error: dbError } = await supabase.from('papers').insert({
+        const { data: insertedPaper, error: dbError } = await supabase.from('papers').insert({
           curriculum: fileObj.curriculum,
           subject: fileObj.subject,
           grade_level: fileObj.grade_level,
@@ -185,10 +207,71 @@ export default function BulkUploadModal({ onClose, onSuccess }: BulkUploadModalP
           paper_number: parseInt(fileObj.paper_number),
           variant: fileObj.variant || null,
           type: fileObj.type,
-          pdf_url: publicUrl
-        });
+          pdf_url: publicUrl,
+          mark_scheme_url: initialMsUrl
+        }).select('id').single();
 
         if (dbError) throw dbError;
+
+        fileObj.publicUrl = publicUrl;
+
+        if (insertedPaper && fileObj.type === 'qp') {
+          await supabase.from('ingestion_jobs').insert({
+            paper_id: insertedPaper.id,
+            mark_scheme_url: initialMsUrl,
+            status: 'uploaded'
+          });
+
+          // Trigger extraction: Try local visual agent first, fallback to Supabase Edge Function
+          (async () => {
+            let triggered = false;
+            try {
+              const controller = new AbortController();
+              const timeoutId = setTimeout(() => controller.abort(), 1000);
+              const res = await fetch('http://localhost:3005/process', { method: 'POST', signal: controller.signal });
+              clearTimeout(timeoutId);
+              if (res.ok) triggered = true;
+            } catch (e) {}
+
+            if (!triggered) {
+              console.log('Triggering cloud edge function extraction for bulk paper', insertedPaper.id);
+              supabase.functions.invoke('process-paper', {
+                body: { 
+                  paper_id: insertedPaper.id,
+                  mark_scheme_url: initialMsUrl || undefined
+                }
+              }).catch(e => console.error('Bulk extraction trigger error:', e));
+
+              if (initialMsUrl) {
+                supabase.functions.invoke('process-marking-scheme', {
+                  body: { paper_id: insertedPaper.id, mark_scheme_url: initialMsUrl }
+                }).catch(e => console.warn('Bulk MS trigger notice:', e));
+              }
+            }
+          })();
+        } else if (fileObj.type === 'ms') {
+          // If an MS is uploaded, auto-link to matching QP and trigger marking scheme extraction
+          const { data: matchingQps } = await supabase
+            .from('papers')
+            .select('id, mark_scheme_url')
+            .eq('subject', fileObj.subject)
+            .eq('year', parseInt(fileObj.year))
+            .eq('paper_number', parseInt(fileObj.paper_number))
+            .eq('type', 'qp');
+
+          if (matchingQps && matchingQps.length > 0) {
+            for (const qp of matchingQps) {
+              await supabase
+                .from('papers')
+                .update({ mark_scheme_url: publicUrl })
+                .eq('id', qp.id);
+
+              supabase.functions.invoke('process-marking-scheme', {
+                body: { paper_id: qp.id, mark_scheme_url: publicUrl }
+              }).catch(e => console.error('MS extraction trigger error:', e));
+            }
+          }
+        }
 
         newFiles[i].status = 'success';
       } catch (err: any) {

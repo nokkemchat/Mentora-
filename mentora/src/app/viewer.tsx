@@ -1,31 +1,65 @@
-import React from 'react';
-import { View, StyleSheet, Text, Pressable, SafeAreaView } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, StyleSheet, Text, Pressable } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Video, ResizeMode } from 'expo-av';
 import { WebView } from 'react-native-webview';
 import { Ionicons, Feather } from '@expo/vector-icons';
+import { Bot, Sparkles } from 'lucide-react-native';
 import { spacing, typography, useThemeColors, borderRadius } from '@/constants/theme';
+import { QuestionPaperTutorModal } from '@/components/QuestionPaperTutorModal';
 
 export default function MediaViewerScreen() {
-  const { uri, type, title } = useLocalSearchParams<{ uri: string, type: string, title: string }>();
+  const { uri, type, title, paperId, subject, curriculum, openTutor } = useLocalSearchParams<{
+    uri: string;
+    type: string;
+    title: string;
+    paperId?: string;
+    subject?: string;
+    curriculum?: string;
+    openTutor?: string;
+  }>();
   const router = useRouter();
   const colors = useThemeColors();
 
+  const [tutorModalVisible, setTutorModalVisible] = useState(openTutor === 'true');
+
+  useEffect(() => {
+    if (openTutor === 'true') {
+      setTutorModalVisible(true);
+    }
+  }, [openTutor]);
+
+  const handleBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/(tabs)');
+    }
+  };
+
   const isVideo = type?.includes('video') || type?.includes('mp4');
-  const isPdf = type?.includes('pdf') || type?.includes('document');
+  const isPdf = type?.includes('pdf') || type?.includes('document') || !type;
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      <View style={[styles.header, { borderBottomColor: colors.border }]}>
-        <Pressable onPress={() => router.back()} style={styles.backButton}>
-          <Feather name="arrow-left" size={24} color={colors.text} />
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
+      {/* Sleek Top Navigation Bar */}
+      <View style={[styles.header, { borderBottomColor: colors.border, backgroundColor: colors.background }]}>
+        <Pressable 
+          onPress={handleBack} 
+          style={({ pressed }) => [styles.backButton, { backgroundColor: colors.surface, borderColor: colors.border }, pressed && { opacity: 0.7, transform: [{ scale: 0.94 }] }]}
+          hitSlop={12}
+          accessibilityLabel="Go back"
+        >
+          <Feather name="chevron-left" size={22} color={colors.text} />
         </Pressable>
         <Text style={[styles.title, { color: colors.text }]} numberOfLines={1}>
-          {title || 'Offline Viewer'}
+          {title || 'Question Paper PDF'}
         </Text>
-        <View style={{ width: 40 }} />
+        <View style={styles.headerPlaceholder} />
       </View>
 
+      {/* PDF / Video View */}
       <View style={styles.content}>
         {isVideo ? (
           <Video
@@ -37,7 +71,7 @@ export default function MediaViewerScreen() {
           />
         ) : isPdf ? (
           <WebView 
-            source={{ uri: uri as string }} 
+            source={{ uri: uri || 'https://akjbejexhdawelrfygub.supabase.co/storage/v1/object/public/past_papers/pending/Pending_ox21_qp.pdf' }} 
             style={styles.webview} 
             originWhitelist={['*']}
             allowFileAccess={true}
@@ -52,15 +86,29 @@ export default function MediaViewerScreen() {
         )}
       </View>
 
-      {/* Contextual AI Tutor FAB (Only for PDFs) */}
+      {/* Floating AI Assistant Tutor Button (Opens Modal Chat) */}
       {isPdf && (
         <Pressable 
-          style={[styles.fab, { backgroundColor: colors.primary }]}
-          onPress={() => router.push({ pathname: '/papers/1', params: { title } })}
+          style={({ pressed }) => [
+            styles.fab,
+            { backgroundColor: colors.primary },
+            pressed && { transform: [{ scale: 0.95 }] }
+          ]}
+          onPress={() => setTutorModalVisible(true)}
         >
-          <Ionicons name="sparkles" size={24} color="#FFF" />
+          <Sparkles color="#FFF" size={26} />
         </Pressable>
       )}
+
+      {/* Question Paper Tutor Agent Modal */}
+      <QuestionPaperTutorModal
+        visible={tutorModalVisible}
+        onClose={() => setTutorModalVisible(false)}
+        paperId={paperId || '21f06556-c22c-4890-bec6-6e7119ffb86e'}
+        paperTitle={title || 'Cambridge Chemistry Paper 4'}
+        subject={subject || 'Chemistry'}
+        curriculum={curriculum || 'Cambridge'}
+      />
     </SafeAreaView>
   );
 }
@@ -71,21 +119,35 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: spacing.md,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 12,
     borderBottomWidth: 1,
-    paddingTop: 40,
   },
   backButton: {
-    width: 40,
-    height: 40,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    shadowColor: '#102A6B',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    elevation: 2,
   },
   title: {
     flex: 1,
-    fontSize: typography.sizes.md,
-    fontWeight: '600',
+    fontSize: 16,
+    fontWeight: '700',
+    fontFamily: 'Outfit_600SemiBold',
     textAlign: 'center',
+    marginHorizontal: spacing.sm,
+    letterSpacing: -0.3,
+  },
+  headerPlaceholder: {
+    width: 42,
+    height: 42,
   },
   content: {
     flex: 1,
@@ -121,5 +183,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 5,
     elevation: 8,
+    zIndex: 999,
   }
 });

@@ -7,27 +7,33 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export function GlobalAITutorButton() {
   const router = useRouter();
-  const colors = useThemeColors();
   const insets = useSafeAreaInsets();
-  const segments = useSegments();
+  const segments = useSegments() as unknown as string[];
 
-  // Hide the button on the AI Tutor screen itself, and auth screens
-  const hideButton = segments.includes('ai-tutor') || segments.includes('(auth)');
+  // Hide the button on the AI Tutor screen itself, auth screens, question papers, document viewer, course, topic, and quiz screens
+  const hideButton = 
+    segments.includes('ai-tutor') || 
+    segments.includes('(auth)') || 
+    segments.includes('papers') ||
+    segments.includes('viewer') ||
+    segments.includes('course') ||
+    segments.includes('topic') ||
+    segments.includes('quiz');
 
   if (hideButton) return null;
 
   return (
     <Pressable
-      style={[
+      style={({ pressed }) => [
         styles.fab,
         {
-          backgroundColor: colors.primary,
-          bottom: insets.bottom + 90, // Above the tab bar
+          bottom: insets.bottom + 84,
         },
+        pressed && { transform: [{ scale: 0.94 }], opacity: 0.9 },
       ]}
       onPress={() => router.push('/ai-tutor')}
     >
-      <MaterialCommunityIcons name="robot-outline" size={32} color="#FFFFFF" />
+      <MaterialCommunityIcons name="robot-outline" size={24} color="#FFFFFF" />
     </Pressable>
   );
 }
@@ -36,16 +42,19 @@ const styles = StyleSheet.create({
   fab: {
     position: 'absolute',
     right: 20,
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#0F172A',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 5,
-    elevation: 8,
-    zIndex: 9999, // Ensure it floats above everything
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 6,
+    zIndex: 9999,
   },
 });

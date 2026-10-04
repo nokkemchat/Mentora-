@@ -1,16 +1,18 @@
 import React, { useMemo, useState, useCallback, useRef } from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Alert, Platform, Modal, TextInput, Linking } from 'react-native';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/context/AuthContext';
 import { spacing, typography, borderRadius, useThemeColors } from '@/constants/theme';
-import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Feather, MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as WebBrowser from 'expo-web-browser';
 import { decode } from 'base64-arraybuffer';
 import DownloadableMaterial from '@/components/DownloadableMaterial';
 import { markMaterialComplete } from '@/lib/progress';
+import { calculateSubtopicMinutes, formatStudyTime } from '@/lib/time';
 
 const STATUS_COLORS: Record<string, string> = {
   'Not Started': '#9CA3AF',
@@ -22,10 +24,19 @@ const STATUS_COLORS: Record<string, string> = {
 export default function TopicDetailScreen() {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const insets = useSafeAreaInsets();
 
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { user } = useAuth();
+
+  const handleBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/(tabs)');
+    }
+  };
 
   const [subtopic, setSubtopic] = useState<any>(null);
   const [materials, setMaterials] = useState<any[]>([]);
@@ -43,8 +54,9 @@ export default function TopicDetailScreen() {
   const isPickingRef = useRef(false);
 
   const fetchSubtopicData = async () => {
-    if (!id || !user) return;
+    if (!id) return;
     if (!subtopic) setLoading(true);
+    const failsafe = setTimeout(() => setLoading(false), 2000);
     
     try {
       // Fetch Subtopic details
@@ -57,24 +69,51 @@ export default function TopicDetailScreen() {
             courses (
               title
             )
-          ),
-          user_progress (status)
+          )
         `)
         .eq('id', id)
         .single();
 
-      // Fetch subtopic materials and user progress
+      // Fetch subtopic materials
       const { data: materialsData, error: matError } = await supabase
         .from('subtopic_materials')
-        .select(`
-          *,
-          user_material_progress (status)
-        `)
+        .select('*')
         .eq('subtopic_id', id);
+
+      // Fetch user progress if user logged in
+      let userStatus = null;
+      let matProgressMap: Record<string, string> = {};
+      if (user) {
+        try {
+          const { data: prog } = await supabase
+            .from('user_progress')
+            .select('status')
+            .eq('subtopic_id', id)
+            .eq('user_id', user.id)
+            .maybeSingle();
+          if (prog) userStatus = prog.status;
+
+          if (materialsData && materialsData.length > 0) {
+            const { data: matProg } = await supabase
+              .from('user_material_progress')
+              .select('material_id, status')
+              .eq('user_id', user.id)
+              .in('material_id', materialsData.map((m: any) => m.id));
+            if (matProg) {
+              matProg.forEach((p: any) => { matProgressMap[p.material_id] = p.status; });
+            }
+          }
+        } catch (authErr) {
+          console.warn('User progress fetch error:', authErr);
+        }
+      }
 
       let mergedMaterials: any[] = [];
       if (!matError && materialsData) {
-        mergedMaterials = [...materialsData];
+        mergedMaterials = materialsData.map((m: any) => ({
+          ...m,
+          user_material_progress: matProgressMap[m.id] ? [{ status: matProgressMap[m.id] }] : []
+        }));
       }
 
       if (!error && data) {
@@ -114,7 +153,7 @@ export default function TopicDetailScreen() {
             });
           });
         }
-        setSubtopic(data);
+        setSubtopic(userStatus ? { ...data, user_progress: [{ status: userStatus }] } : data);
       }
 
       setMaterials(mergedMaterials);
@@ -130,8 +169,9 @@ export default function TopicDetailScreen() {
       }
 
     } catch (err) {
-      console.error(err);
+      console.error('fetchSubtopicData error:', err);
     } finally {
+      clearTimeout(failsafe);
       setLoading(false);
       setRefreshing(false);
     }
@@ -140,7 +180,7 @@ export default function TopicDetailScreen() {
   useFocusEffect(
     useCallback(() => {
       fetchSubtopicData();
-    }, [id, user])
+    }, [id])
   );
 
   if (loading) {
@@ -155,7 +195,7 @@ export default function TopicDetailScreen() {
     return (
       <View style={styles.centered}>
         <Text style={styles.errorText}>Topic not found.</Text>
-        <Pressable onPress={() => router.back()} style={styles.backButton}>
+        <Pressable onPress={handleBack} style={styles.backButton}>
           <Text style={styles.backButtonText}>Go Back</Text>
         </Pressable>
       </View>
@@ -413,20 +453,42 @@ export default function TopicDetailScreen() {
     setModalVisible(true);
   };
 
-  const totalMinutes = materials.reduce((acc, mat) => acc + (mat.estimated_minutes || 0), 0) + (questionsCount > 0 ? (subtopic.estimated_quiz_minutes || 15) : 0);
-  const timeDisplay = totalMinutes > 0 ? `${totalMinutes} mins` : subtopic.estimated_time;
+  const totalMinutes = calculateSubtopicMinutes({
+    ...subtopic,
+    questions_count: questionsCount
+  }, materials);
+  const timeDisplay = formatStudyTime(totalMinutes, subtopic.estimated_time);
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      {/* Header */}
-      <Pressable onPress={() => router.back()} style={styles.backNav}>
-        <Feather name="arrow-left" size={24} color={colors.text} />
-      </Pressable>
+    <ScrollView 
+      style={styles.container} 
+      contentContainerStyle={[styles.content, { paddingTop: Math.max(insets.top + 12, 52) }]}
+      showsVerticalScrollIndicator={false}
+    >
+      {/* Sleek Top Navigation Bar */}
+      <View style={styles.topNavRow}>
+        <Pressable 
+          onPress={handleBack} 
+          style={({ pressed }) => [styles.navCircleBtn, pressed && { opacity: 0.7, transform: [{ scale: 0.94 }] }]}
+          hitSlop={12}
+          accessibilityLabel="Go back"
+        >
+          <Feather name="chevron-left" size={22} color={colors.text} />
+        </Pressable>
+
+        <View style={styles.navCenterCol}>
+          <Text style={styles.navTitleText} numberOfLines={1}>
+            {parentTopic?.title || 'Topic Details'}
+          </Text>
+          <Text style={styles.navSubtitleText} numberOfLines={1}>
+            {parentCourse?.title || 'Course'}
+          </Text>
+        </View>
+
+        <View style={styles.navCirclePlaceholder} />
+      </View>
 
       <View style={styles.header}>
-        <View style={styles.breadcrumb}>
-          <Text style={styles.breadcrumbText}>{parentCourse?.title} • {parentTopic?.title}</Text>
-        </View>
         <Text style={styles.title}>{subtopic.title}</Text>
         
         <View style={styles.metaRow}>
@@ -710,8 +772,54 @@ const createStyles = (colors: any) => StyleSheet.create({
     padding: spacing.xl,
     paddingTop: spacing.xxxl,
   },
-  backNav: {
-    marginBottom: spacing.lg,
+  topNavRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.xl,
+    paddingHorizontal: 4,
+  },
+  navCircleBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: colors.surface || '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.border || '#E2E8F0',
+    shadowColor: '#102A6B',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    elevation: 2,
+  },
+  navCenterCol: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    flex: 1,
+    paddingHorizontal: 12,
+  },
+  navTitleText: {
+    fontSize: 16,
+    fontWeight: '700',
+    fontFamily: 'Outfit_600SemiBold',
+    color: colors.text,
+    textAlign: 'center',
+    letterSpacing: -0.3,
+  },
+  navSubtitleText: {
+    fontSize: 11,
+    fontWeight: '600',
+    fontFamily: 'Outfit_500Medium',
+    color: colors.textSecondary,
+    textAlign: 'center',
+    marginTop: 2,
+    letterSpacing: 0.3,
+  },
+  navCirclePlaceholder: {
+    width: 42,
+    height: 42,
   },
   header: {
     marginBottom: spacing.xxl,
