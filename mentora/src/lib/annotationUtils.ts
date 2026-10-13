@@ -1,4 +1,33 @@
+import {
+  buildNormalizedLayoutFromAssessment,
+  clampBBoxToPage,
+  recalibrateAnnotationBox,
+} from './normalizedMarkingEngine';
+import type {
+  NormalizedBBox,
+  DetectedLayoutRegion,
+  AnchoredAnnotation,
+  ResolvedRenderAnnotation,
+} from './normalizedMarkingEngine';
 import type { VisualAnnotation, AssessmentResult, AssessmentSubpart } from './tutorAgent';
+export type { VisualAnnotation, AssessmentResult, AssessmentSubpart };
+
+/**
+ * Normalizes and guards bounding boxes so coordinates are always valid integers strictly
+ * within page bounds (15-985), ensuring NO annotations ever spill outside the image borders.
+ */
+function normalizeAnnotationBox(box: [number, number, number, number] | undefined, subpartLabel?: string, comment?: string): [number, number, number, number] {
+  if (!box || !Array.isArray(box) || box.length !== 4) return [50, 860, 85, 960];
+  let [ymin, xmin, ymax, xmax] = box;
+
+  // Strict guardrail clamping inside image canvas (15-985)
+  ymin = Math.max(15, Math.min(Math.round(ymin), 940));
+  xmin = Math.max(15, Math.min(Math.round(xmin), 940));
+  ymax = Math.max(ymin + 18, Math.min(Math.round(ymax), 985));
+  xmax = Math.max(xmin + 35, Math.min(Math.round(xmax), 985));
+
+  return [ymin, xmin, ymax, xmax];
+}
 
 /**
  * Reconciles the total score and max score with the itemised sub-parts.
@@ -30,12 +59,12 @@ export function reconcileAssessment(assessment: AssessmentResult, officialMaxSco
       return getWeight(a.part_label) - getWeight(b.part_label);
     });
   }
-  subparts.forEach((sp) => {
+  subparts.forEach((sp: any) => {
     const max = Number(sp.max_score) || 1;
     sp.score = Math.max(0, Math.min(Number(sp.score) || 0, max));
   });
-  const computedScore = subparts.reduce((sum, sp) => sum + (Number(sp.score) || 0), 0);
-  const computedSubpartsMax = subparts.reduce((sum, sp) => sum + (Number(sp.max_score) || 0), 0);
+  const computedScore = subparts.reduce((sum: number, sp: any) => sum + (Number(sp.score) || 0), 0);
+  const computedSubpartsMax = subparts.reduce((sum: number, sp: any) => sum + (Number(sp.max_score) || 0), 0);
 
   // Preserve official question max score from paper repository if provided, or current total_max_score
   const effectiveMaxScore = officialMaxMarks(assessment, officialMaxScore, computedSubpartsMax);
@@ -66,17 +95,15 @@ function officialMaxMarks(assessment: AssessmentResult, officialMaxScore?: numbe
  */
 function computeSubpartYPositions(totalSubparts: number): number[] {
   if (totalSubparts <= 0) return [];
-  if (totalSubparts === 1) return [130];
-  if (totalSubparts === 2) return [130, 320];
-  if (totalSubparts === 3) return [125, 280, 460];
-  if (totalSubparts === 4) return [125, 260, 410, 580];
-  if (totalSubparts === 5) return [125, 245, 380, 520, 670];
-  if (totalSubparts === 6) return [125, 235, 350, 460, 580, 690];
-  if (totalSubparts === 7) return [125, 235, 350, 450, 550, 635, 715];
+  if (totalSubparts === 1) return [220];
+  if (totalSubparts === 2) return [200, 440];
+  if (totalSubparts === 3) return [190, 390, 590];
+  if (totalSubparts === 4) return [180, 340, 500, 670];
+  if (totalSubparts === 5) return [170, 300, 430, 560, 690];
 
-  // For 8 or more subparts, distribute within the active written area (Y: 120 to 730)
-  const startY = 120;
-  const availableSpan = Math.min(610, (totalSubparts - 1) * 80);
+  // For 6 or more subparts, distribute within the active written area (Y: 170 to 760)
+  const startY = 170;
+  const availableSpan = Math.min(590, (totalSubparts - 1) * 85);
   const step = availableSpan / (totalSubparts - 1);
   return Array.from({ length: totalSubparts }, (_, i) => Math.round(startY + i * step));
 }
@@ -95,185 +122,440 @@ export function ensureAssessmentAnnotations(assessment: AssessmentResult, pageIn
 
   reconcileAssessment(assessment);
 
-  const grandScore = assessment.total_score !== undefined ? assessment.total_score : assessment.score || 0;
-  const grandMax = assessment.total_max_score !== undefined ? assessment.total_max_score : assessment.max_score || 1;
+  const targetPageIndex = typeof pageIndex === 'number' ? pageIndex : 0;
+  const pageData = assessment.pages?.[targetPageIndex];
 
-  let subparts: AssessmentSubpart[] = [];
-  let score = grandScore;
-  let maxScore = grandMax;
-  let bottomText = `Total: ${grandScore}/${grandMax}`;
-
-  if (typeof pageIndex === 'number' && assessment.pages && assessment.pages[pageIndex]) {
-    const pageData = assessment.pages[pageIndex];
-    subparts = pageData.subparts || assessment.subparts?.filter((sp) => sp.page_index === pageIndex) || [];
-    score = pageData.page_score ?? 0;
-    maxScore = pageData.page_max_score ?? 1;
-    const isLastPage = pageIndex === assessment.pages.length - 1;
-    bottomText = isLastPage
-      ? `Total: ${grandScore}/${grandMax}`
-      : `Page ${pageIndex + 1} Subtotal: ${score}/${maxScore}`;
-  } else if (typeof pageIndex === 'number' && assessment.subparts) {
-    subparts = assessment.subparts.filter((sp) => sp.page_index === pageIndex);
-    score = subparts.reduce((sum, sp) => sum + (Number(sp.score) || 0), 0);
-    maxScore = subparts.reduce((sum, sp) => sum + (Number(sp.max_score) || 0), 0) || 1;
-    bottomText = `Page ${pageIndex + 1} Subtotal: ${score}/${maxScore}`;
-  } else {
-    subparts = assessment.subparts || [];
-  }
-
-  const synthesized: VisualAnnotation[] = [];
-
-  // 1. Bottom Right: Natural handwritten teacher grade / subtotal
-  synthesized.push({
-    type: 'total_header',
-    text: bottomText,
-    comment: bottomText,
-    box_2d: [840, bottomText.startsWith('Page') ? 700 : 750, 880, 960],
-    page_index: pageIndex
+  // Helper map for subpart feedback (deductions, correction notes, constructive guidance)
+  const subpartsList: AssessmentSubpart[] = pageData?.subparts || assessment.subparts || [];
+  const subpartFeedbackMap = new Map<string, { note: string; deduction: string }>();
+  subpartsList.forEach((sp: any) => {
+    if (sp.part_label) {
+      const note = sp.teacher_correction_note || sp.constructive_correction || sp.teacher_correction || '';
+      const deduction = (sp.deductions && sp.deductions[0]) || sp.feedback || '';
+      subpartFeedbackMap.set(sp.part_label, { note, deduction });
+    }
   });
 
-  if (subparts.length > 0) {
-    const yPositions = computeSubpartYPositions(subparts.length);
-
-    subparts.forEach((sp: AssessmentSubpart, idx: number) => {
-      const yMid =
-        typeof sp.line_y === 'number' && sp.line_y > 80 && sp.line_y < 960
-          ? sp.line_y
-          : yPositions[idx] || 120 + idx * 95;
-      const awardedMarks = Number(sp.score) || 0;
-      const maxSubpartMarks = Number(sp.max_score) || 1;
-
-      // 2. Point-by-point inline marking (tick at each and every earned point)
-      if (Array.isArray(sp.marking_points) && sp.marking_points.length > 0) {
-        let earnedCount = 0;
-        let unearnedCount = 0;
-
-        sp.marking_points.forEach((pt) => {
-          if (pt.is_earned) {
-            earnedCount++;
-            const inlineX = pt.box_2d && pt.box_2d[1] ? pt.box_2d[1] : Math.min(220 + (earnedCount - 1) * 150, 740);
-            const inlineY = pt.box_2d && pt.box_2d[0] ? pt.box_2d[0] : yMid;
-            synthesized.push({
-              type: 'inline_tick',
-              text: pt.mark_code || '✓',
-              comment: pt.criterion || pt.student_phrase || `Point ${pt.point_number} earned`,
-              box_2d: pt.box_2d || [Math.max(inlineY - 14, 40), inlineX, Math.min(inlineY + 14, 980), inlineX + 40],
-              subpart_label: sp.part_label,
-            });
-          } else {
-            unearnedCount++;
-            const guide = pt.constructive_correction || `Missing: ${pt.criterion}. State correct working clearly.`;
-            const noteY = pt.box_2d && pt.box_2d[0] ? pt.box_2d[0] : yMid + 25 + (unearnedCount - 1) * 35;
-            synthesized.push({
-              type: 'underline',
-              text: guide.startsWith('✍️') || guide.startsWith('Correction:') || guide.startsWith('How to answer:')
-                ? guide
-                : `Correction: ${guide}`,
-              comment: pt.criterion,
-              box_2d: [Math.min(noteY, 930), 200, Math.min(noteY + 40, 960), 880],
-              subpart_label: sp.part_label,
-            });
-          }
-        });
-      } else {
-        // Synthesize inline ticks for each awarded mark across the student's line
-        if (awardedMarks > 0) {
-          for (let m = 0; m < awardedMarks; m++) {
-            const tickX = Math.min(220 + m * 160, 720);
-            synthesized.push({
-              type: 'inline_tick',
-              text: '✓',
-              comment: sp.marks_awarded?.[m] || `Part ${sp.part_label} Point ${m + 1}`,
-              box_2d: [Math.max(yMid - 14, 40), tickX, Math.min(yMid + 14, 980), tickX + 40],
-              subpart_label: sp.part_label,
-            });
-          }
-        }
-
-        // Constructive correction note for missed marks
-        if (awardedMarks < maxSubpartMarks) {
-          const correctionText =
-            sp.constructive_correction ||
-            sp.teacher_correction_note ||
-            sp.teacher_correction ||
-            (sp.deductions && sp.deductions.join('; ')) ||
-            '';
-          if (
-            correctionText &&
-            !correctionText.toLowerCase().includes('good job') &&
-            !correctionText.toLowerCase().includes('correct') &&
-            !correctionText.toLowerCase().includes('omitted')
-          ) {
-            const formattedNote =
-              correctionText.startsWith('✍️') ||
-              correctionText.startsWith('Correction:') ||
-              correctionText.startsWith('How to answer:')
-                ? correctionText
-                : `Correction: ${correctionText}`;
-
-            synthesized.push({
-              type: 'underline',
-              text: formattedNote,
-              comment: correctionText,
-              box_2d: [Math.min(yMid + 25, 930), 200, Math.min(yMid + 75, 960), 880],
-              subpart_label: sp.part_label,
-            });
-          }
-        }
+  const getSubpartFeedback = (label: string) => {
+    if (!label) return null;
+    const clean = label.toLowerCase().replace(/[^a-z0-9]/g, '');
+    for (const [key, val] of subpartFeedbackMap.entries()) {
+      const keyClean = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (keyClean === clean || keyClean.endsWith(clean) || clean.endsWith(keyClean)) {
+        return val;
       }
-
-      // 3. Right margin subpart fraction
-      if (awardedMarks > 0) {
-        synthesized.push({
-          type: 'tick',
-          text: `(${awardedMarks}/${maxSubpartMarks})`,
-          comment: sp.marks_awarded?.[0] || `Part ${sp.part_label}: ${awardedMarks}/${maxSubpartMarks} marks`,
-          box_2d: [Math.max(yMid - 16, 50), 875, Math.min(yMid + 16, 980), 975],
-          subpart_label: sp.part_label,
-        });
-      } else {
-        synthesized.push({
-          type: 'cross',
-          text: `(0/${maxSubpartMarks})`,
-          comment: sp.deductions?.[0] || `Part ${sp.part_label}: 0/${maxSubpartMarks} marks`,
-          box_2d: [Math.max(yMid - 16, 50), 875, Math.min(yMid + 16, 980), 975],
-          subpart_label: sp.part_label,
-        });
-      }
-    });
-  } else {
-    // Single part fallback
-    if (score > 0) {
-      for (let m = 0; m < score; m++) {
-        synthesized.push({
-          type: 'inline_tick',
-          text: '✓',
-          comment: `Point ${m + 1}`,
-          box_2d: [200, 240 + m * 140, 230, 280 + m * 140],
-        });
-      }
-      synthesized.push({
-        type: 'tick',
-        text: `(${score}/${maxScore})`,
-        comment: `${score}/${maxScore} marks`,
-        box_2d: [220, 875, 252, 975],
-      });
-    } else {
-      synthesized.push({
-        type: 'cross',
-        text: `(0/${maxScore})`,
-        comment: `0/${maxScore} marks`,
-        box_2d: [220, 875, 252, 975],
-      });
     }
-    if (score < maxScore && (assessment.feedback || assessment.explanation)) {
-      synthesized.push({
-        type: 'underline',
-        text: `Correction: ${assessment.explanation || assessment.feedback}`,
-        box_2d: [260, 200, 310, 880],
+    return null;
+  };
+
+  const pageAnnotationsList = pageData?.annotations || [];
+  const hasPageAnnotations = Array.isArray(pageAnnotationsList) && pageAnnotationsList.length > 0;
+  const pageMarks = hasPageAnnotations
+    ? pageAnnotationsList.filter((a: any) =>
+        a.type === 'tick' || a.type === 'inline_tick' || a.type === 'cross' || a.type === 'mark_badge'
+      )
+    : [];
+
+  let finalResult: any[] = [];
+
+  const layoutRegions = (pageData as any)?.layout_regions || (assessment as any)?.layout_regions || [];
+
+  if (pageMarks.length > 0) {
+    const rawMapped = pageAnnotationsList.map((ann: any) => {
+      const spInfo = getSubpartFeedback(ann.subpart_label);
+      let teacherCorrection = ann.teacher_correction || '';
+      if (!teacherCorrection && spInfo) {
+        teacherCorrection = spInfo.note;
+      }
+      let comment = ann.comment || '';
+      if (!comment && spInfo && (ann.type === 'cross' || ann.text === '✗')) {
+        comment = spInfo.deduction || spInfo.note;
+      }
+
+      const { box_2d: clampedBox, bbox } = recalibrateAnnotationBox(
+        { ...ann, teacher_correction: teacherCorrection, comment },
+        subpartFeedbackMap
+      );
+
+      return {
+        ...ann,
+        box_2d: clampedBox,
+        bbox,
+        comment,
+        teacher_correction: teacherCorrection,
+        page_index: targetPageIndex,
+      };
+    });
+    finalResult = finalizeAnnotationsList(rawMapped, subpartsList, targetPageIndex, layoutRegions);
+  } else {
+    // Check if explicit annotations exist at root level for this page
+    const isMultiPageDoc = Array.isArray(assessment.pages) && assessment.pages.length > 1;
+    const rootPageAnnotations = Array.isArray(assessment.annotations)
+      ? assessment.annotations.filter((a: any) =>
+          isMultiPageDoc ? a.page_index === targetPageIndex : (a.page_index === undefined || a.page_index === targetPageIndex)
+        )
+      : [];
+    const rootMarks = rootPageAnnotations.filter((a: any) =>
+      a.type === 'tick' || a.type === 'inline_tick' || a.type === 'cross' || a.type === 'mark_badge'
+    );
+
+    if (rootMarks.length > 0) {
+      const rawMapped = rootPageAnnotations.map((ann: any) => {
+        const spInfo = getSubpartFeedback(ann.subpart_label);
+        const teacherCorrection = ann.teacher_correction || spInfo?.note || '';
+        const comment = ann.comment || (ann.type === 'cross' ? spInfo?.deduction || spInfo?.note : '');
+
+        const { box_2d: clampedBox, bbox } = recalibrateAnnotationBox(
+          { ...ann, teacher_correction: teacherCorrection, comment },
+          subpartFeedbackMap
+        );
+
+        return {
+          ...ann,
+          box_2d: clampedBox,
+          bbox,
+          teacher_correction: teacherCorrection,
+          comment,
+          page_index: targetPageIndex,
+        };
       });
+      finalResult = finalizeAnnotationsList(rawMapped, subpartsList, targetPageIndex, layoutRegions);
+    } else {
+      // Use the OpenAI Normalized Page Coordinate Layout Engine:
+      // Strictly bounded [0.0, 1.0], anchor-based, collision-resolved with connector lines!
+      const { resolved } = buildNormalizedLayoutFromAssessment(assessment, targetPageIndex);
+
+      const rawMapped = resolved.map((item) => ({
+        type: item.type,
+        text: item.text,
+        comment: item.reason || item.teacher_correction || item.text,
+        teacher_correction: item.teacher_correction,
+        box_2d: item.box_2d || [
+          Math.round(item.bbox.y * 1000),
+          Math.round(item.bbox.x * 1000),
+          Math.round((item.bbox.y + item.bbox.height) * 1000),
+          Math.round((item.bbox.x + item.bbox.width) * 1000),
+        ],
+        subpart_label: item.subpart_label,
+        page_index: targetPageIndex,
+        bbox: item.bbox,
+        target_id: item.target_id,
+        connector: item.connector,
+        confidence: item.confidence,
+        is_flagged_for_review: item.is_flagged_for_review,
+      }));
+      finalResult = finalizeAnnotationsList(rawMapped, subpartsList, targetPageIndex, layoutRegions);
     }
   }
 
-  return synthesized;
+  return finalResult;
 }
+
+/**
+ * Guarantees every subpart has an authentic right-margin score mark and prevents badge stacking.
+ */
+function finalizeAnnotationsList(
+  rawList: any[],
+  subpartsList: any[],
+  targetPageIndex: number,
+  layoutRegions: any[] = []
+): any[] {
+  const badges: any[] = [];
+  const otherMarks: any[] = [];
+
+  rawList.forEach((ann) => {
+    const isBadge =
+      ann.type === 'mark_badge' ||
+      ((ann.text || '').includes('/') && !(ann.text || '').includes('Total') && (ann.bbox?.x >= 0.70 || ann.box_2d?.[1] >= 700));
+    if (isBadge) {
+      badges.push(ann);
+    } else {
+      otherMarks.push(ann);
+    }
+  });
+
+  // Guarantee that every subpart from the paper manifest/subparts has a margin score mark
+  const seenLabels = new Set(
+    badges
+      .map((b) => (b.subpart_label || '').toLowerCase().replace(/[^a-z0-9]/g, ''))
+      .filter(Boolean)
+  );
+
+  subpartsList.forEach((sp: any, idx: number) => {
+    const rawLabel = (sp.part_label || '').toLowerCase().trim();
+    const cleanKey = rawLabel.replace(/[^a-z0-9]/g, '');
+    if (cleanKey && !seenLabels.has(cleanKey)) {
+      seenLabels.add(cleanKey);
+      const score = Number(sp.score) || 0;
+      const maxScore = Number(sp.max_score) || 1;
+      const isZero = score === 0;
+
+      // Anchor to Page Surveyor verified region if available
+      const matchingRegion = layoutRegions.find((lr: any) =>
+        lr.type === 'answer_line' && lr.subpart_label &&
+        lr.subpart_label.replace(/[^a-z0-9]/gi, '').toLowerCase() === cleanKey
+      );
+
+      const yEstimate = (matchingRegion && matchingRegion.bbox?.y)
+        ? Math.max(35, Math.round(matchingRegion.bbox.y * 1000) - 20)
+        : (typeof sp.line_y === 'number' && sp.line_y >= 40 && sp.line_y <= 950
+            ? Math.max(35, sp.line_y - 20)
+            : Math.round(70 + idx * (800 / Math.max(1, subpartsList.length - 1))));
+
+      const { box_2d, bbox } = recalibrateAnnotationBox({
+        type: 'mark_badge',
+        subpart_label: sp.part_label,
+        text: `(${score}/${maxScore})`,
+        comment: `Part ${sp.part_label}: ${score}/${maxScore}`,
+        box_2d: [yEstimate, 865, yEstimate + 30, 975],
+      });
+      badges.push({
+        type: 'mark_badge',
+        subpart_label: sp.part_label,
+        text: `(${score}/${maxScore})`,
+        comment: `Part ${sp.part_label}: ${score}/${maxScore}`,
+        box_2d,
+        bbox,
+        page_index: targetPageIndex,
+      });
+    }
+  });
+
+  // Prevent badge collisions in the right margin (guarantee minimum 38 units / ~4% vertical spacing)
+  badges.sort((a, b) => (a.box_2d?.[0] || Math.round((a.bbox?.y || 0) * 1000)) - (b.box_2d?.[0] || Math.round((b.bbox?.y || 0) * 1000)));
+
+  let lastY = 20;
+  badges.forEach((b) => {
+    let curY = b.box_2d ? b.box_2d[0] : Math.round((b.bbox?.y || 0) * 1000);
+    if (curY < lastY + 38) {
+      curY = lastY + 38;
+      if (b.box_2d) {
+        const h = Math.max(25, b.box_2d[2] - b.box_2d[0]);
+        b.box_2d[0] = curY;
+        b.box_2d[2] = curY + h;
+      }
+      if (b.bbox) {
+        b.bbox.y = curY / 1000;
+      }
+    }
+    lastY = curY;
+  });
+
+  // Build a vertical boundary map for each subpart based on badge positions
+  // In British/Cambridge exam sheets, mark badges sit at the END / answer line of the subpart!
+  // Subpart i's territory is therefore [prevBadge.Y + 15, currentBadge.Y + 15]
+  const subpartBoundaryMap = new Map<string, { startY: number; endY: number }>();
+  badges.forEach((b, bIdx) => {
+    const key = (b.subpart_label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (key) {
+      const prevBadge = badges[bIdx - 1];
+      const startY = prevBadge
+        ? Math.max(30, (prevBadge.box_2d ? prevBadge.box_2d[0] : Math.round((prevBadge.bbox?.y || 0) * 1000)) + 15)
+        : 35;
+      const curBadgeY = b.box_2d ? b.box_2d[0] : Math.round((b.bbox?.y || 0) * 1000);
+      const endY = Math.max(startY + 25, curBadgeY + 15);
+      subpartBoundaryMap.set(key, { startY, endY });
+    }
+  });
+
+  // Bound otherMarks (crosses, comments, underlines) strictly within their subpart's territory
+  const clampedOtherMarks = otherMarks.map((ann) => {
+    // Sanitize tick mark text: only allow strict concise mark codes (e.g. B1, M1, A1, C1), NEVER sentences or phrases
+    if (ann.type === 'tick' || ann.type === 'inline_tick') {
+      const isStrict = typeof ann.text === 'string' && /^[A-Z]\d{1,2}$/i.test(ann.text.trim()) && ann.text.trim().length <= 4;
+      if (!isStrict) {
+        ann.text = '✓';
+      } else {
+        ann.text = ann.text.trim().toUpperCase();
+      }
+    }
+
+    const key = (ann.subpart_label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const bounds = key ? subpartBoundaryMap.get(key) : null;
+    if (bounds) {
+      let curY = ann.box_2d ? ann.box_2d[0] : Math.round((ann.bbox?.y || 0) * 1000);
+      // If annotation drifted outside its subpart's boundaries, clamp it safely inside!
+      if (curY < bounds.startY || curY >= bounds.endY) {
+        curY = Math.max(bounds.startY, Math.min(bounds.startY + 20, bounds.endY - 25));
+        if (ann.box_2d) {
+          const h = Math.max(25, ann.box_2d[2] - ann.box_2d[0]);
+          ann.box_2d[0] = curY;
+          ann.box_2d[2] = curY + h;
+        }
+        if (ann.bbox) {
+          ann.bbox.y = curY / 1000;
+        }
+      }
+    }
+    return ann;
+  });
+
+  // Guarantee that every subpart with missed marks has an authentic teacher red-ink correction note
+  // and guarantee that every earned mark has a point-by-point inline tick
+  subpartsList.forEach((sp: any) => {
+    const rawLabel = (sp.part_label || '').toLowerCase().trim();
+    const cleanKey = rawLabel.replace(/[^a-z0-9]/g, '');
+    const score = Number(sp.score) || 0;
+    const maxScore = Number(sp.max_score) || 1;
+    const bounds = subpartBoundaryMap.get(cleanKey);
+    const matchingBadge = badges.find(b => {
+      const bKey = (b.subpart_label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      return bKey === cleanKey || bKey.endsWith(cleanKey) || cleanKey.endsWith(bKey);
+    });
+    const badgeY = matchingBadge?.box_2d ? matchingBadge.box_2d[0] : Math.round((matchingBadge?.bbox?.y || 0) * 1000);
+
+    // 1. Synthesize point-by-point inline ticks if fewer ticks exist than earned score
+    const existingTicks = clampedOtherMarks.filter(m => {
+      const mKey = (m.subpart_label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      return (mKey === cleanKey || mKey.endsWith(cleanKey) || cleanKey.endsWith(mKey)) &&
+             (m.type === 'tick' || m.type === 'inline_tick');
+    });
+
+    if (score > 0 && existingTicks.length < score) {
+      const neededTicks = score - existingTicks.length;
+      const startY = bounds ? bounds.startY + 10 : Math.max(badgeY - 30, 40);
+      const endY = bounds ? Math.min(bounds.endY - 20, badgeY) : badgeY;
+      const totalSpan = Math.max(25, endY - startY);
+
+      const earnedPoints = Array.isArray(sp.marking_points)
+        ? sp.marking_points.filter((pt: any) => pt.is_earned || pt.tick_or_cross === 'tick')
+        : [];
+
+      for (let i = 0; i < neededTicks; i++) {
+        const pt = earnedPoints[existingTicks.length + i];
+        let tickY: number;
+        let tickX: number;
+
+        if (pt && Array.isArray(pt.box_2d) && pt.box_2d.length === 4 && (pt.box_2d[0] > 0 || pt.box_2d[2] > 0)) {
+          tickY = Math.round((pt.box_2d[0] + pt.box_2d[2]) / 2);
+          tickX = Math.min(Math.max(pt.box_2d[3] + 8, 140), 760);
+        } else {
+          const stepFrac = (existingTicks.length + i + 1) / (score + 1);
+          tickY = Math.round(startY + totalSpan * stepFrac);
+          const xStops = [520, 680, 590, 740];
+          tickX = xStops[(existingTicks.length + i) % xStops.length];
+        }
+
+        const isStrict = typeof pt?.mark_code === 'string' && /^[A-Z]\d{1,2}$/i.test(pt.mark_code.trim()) && pt.mark_code.trim().length <= 4;
+        const tickText = isStrict ? pt.mark_code.trim().toUpperCase() : '✓';
+
+        clampedOtherMarks.push({
+          type: 'inline_tick',
+          text: tickText,
+          comment: pt?.criterion || pt?.student_phrase || `Part ${sp.part_label} mark earned`,
+          subpart_label: sp.part_label,
+          page_index: targetPageIndex,
+          box_2d: [tickY - 12, tickX, tickY + 12, tickX + 28],
+          bbox: { x: tickX / 1000, y: (tickY - 12) / 1000, width: 0.03, height: 0.024 },
+        });
+      }
+    }
+
+    // 2. Synthesize teacher correction note for missed marks
+    const note = (
+      sp.teacher_correction_note ||
+      sp.constructive_correction ||
+      sp.teacher_correction ||
+      (sp.deductions && sp.deductions[0]) ||
+      ''
+    ).replace(/^✎\s*/, '').replace(/^\^\s*/, '').trim();
+
+    if (score < maxScore && note) {
+      let existingNote = clampedOtherMarks.find((m) => {
+        const mKey = (m.subpart_label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        return (mKey === cleanKey || mKey.endsWith(cleanKey) || cleanKey.endsWith(mKey)) &&
+               (m.type === 'comment' || m.type === 'teacher_note' || m.type === 'underline');
+      });
+
+      if (existingNote) {
+        if (!existingNote.teacher_correction) {
+          existingNote.teacher_correction = note;
+          existingNote.text = note;
+          existingNote.comment = note;
+        }
+      } else {
+        const corrY = bounds
+          ? Math.min(bounds.startY + 24, bounds.endY - 18)
+          : (badgeY > 0 ? Math.min(badgeY + 18, 930) : 300);
+
+        clampedOtherMarks.push({
+          type: 'comment',
+          text: note,
+          comment: note,
+          teacher_correction: note,
+          subpart_label: sp.part_label,
+          page_index: targetPageIndex,
+          box_2d: [corrY, 130, Math.min(corrY + 28, 940), 760],
+          bbox: { x: 0.13, y: corrY / 1000, width: 0.65, height: 0.028 }
+        });
+      }
+    }
+  });
+
+  // 3. Deduplicate comments strictly so no subpart ever has duplicate comments
+  const seenComments = new Set<string>();
+  const deduplicatedOtherMarks: any[] = [];
+  clampedOtherMarks.forEach((m) => {
+    if (m.type === 'comment' || m.type === 'teacher_note') {
+      const cleanKey = (m.subpart_label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const textClean = (m.teacher_correction || m.text || m.comment || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 30);
+      const dedupeKey = `${cleanKey}_${textClean}`;
+      if (seenComments.has(dedupeKey)) {
+        return; // Discard duplicate comment
+      }
+      seenComments.add(dedupeKey);
+    }
+    deduplicatedOtherMarks.push(m);
+  });
+
+  // 4. Strict 2D Collision Resolution: Ticks and Comments MUST NOT overlap!
+  const ticks = deduplicatedOtherMarks.filter(m => m.type === 'tick' || m.type === 'inline_tick');
+  const comments = deduplicatedOtherMarks.filter(m => m.type === 'comment' || m.type === 'teacher_note' || m.type === 'underline');
+
+  comments.forEach(comm => {
+    const cBox = comm.box_2d;
+    if (!Array.isArray(cBox) || cBox.length < 4) return;
+
+    // Check collision against all ticks in the same subpart
+    const commSubpart = (comm.subpart_label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const relevantTicks = ticks.filter(t => {
+      const tSubpart = (t.subpart_label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      return !commSubpart || !tSubpart || commSubpart === tSubpart;
+    });
+
+    for (const t of relevantTicks) {
+      const tBox = t.box_2d;
+      if (!Array.isArray(tBox) || tBox.length < 4) continue;
+
+      // 2D collision check with safety buffer
+      const yOverlap = Math.max(cBox[0], tBox[0] - 8) < Math.min(cBox[2], tBox[2] + 8);
+      const xOverlap = Math.max(cBox[1], tBox[1] - 8) < Math.min(cBox[3], tBox[3] + 8);
+
+      if (yOverlap && xOverlap) {
+        // Shift comment away from tick vertically
+        const tickMidY = (tBox[0] + tBox[2]) / 2;
+        const commMidY = (cBox[0] + cBox[2]) / 2;
+        const commHeight = Math.max(22, cBox[2] - cBox[0]);
+
+        if (commMidY >= tickMidY) {
+          // Push comment below the tick
+          cBox[0] = Math.min(930, tBox[2] + 10);
+          cBox[2] = Math.min(950, cBox[0] + commHeight);
+        } else {
+          // Push comment above the tick
+          cBox[2] = Math.max(30, tBox[0] - 10);
+          cBox[0] = Math.max(20, cBox[2] - commHeight);
+        }
+
+        if (comm.bbox) {
+          comm.bbox.y = cBox[0] / 1000;
+          comm.bbox.height = (cBox[2] - cBox[0]) / 1000;
+        }
+      }
+    }
+  });
+
+  return [...badges, ...deduplicatedOtherMarks];
+}
+
+export { buildNormalizedLayoutFromAssessment };

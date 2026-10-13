@@ -605,10 +605,18 @@ async function executeChatCompletion(
         ...bodyPayload,
         model: m,
       };
+      // Ensure deterministic results across all evaluations and batch marking runs
+      if (requestPayload.seed === undefined) {
+        requestPayload.seed = 42;
+      }
+
       // Reasoning models (o1, o3, o4) and GPT-6 models (gpt-6-luna, gpt-6.1-sol) reject custom temperature (e.g. 0.1).
       // They only accept default (1) or omitting the field.
       if (m.startsWith("gpt-6") || m.startsWith("o1") || m.startsWith("o3") || m.startsWith("o4")) {
         delete requestPayload.temperature;
+      } else {
+        // Enforce deterministic 0.0 temperature for all vision/evaluation models
+        requestPayload.temperature = 0.0;
       }
 
       console.log(`executeChatCompletion: attempting with model candidate ${m}...`);
@@ -837,6 +845,479 @@ function getSubpartSortWeight(keyOrLabel: string): number {
   return weight;
 }
 
+interface PageLayoutMap {
+  identified_question_number?: string;
+  diagram_regions: Array<{
+    label: string;
+    box_2d: [number, number, number, number];
+  }>;
+  subpart_regions: Array<{
+    part_label: string;
+    label_box?: [number, number, number, number];
+    handwriting_box?: [number, number, number, number];
+    answer_baseline_y: number; // 0-1000
+    has_student_writing?: boolean;
+  }>;
+}
+
+interface VisualGroundingResult {
+  diagram_regions: Array<{
+    label: string;
+    box_2d: [number, number, number, number];
+  }>;
+  subpart_groundings: Array<{
+    part_label: string;
+    label_box?: [number, number, number, number];
+    handwriting_box?: [number, number, number, number];
+    answer_baseline_y: number; // 0-1000
+    has_student_writing?: boolean;
+    earned_points?: Array<{
+      point_number: number;
+      student_phrase?: string;
+      box_2d: [number, number, number, number];
+    }>;
+    mistake_points?: Array<{
+      flawed_phrase?: string;
+      box_2d: [number, number, number, number];
+    }>;
+    correction_box?: [number, number, number, number];
+  }>;
+}
+
+function formatLayoutRegions(layoutMap: PageLayoutMap | VisualGroundingResult): any[] {
+  const regions: any[] = [];
+  (layoutMap.diagram_regions || []).forEach((d: any, idx: number) => {
+    if (Array.isArray(d.box_2d) && d.box_2d.length === 4) {
+      regions.push({
+        id: `diagram_${(d.label || `fig_${idx + 1}`).replace(/[^a-z0-9]/gi, '_')}`,
+        type: 'diagram',
+        bbox: {
+          x: d.box_2d[1] / 1000,
+          y: d.box_2d[0] / 1000,
+          width: Math.max(0.05, (d.box_2d[3] - d.box_2d[1]) / 1000),
+          height: Math.max(0.05, (d.box_2d[2] - d.box_2d[0]) / 1000)
+        },
+        confidence: 1.0,
+        text_snippet: d.label
+      });
+    }
+  });
+
+  const subparts = (layoutMap as any).subpart_groundings || (layoutMap as any).subpart_regions || [];
+  subparts.forEach((s: any) => {
+    const effectiveY = (typeof s.answer_baseline_y === 'number' && s.answer_baseline_y > 40)
+      ? s.answer_baseline_y
+      : ((Array.isArray(s.handwriting_box) && s.handwriting_box[2] > 40)
+          ? s.handwriting_box[2]
+          : ((Array.isArray(s.label_box) && s.label_box[0] > 40)
+              ? s.label_box[0]
+              : 100));
+    const ymin = Math.max(40, effectiveY);
+    const ymax = Math.min(960, ymin + 35);
+    const xmin = (Array.isArray(s.handwriting_box) && s.handwriting_box[1] > 40) ? s.handwriting_box[1] : 150;
+    const xmax = (Array.isArray(s.handwriting_box) && s.handwriting_box[3] > 40) ? s.handwriting_box[3] : 850;
+    regions.push({
+      id: `ans_${(s.part_label || 'subpart').replace(/[^a-z0-9]/gi, '_').toLowerCase()}_line`,
+      type: 'answer_line',
+      bbox: {
+        x: xmin / 1000,
+        y: ymin / 1000,
+        width: Math.max(0.1, (xmax - xmin) / 1000),
+        height: Math.max(0.02, (ymax - ymin) / 1000)
+      },
+      confidence: 1.0,
+      subpart_label: s.part_label
+    });
+  });
+  return regions;
+}
+
+// Pass 2: Visual Grounding & Positioning Agent (pure coordinate and spatial localization with gpt-6-luna)
+async function groundEvaluatedMarks(
+  apiKey: string,
+  modelCandidates: string[],
+  imageUrl: string,
+  evaluatedSubparts: any[],
+  qNum: string
+): Promise<VisualGroundingResult | null> {
+  if (!imageUrl || !evaluatedSubparts || evaluatedSubparts.length === 0) return null;
+
+  const targets = evaluatedSubparts.map((sp: any) => {
+    const earnedPhrases = Array.isArray(sp.marking_points)
+      ? sp.marking_points
+          .filter((pt: any) => (pt.is_earned || pt.is_awarded || pt.tick_or_cross === 'tick') && pt.student_phrase)
+          .map((pt: any) => ({
+            point_number: pt.point_number || pt.point_index || 1,
+            student_phrase: pt.student_phrase,
+            mark_code: pt.mark_code || 'B1'
+          }))
+      : [];
+    const flawedPhrases = Array.isArray(sp.marking_points)
+      ? sp.marking_points
+          .filter((pt: any) => !(pt.is_earned || pt.is_awarded) && pt.flawed_phrase)
+          .map((pt: any) => ({ flawed_phrase: pt.flawed_phrase }))
+      : [];
+
+    return {
+      part_label: sp.part_label,
+      student_answer_detected: sp.student_answer_detected || "",
+      score: sp.score,
+      max_score: sp.max_score,
+      earned_phrases: earnedPhrases,
+      flawed_phrases: flawedPhrases,
+      teacher_correction_note: sp.teacher_correction_note || sp.constructive_correction || ""
+    };
+  });
+
+  const groundingPrompt = `You are the Mentora Visual Grounding & Spatial Positioning Agent.
+The Senior Chief Examiner has evaluated Question ${qNum}.
+Your SOLE TASK is visual OCR localization on this student's exam sheet.
+DO NOT re-grade or change scores. Focus 100% on pinpointing the precise pixel coordinates [ymin, xmin, ymax, xmax] (0-1000 integer scale, top-left [0,0] to bottom-right [1000,1000]).
+
+EVALUATED SUBPARTS & TARGET PHRASES TO LOCATE:
+${JSON.stringify(targets, null, 2)}
+
+TASK:
+1. DETECT PROTECTED REGIONS:
+   - Identify any printed diagrams, graphs, circuits, apparatus illustrations, or tables (e.g. "Fig. 8.1", graphs):
+   - "diagram_regions": [
+       { "label": "string", "box_2d": [ymin, xmin, ymax, xmax] }
+     ]
+   - Teacher pen marks and notes MUST NEVER overlap these protected regions.
+
+2. FOR EACH SUBPART:
+   - "part_label": string matching the input (e.g. "(a)", "(b)(i)")
+   - "label_box": [ymin, xmin, ymax, xmax] bounding the printed question subpart label.
+   - "handwriting_box": [ymin, xmin, ymax, xmax] bounding the student's actual handwritten answer / calculation for this subpart. If blank: [0, 0, 0, 0].
+   - "answer_baseline_y": integer (0 to 1000) indicating the EXACT vertical level (baseline) where the student's handwritten answer text finishes.
+   - "earned_points": For each item in "earned_phrases", locate where that exact phrase or formula appears on the sheet:
+     [
+       {
+         "point_number": number,
+         "student_phrase": "string",
+         "box_2d": [ymin, xmin, ymax, xmax] // bounding the exact phrase so a red tick (✓) can be placed at it
+       }
+     ]
+   - "mistake_points": For each item in "flawed_phrases", locate where that flawed word appears on the sheet:
+     [
+       {
+         "flawed_phrase": "string",
+         "box_2d": [ymin, xmin, ymax, xmax] // bounding the flawed word so a neat underline or caret can be placed
+       }
+     ]
+   - "correction_box": If teacher_correction_note is not empty, specify [ymin, xmin, ymax, xmax] for a clear empty space directly below/beside the error where the teacher's red correction note can be written without overlapping diagrams or the next subpart.
+
+COORDINATE SYSTEM:
+All coordinates are normalized integers 0 to 1000 (0,0 is top-left, 1000,1000 is bottom-right).
+
+Return strictly valid JSON matching this schema:
+{
+  "diagram_regions": [
+    { "label": "string", "box_2d": [ymin, xmin, ymax, xmax] }
+  ],
+  "subpart_groundings": [
+    {
+      "part_label": "string",
+      "label_box": [ymin, xmin, ymax, xmax],
+      "handwriting_box": [ymin, xmin, ymax, xmax],
+      "answer_baseline_y": number,
+      "earned_points": [
+        { "point_number": number, "student_phrase": "string", "box_2d": [ymin, xmin, ymax, xmax] }
+      ],
+      "mistake_points": [
+        { "flawed_phrase": "string", "box_2d": [ymin, xmin, ymax, xmax] }
+      ],
+      "correction_box": [ymin, xmin, ymax, xmax]
+    }
+  ]
+}
+Return only JSON.`;
+
+  try {
+    const res = await executeChatCompletion(apiKey, modelCandidates, {
+      messages: [
+        { role: "system", content: "You are the Mentora Visual Grounding & Spatial Positioning Agent. Output strictly valid JSON." },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: groundingPrompt },
+            { type: "image_url", image_url: { url: imageUrl, detail: "high" } }
+          ]
+        }
+      ],
+      response_format: { type: "json_object" }
+    });
+
+    if (res.ok && res.data?.choices?.[0]?.message?.content) {
+      const cleanJson = res.data.choices[0].message.content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+      const parsed = JSON.parse(cleanJson);
+      return {
+        diagram_regions: Array.isArray(parsed.diagram_regions) ? parsed.diagram_regions : [],
+        subpart_groundings: Array.isArray(parsed.subpart_groundings) ? parsed.subpart_groundings : []
+      };
+    }
+  } catch (err) {
+    console.warn("groundEvaluatedMarks execution error:", err);
+  }
+  return null;
+}
+
+// Master synthesizer: merges Pass 1 pedagogical assessment with Pass 2 visual grounding
+function applyVisualGroundingToAssessment(
+  assessment: any,
+  grounding: VisualGroundingResult | null,
+  qNum: string,
+  targetPageIndex?: number
+): void {
+  const pIdx = typeof targetPageIndex === 'number' ? targetPageIndex : 0;
+  if (!assessment) return;
+
+  if (grounding) {
+    assessment.layout_regions = formatLayoutRegions(grounding);
+  }
+
+  const subparts: any[] = Array.isArray(assessment.subparts) ? assessment.subparts : [];
+  if (subparts.length === 0) return;
+
+  subparts.sort((a: any, b: any) => {
+    const wA = getSubpartSortWeight(a.part_label || '');
+    const wB = getSubpartSortWeight(b.part_label || '');
+    return wA - wB;
+  });
+
+  const totalParts = subparts.length;
+  const score = assessment.total_score ?? assessment.score ?? 0;
+  const maxScore = assessment.total_max_score || assessment.max_score || 1;
+
+  const synthesized: any[] = [
+    {
+      type: 'total_header',
+      text: `Q${qNum} Total: ${score}/${maxScore}`,
+      comment: `Question ${qNum} Total Score: ${score}/${maxScore}`,
+      box_2d: [840, 770, 880, 960],
+      page_index: pIdx
+    }
+  ];
+
+  let prevBadgeY = 0;
+
+  subparts.forEach((sp: any, idx: number) => {
+    const max = Number(sp.max_score) || 1;
+    sp.score = Math.max(0, Math.min(Number(sp.score) || 0, max));
+    if (sp.score === max) {
+      sp.teacher_correction_note = "";
+      sp.constructive_correction = "";
+      sp.mistake_details = "";
+      sp.misconception_analysis = "";
+      sp.how_to_improve = "";
+    }
+
+    const cleanPart = (sp.part_label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const matchedGrounding = grounding?.subpart_groundings?.find((sg: any) => {
+      const gPart = (sg.part_label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      return gPart === cleanPart || gPart.endsWith(cleanPart) || cleanPart.endsWith(gPart);
+    });
+
+    // 1. Determine answer baseline Y
+    let detectedY: number | null = null;
+    if (matchedGrounding && typeof matchedGrounding.answer_baseline_y === 'number' && matchedGrounding.answer_baseline_y >= 40 && matchedGrounding.answer_baseline_y <= 950) {
+      detectedY = matchedGrounding.answer_baseline_y;
+      sp.line_y = detectedY;
+    } else if (matchedGrounding && Array.isArray(matchedGrounding.handwriting_box) && matchedGrounding.handwriting_box[2] > 40) {
+      detectedY = Math.round((matchedGrounding.handwriting_box[0] + matchedGrounding.handwriting_box[2]) / 2);
+      sp.line_y = detectedY;
+    } else if (typeof sp.line_y === 'number' && sp.line_y >= 40 && sp.line_y <= 950) {
+      detectedY = sp.line_y;
+    }
+
+    const defaultY = Math.round(70 + idx * (800 / Math.max(1, totalParts - 1)));
+    const rawY = detectedY && detectedY >= 40 && detectedY <= 950 ? detectedY : defaultY;
+    // Raise position by 20 units above the end-of-answer line so there is clear room to see which answer it belongs to
+    let yMid = Math.max(rawY - 20, 35);
+
+    // Collision prevention with diagrams
+    if (grounding?.diagram_regions && grounding.diagram_regions.length > 0) {
+      for (const d of grounding.diagram_regions) {
+        if (Array.isArray(d.box_2d) && d.box_2d.length === 4) {
+          const [dYmin, , dYmax] = d.box_2d;
+          if (yMid >= dYmin - 10 && yMid <= dYmax + 10) {
+            yMid = Math.min(dYmax + 25, 940);
+          }
+        }
+      }
+    }
+
+    // Minimum 38 units separation between margin badges
+    if (prevBadgeY > 0 && yMid < prevBadgeY + 38) {
+      yMid = prevBadgeY + 38;
+    }
+    prevBadgeY = yMid;
+    sp.line_y = yMid;
+
+    // 2. Right Margin Score Badge: strictly in the right margin column
+    const badgeText = `(${sp.score}/${sp.max_score})`;
+    synthesized.push({
+      type: 'mark_badge',
+      text: badgeText,
+      comment: sp.score > 0 ? (sp.marks_awarded?.[0] || `Part ${sp.part_label}: ${sp.score}/${sp.max_score} marks`) : (sp.deductions?.[0] || `Part ${sp.part_label}: 0/${sp.max_score} marks`),
+      box_2d: [Math.max(yMid - 16, 40), 865, Math.min(yMid + 16, 940), 975],
+      subpart_label: sp.part_label,
+      page_index: pIdx
+    });
+
+    // 3. Point-by-point inline ticks (grounded to specific words/steps)
+    let placedTicks = 0;
+    const earnedPoints = Array.isArray(sp.marking_points)
+      ? sp.marking_points.filter((pt: any) => pt.is_earned || pt.is_awarded || pt.tick_or_cross === 'tick')
+      : [];
+
+    earnedPoints.forEach((pt: any, ptIdx: number) => {
+      let ptBox: [number, number, number, number] | null = null;
+      if (matchedGrounding?.earned_points && matchedGrounding.earned_points.length > 0) {
+        const ep = matchedGrounding.earned_points.find((p: any) =>
+          p.point_number === (pt.point_number || pt.point_index || ptIdx + 1) ||
+          (p.student_phrase && pt.student_phrase && p.student_phrase.toLowerCase().includes(pt.student_phrase.toLowerCase().slice(0, 15)))
+        );
+        if (ep && Array.isArray(ep.box_2d) && ep.box_2d.length === 4 && (ep.box_2d[0] > 0 || ep.box_2d[2] > 0)) {
+          ptBox = ep.box_2d;
+          pt.box_2d = ep.box_2d;
+        }
+      }
+
+      if (!ptBox && Array.isArray(pt.box_2d) && pt.box_2d.length === 4 && (pt.box_2d[0] > 0 || pt.box_2d[2] > 0)) {
+        ptBox = pt.box_2d;
+      }
+
+      let tickY: number;
+      let tickX: number;
+      if (ptBox) {
+        const lineY = Math.round((ptBox[0] + ptBox[2]) / 2);
+        tickY = Math.max(Math.min(lineY, 940), 30);
+        tickX = Math.min(Math.max(ptBox[3] + 6, 120), 760);
+      } else {
+        // If subpart spans a tall handwriting box (e.g. graph + equations, span > 80 units),
+        // distribute ticks along that span rather than clustering at the very bottom!
+        const hwBox = matchedGrounding?.handwriting_box;
+        const hasTallSpan = Array.isArray(hwBox) && hwBox.length === 4 && (hwBox[2] - hwBox[0] > 80);
+        if (hasTallSpan) {
+          const hwTop = Math.max(hwBox[0], 40);
+          const hwBottom = Math.min(hwBox[2], 930);
+          const span = hwBottom - hwTop;
+          const stepFrac = (ptIdx + 1) / (earnedPoints.length + 1);
+          tickY = Math.round(hwTop + span * stepFrac);
+          tickX = ptIdx % 2 === 0 ? 560 : 720;
+        } else {
+          const yOffset = earnedPoints.length === 1 ? 0 : Math.round((ptIdx - (earnedPoints.length - 1) / 2) * 22);
+          tickY = Math.max(yMid + yOffset, 40);
+          tickX = earnedPoints.length === 1 ? 720 : (ptIdx % 2 === 0 ? 580 : 720);
+        }
+      }
+
+      const isStrictMarkCode = typeof pt.mark_code === 'string' && /^[A-Z]\d{1,2}$/i.test(pt.mark_code.trim()) && pt.mark_code.trim().length <= 4;
+      const cleanMarkCode = isStrictMarkCode ? pt.mark_code.trim().toUpperCase() : '✓';
+
+      synthesized.push({
+        type: 'inline_tick',
+        text: cleanMarkCode,
+        comment: pt.criterion || pt.student_phrase || `Part ${sp.part_label} mark earned`,
+        box_2d: [Math.max(tickY - 14, 30), tickX, Math.min(tickY + 14, 940), Math.min(tickX + 40, 795)],
+        subpart_label: sp.part_label,
+        page_index: pIdx
+      });
+      placedTicks++;
+    });
+
+    // If earned marks > placedTicks, synthesize remaining ticks distributed along the answer line
+    if (placedTicks < sp.score) {
+      const remaining = Math.min(sp.score - placedTicks, 4);
+      for (let k = 0; k < remaining; k++) {
+        const tickIdx = placedTicks + k;
+        const yOffset = Math.round((tickIdx - (sp.score - 1) / 2) * 22);
+        const tickY = Math.max(yMid + yOffset, 40);
+        const tickX = sp.score === 1 ? 720 : (tickIdx % 2 === 0 ? 580 : 720);
+        synthesized.push({
+          type: 'inline_tick',
+          text: '✓',
+          comment: sp.marks_awarded?.[tickIdx] || `Part ${sp.part_label} mark ${tickIdx + 1} earned`,
+          box_2d: [Math.max(tickY - 14, 30), tickX, Math.min(tickY + 14, 940), Math.min(tickX + 35, 840)],
+          subpart_label: sp.part_label,
+          page_index: pIdx
+        });
+      }
+    }
+
+    // 4. Teacher correction note: positioned safely in blank space, NEVER overlapping the next subpart
+    if (sp.score < sp.max_score) {
+      const note = (sp.teacher_correction_note || sp.constructive_correction || sp.teacher_correction || sp.deductions?.[0] || sp.feedback || '').replace(/^✎\s*/, '').replace(/^\^\s*/, '').trim();
+      if (note) {
+        let corrBox: [number, number, number, number];
+        if (matchedGrounding && Array.isArray(matchedGrounding.correction_box) && matchedGrounding.correction_box.length === 4 && matchedGrounding.correction_box[0] > 0) {
+          corrBox = matchedGrounding.correction_box;
+        } else {
+          const nextSubpartDefaultY = idx + 1 < totalParts ? Math.round(70 + (idx + 1) * (800 / Math.max(1, totalParts - 1))) : 940;
+          const availableGap = nextSubpartDefaultY - yMid;
+          const corrY = availableGap >= 45 ? Math.min(yMid + 20, nextSubpartDefaultY - 20) : Math.max(yMid - 20, 45);
+          const corrX = availableGap >= 45 ? 160 : 120;
+          corrBox = [corrY, corrX, Math.min(corrY + 28, 940), Math.min(corrX + 340, 840)];
+        }
+
+        synthesized.push({
+          type: 'comment',
+          text: note,
+          comment: note,
+          teacher_correction: note,
+          box_2d: corrBox,
+          subpart_label: sp.part_label,
+          page_index: pIdx
+        });
+      }
+    }
+  });
+
+  // 5. Strict 2D Collision Resolution: Ticks and Comments MUST NOT overlap!
+  const allTicks = synthesized.filter(m => m.type === 'tick' || m.type === 'inline_tick');
+  const allComments = synthesized.filter(m => m.type === 'comment' || m.type === 'teacher_note');
+
+  allComments.forEach(comm => {
+    const cBox = comm.box_2d;
+    if (!Array.isArray(cBox) || cBox.length < 4) return;
+
+    for (const t of allTicks) {
+      const tBox = t.box_2d;
+      if (!Array.isArray(tBox) || tBox.length < 4) continue;
+
+      const yOverlap = Math.max(cBox[0], tBox[0] - 8) < Math.min(cBox[2], tBox[2] + 8);
+      const xOverlap = Math.max(cBox[1], tBox[1] - 8) < Math.min(cBox[3], tBox[3] + 8);
+
+      if (yOverlap && xOverlap) {
+        const tickMidY = (tBox[0] + tBox[2]) / 2;
+        const commMidY = (cBox[0] + cBox[2]) / 2;
+        const commHeight = Math.max(22, cBox[2] - cBox[0]);
+
+        if (commMidY >= tickMidY) {
+          cBox[0] = Math.min(930, tBox[2] + 10);
+          cBox[2] = Math.min(950, cBox[0] + commHeight);
+        } else {
+          cBox[2] = Math.max(30, tBox[0] - 10);
+          cBox[0] = Math.max(20, cBox[2] - commHeight);
+        }
+      }
+    }
+  });
+
+  assessment.annotations = synthesized;
+}
+
+// Fallback surveyor for backwards-compatibility
+async function surveyPageLayout(
+  apiKey: string,
+  modelCandidates: string[],
+  imageUrl: string,
+  questionHint?: string
+): Promise<PageLayoutMap | null> {
+  return null;
+}
+
 // Prompt builder: targeted per-question grading with explicit mark-scheme injection and anti-hallucination rules
 function buildTargetedQuestionGradingPrompt(
   qNum: string,
@@ -849,7 +1330,8 @@ function buildTargetedQuestionGradingPrompt(
   },
   studentTranscription?: string,
   spannedPages?: number[],
-  targetPageIndex?: number
+  targetPageIndex?: number,
+  layoutMap?: PageLayoutMap | null
 ): string {
   const isPageSpecific = typeof targetPageIndex === 'number';
   const pagesText = isPageSpecific
@@ -882,9 +1364,21 @@ OFFICIAL AUTHORITATIVE MARK SCHEME (MANDATORY & BINDING GROUND TRUTH FOR QUESTIO
 ${schemeData.official_mark_scheme}
 ======================================================================
 
-CRITICAL MARK SCHEME SUPREMACY & ANTI-HALLUCINATION RULES:
+CRITICAL MARK SCHEME SUPREMACY, UNIVERSAL STANDARDISATION & ANTI-HALLUCINATION RULES:
 1. BINDING GROUND TRUTH: The official mark scheme above is the SUPREME BINDING CRITERIA. You MUST NOT invent outside rules, unmentioned jargon, or deductions not present in this official scheme.
-2. QUESTION 3 (THERMAL PHYSICS / PARTICLES / CONVECTION) MANDATORY GRADING RULES:
+
+2. UNIVERSAL EXAMINER CODE OF PRACTICE & BENEFIT OF THE DOUBT (BOD) (APPLIES TO ALL PAPERS):
+   - Under standard Cambridge / Edexcel / ZIMSEC / IB exam marking principles, apply the Benefit of the Doubt (BOD) rule:
+   - When a student's answer, formula, calculation, or diagram shows genuine scientific knowledge that satisfies the marking point, AWARD THE MARK.
+   - Do NOT penalize or withhold marks for:
+     * Unlabelled reference letters on diagrams (e.g. if an object X is placed close to the lens in the focal region, award the mark even if the student did not write the letter 'F', provided it is visibly on the correct side and closer than infinity).
+     * Stray marks, faint pencil lines, erased attempts, or unintentional ink smudges near printed text.
+     * Minor phonetic spelling or handwriting slips where the meaning is unambiguous (e.g. 'alchol', 'convection', 'amphoteric', 'calcium carbonate').
+   - DETERMINISTIC CONSISTENCY GUARANTEE:
+     * Identical student answers MUST receive identical scores every single time without variance.
+     * Never apply subjective harshness on one run and leniency on another.
+
+3. QUESTION 3 (THERMAL PHYSICS / PARTICLES / CONVECTION) MANDATORY GRADING RULES:
    - Part (a) Particle Motion: Award the 1 mark if student states that particles in ice vibrate (about fixed positions) OR that particles in water move / slide past each other. This is the exact mark scheme criterion (B1: vibrate about fixed position OR particles in water move throughout liquid). DO NOT dock marks claiming "need to state motion not just fixed positions"!
    - Part (b)(ii) Specific Heat Capacity (Q = mcΔT):
      Formula: Q = mcΔT (1 mark). Substitution: 0.34 × 4200 × (change in temp) (1 mark).
@@ -897,15 +1391,46 @@ CRITICAL MARK SCHEME SUPREMACY & ANTI-HALLUCINATION RULES:
      Requires density changes: cold/colder water near ice becomes denser and sinks; warmer water rises to replace it, forming a convection current. (3 marks).
    - Part (b)(iv) / (c)(iv) Internal Energy:
      Internal energy decreases (1 mark) AND kinetic energy of particles decreases / particles move slower (1 mark). Total 2 marks. DO NOT demand potential energy changes!
-3. MATHEMATICAL & CALCULATION VERIFICATION:
+
+3. QUESTION 4 (OPTICS, LENSES, MAGNIFYING GLASS, REFRACTION) MANDATORY GRADING RULES:
+   - Part (a)(i) Focal Point Definition:
+     * Mark 1: Rays meet / are focused after passing through a converging lens.
+     * Mark 2: Incident rays must be parallel to the principal axis.
+     * If the student wrote "A focal point is the point where light rays are focused after passing through a lens", award 1/2 marks.
+     * Teacher correction note: "Add that the incident rays must be parallel to the principal axis."
+   - Part (a)(ii) Magnifying Glass Object Position:
+     * Position of object: between optical centre / lens and principal focus / focal point.
+     * If student marks E between lens and focal point or writes "between the lens and a focal point", AWARD FULL 1/1 MARK!
+   - Part (a)(iii) Two words to describe the image formed by a magnifying glass:
+     * Question text: "Two words to describe the image are: - inverted, - real, - upright, - virtual".
+     * Mark scheme criteria: "upright" AND "virtual" (image is virtual, upright, and enlarged).
+     * CAREFULLY INSPECT THE STUDENT'S BLUE PEN INK: The student drew underlines ONLY under "upright" and "virtual"!
+     * "inverted" and "real" are merely printed/transcribed list items and are NOT underlined!
+     * Because the student selected "upright" and "virtual", they have chosen the EXACT CORRECT TWO PROPERTIES!
+     * AWARD FULL MARKS: score = 1, max_score = 1 (or 2/2 if 2 marks).
+     * DO NOT hallucinate that "real" or "inverted" were selected!
+     * Zero over-correction rule: since full marks, teacher_correction_note = "".
+   - Part (b)(i) Speed of Light in Glass:
+     * Formula: n = c / v (1 mark). Calculation: v = (3.0 × 10⁸) / 1.5 = 2.0 × 10⁸ m/s with unit (1 mark).
+     * Student's working is 100% correct. AWARD FULL 2/2 MARKS!
+
+4. UNIVERSAL MANDATORY RULE FOR MULTIPLE CHOICE, WORD LISTS, AND SELECTION QUESTIONS (UNDERLINE / CIRCLE / TICK):
+   - Whenever a question presents a word bank or multiple options (e.g. "Two words to describe the image are: - inverted, - real, - upright, - virtual"):
+   - INSPECT THE PEN INK CLOSELY: A word is ONLY selected if the student has actively underlined it, circled it, or ticked beside it.
+   - The printed text of options does NOT mean the student selected all of them!
+   - If the student underlined 'upright' and 'virtual', they selected ONLY those two words.
+   - If those two words match the mark scheme criteria (e.g. virtual and upright for a magnifying glass), AWARD FULL MARKS!
+   - POSITIVE MARKING (CAMBRIDGE & ZIMSEC PRINCIPLE): NEVER hallucinate that un-underlined words were chosen, and NEVER cancel out correct marks with imaginary selections!
+
+5. MATHEMATICAL & CALCULATION VERIFICATION:
    - Carefully verify the student's mathematical steps, formulas, and arithmetic.
    - For thermal calculations like Q = mcΔT = 0.34 × 4200 × 10 = 14 280 J (or 1.4 × 10⁴ J, or 25 704 J), award full marks immediately!
    - ABSOLUTE BAN ON SELF-CONTRADICTION: Under NO circumstances mark a student step incorrect if your own proposed correction note repeats the exact formula, numbers, or answer the student wrote!
-4. "ANY N FROM" CRITERIA:
+6. "ANY N FROM" CRITERIA:
    - If the mark scheme states "any two from [A, B, C]" or "any three from [D, E, F]", and the student states that required number of valid concepts, award FULL MARKS.
-5. SUBPART MARKS BUDGET INTEGRITY:
+7. SUBPART MARKS BUDGET INTEGRITY:
    - The max marks for each subpart are strictly defined by the mark scheme.
-6. ZERO OVER-CORRECTION ON FULL-MARK ANSWERS:
+8. ZERO OVER-CORRECTION ON FULL-MARK ANSWERS:
    - When a student scores full marks on a subpart, set teacher_correction_note: "", constructive_correction: "", mistake_details: "".
    - Never write red correction notes or underlines over correct answers or drawings.`
     : `======================================================================
@@ -913,6 +1438,20 @@ OFFICIAL MARK SCHEME STATUS:
 [NO OFFICIAL MARK SCHEME STORED IN DATABASE FOR QUESTION ${qNum}]
 - Grade fairly and equitably using standard Cambridge / ZIMSEC / IB syllabus principles.
 ======================================================================`;
+
+  const layoutGroundingSection = layoutMap ? `
+4. VERIFIED VISUAL GROUNDING (PAGE SURVEYOR AGENT GROUND TRUTH):
+The Page Surveyor Agent has physically mapped this sheet. You MUST anchor to this ground truth:
+- PROTECTED DIAGRAM / APPARATUS REGIONS (NEVER place marks or comments inside these):
+${layoutMap.diagram_regions && layoutMap.diagram_regions.length > 0 ? JSON.stringify(layoutMap.diagram_regions, null, 2) : "None detected"}
+
+- DETECTED SUBPART HANDWRITING REGIONS & BASELINE Y:
+${layoutMap.subpart_regions && layoutMap.subpart_regions.length > 0 ? JSON.stringify(layoutMap.subpart_regions, null, 2) : "None detected"}
+
+COORDINATE ANCHORING INSTRUCTIONS:
+- For every subpart with an "answer_baseline_y", place its right-margin badge (✓ or ✗) at that EXACT Y coordinate: "line_y": answer_baseline_y, "box_2d": [answer_baseline_y - 15, 870, answer_baseline_y + 15, 970].
+- For inline ticks (✓), place them inside that subpart's handwriting_box at the end of the student's valid written step.
+- For teacher corrections, place them in blank ruled space below mistakes, NEVER overlapping the diagrams!` : '';
 
   return `You are the Mentora Senior Chief Examiner and Master Pedagogical Teacher.
 You evaluate student answers under the guiding philosophy:
@@ -935,12 +1474,20 @@ STUDENT SUBMISSION NOTES / TRANSCRIPTION:
 ${studentTranscription || "Refer to attached handwriting image(s)."}
 
 PROFESSIONAL EXAMINER & PEDAGOGICAL TEACHER PROTOCOL:
-1. POINT-BY-POINT INLINE MARKING:
-   - Place a neat red checkmark (✓) directly adjacent to or above EACH AND EVERY valid point, formula, substitution, calculated value, unit, chemical name, or key scientific concept in the student's written response.
-   - For every subpart, place inline ticks at valid steps and a margin mark badge (✓ score/max or ✗ 0/max) in the right margin (x: 870 to 970).
+1. RIGOROUS MARK SCHEME GRADING & EXACT PHRASE EXTRACTION:
+   - Grade every subpart strictly against the official mark scheme.
+   - For every marking point in "marking_points":
+     * "point_number": integer (1, 2, ...)
+     * "criterion": string (mark scheme criteria)
+     * "is_earned": boolean (true if earned, false otherwise)
+     * "mark_code": string (STRICT 2-3 char code only, e.g. "B1", "M1", "A1", "C1". NEVER write sentences or explanations in mark_code)
+     * "student_phrase": the EXACT word, phrase, equation, or number from the student's handwritten response that earned this mark (e.g. 'upright', 'virtual', 'vibrate about fixed positions', 'Q = mcΔT', '14 280 J'). If not earned, leave empty "".
+     * "flawed_phrase": if missed due to an incorrect response, the specific flawed word or value written by the student (e.g. 'conduction', 'inverted', 'real'). If omitted entirely, leave empty "".
+   - NOTE: You do not need to guess pixel coordinates; the Visual Grounding Agent will localize them in Pass 2 using these target phrases!
 2. CONSTRUCTIVE CORRECTIONS FOR MISSED POINTS:
-   - If a student makes an error, write a concise correction note (e.g. 'Replace "Convection" with "Conduction"').
-   - If full marks: teacher_correction_note: "".
+   - If a student makes an error, write a concise correction note (MAXIMUM 10-12 words, e.g. 'Max current = 7.5/30 = 0.25 A as 30 Ω resistor remains in circuit'). Keep it very short so it fits on one line and never overlaps student writing!
+   - If full marks: teacher_correction_note: "", constructive_correction: "", mistake_details: "".
+${layoutGroundingSection}
 
 REQUIRED JSON OUTPUT SCHEMA:
 {
@@ -952,6 +1499,7 @@ REQUIRED JSON OUTPUT SCHEMA:
   "subparts": [
     {
       "part_label": "string (e.g. '(a)', '(b)(i)', '(b)(ii)', '(b)(iii)')",
+      "line_y": number, // integer 0-1000 indicating vertical level of student's answer line
       "score": number,
       "max_score": number,
       "student_answer_detected": "string",
@@ -966,7 +1514,9 @@ REQUIRED JSON OUTPUT SCHEMA:
           "point_number": 1,
           "criterion": "string",
           "is_earned": boolean,
-          "box_2d": [ymin, xmin, ymax, xmax]
+          "mark_code": "string",
+          "student_phrase": "string",
+          "flawed_phrase": "string"
         }
       ]
     }
@@ -1378,34 +1928,35 @@ Return strictly valid JSON matching this exact structure:
     }
   ],
   "marking_instructions_for_image_editor": "string (complete multi-line numbered instructions for GPT-Image-2.5-Sunburst describing every inline tick at each point, exact line position, cross, constructive correction note on how it should be answered, margin sub-totals, and final total stamp)",
+  "detected_regions": [
+    {
+      "id": "answer_1a_line_1",
+      "type": "answer_line | question_number | answer_area | diagram | margin",
+      "bbox": { "x": 0.22, "y": 0.18, "width": 0.60, "height": 0.035 },
+      "confidence": 0.95
+    }
+  ],
   "annotations": [
     {
-      "type": "inline_tick",
+      "type": "inline_tick | cross | mark_badge | underline | comment | total_header",
+      "target_id": "answer_1a_line_1",
+      "anchor": "right_of_target | under_target | right_margin | left_margin | bottom_right_stamp",
+      "offset": { "x": 0.012, "y": 0.0 },
       "text": "✓",
-      "comment": "Electrons move in wire",
-      "box_2d": [180, 240, 205, 300],
-      "subpart_label": "(b)(i)"
-    },
-    {
-      "type": "underline",
-      "text": "move from sphere to Earth",
-      "comment": "Direction inverted: electrons move from negative sphere to Earth",
-      "box_2d": [200, 310, 230, 600],
-      "subpart_label": "(b)(i)"
-    },
-    {
-      "type": "tick",
-      "text": "(1/2)",
-      "comment": "Part (b)(i): 1/2 marks",
-      "box_2d": [180, 880, 220, 970],
-      "subpart_label": "(b)(i)"
+      "reason": "Electrons move in wire",
+      "teacher_correction": "move from sphere to Earth",
+      "bbox": { "x": 0.83, "y": 0.18, "width": 0.045, "height": 0.035 },
+      "box_2d": [180, 830, 215, 875],
+      "subpart_label": "(a)(i)",
+      "confidence": 0.95
     }
   ],
   "overall_feedback": "string (encouraging, constructive summary of performance across the whole question)",
   "examiner_model_solution": "string (concise complete model answer for full marks across all parts)",
   "recommended_next_step": "string (targeted advice on what to review next)"
 }
-CRITICAL: The "annotations" array and "subparts" array MUST NOT be empty. For EVERY subpart, specify inline ticks at each valid point, exact locations, constructive correction notes for mistakes, right margin marks, and circled final score.
+CRITICAL: Place every annotation using normalized page coordinates [0.0, 1.0]. Do NOT guess arbitrary pixel values. All annotations MUST reference a valid target_id in detected_regions with an anchor (right_of_target, right_margin, under_target, bottom_right_stamp).
+The "annotations" array and "subparts" array MUST NOT be empty. For EVERY subpart, specify inline ticks at each valid point, exact locations, constructive correction notes for mistakes, right margin marks, and circled final score.
 Return only JSON. No surrounding markdown backticks.`;
 
       let rawImages: string[] = Array.isArray(payload.images) && payload.images.length > 0
@@ -1414,9 +1965,9 @@ Return only JSON. No surrounding markdown backticks.`;
           ? payload.answer_files.map((f: any) => f.base64 || f.uri).filter(Boolean)
           : (image_url ? [image_url] : []));
 
-      const requestedModel = (model_override && model_override !== "gpt-4o") ? model_override : null;
-      const pass1Candidates = requestedModel ? [requestedModel, "gpt-6-luna", "gpt-4o-mini"] : ["gpt-6-luna", "gpt-4o-mini", "gpt-4o"];
-      const pass2Candidates = requestedModel ? [requestedModel, "gpt-6-luna", "gpt-6.1-sol"] : ["gpt-6-luna", "gpt-6.1-sol", "gpt-4o"];
+      const requestedModel = model_override || "gpt-6-luna";
+      const pass1Candidates = [requestedModel, "gpt-6-luna", "gpt-4o-mini"];
+      const pass2Candidates = [requestedModel, "gpt-6-luna", "gpt-6.1-sol", "gpt-4o"];
 
       if (openaiApiKey && rawImages.length > 1) {
         try {
@@ -1486,7 +2037,7 @@ YOUR TASK:
               { role: "user", content: indexUserParts }
             ],
             response_format: { type: "json_object" },
-            temperature: 0.1
+            temperature: 0.0
           });
 
           let scriptMap: any[] = [];
@@ -1643,6 +2194,8 @@ YOUR TASK:
               // Evaluate EACH page of this question with dedicated focus so that NO subpart on ANY page is ever missed!
               const pageEvals = await Promise.all(
                 spannedPages.map(async (pIdx: number) => {
+                  // PASS 1 FOR THIS PAGE: Pedagogical Examiner Agent (focused marking with gpt-6-luna)
+                  console.log(`Page ${pIdx}: Running Pass 1 (Examiner Agent with gpt-6-luna)...`);
                   const targetedPrompt = buildTargetedQuestionGradingPrompt(
                     qNum,
                     schemeData,
@@ -1680,27 +2233,43 @@ YOUR TASK:
                   try {
                     const qRes = await executeChatCompletion(openaiApiKey, pass2Candidates, {
                       messages: [
-                        { role: "system", content: `You are the Mentora Senior Chief Examiner. Evaluate and mark EVERY subpart written on Page ${pIdx} strictly according to the mark scheme. Output strictly valid JSON.` },
+                        { role: "system", content: `You are the Mentora Senior Chief Examiner. Evaluate and mark EVERY subpart written on Page ${pIdx} strictly according to the mark scheme. Apply standard Cambridge/ZIMSEC Benefit of the Doubt (BOD): award marks when valid scientific understanding is demonstrated, ignore accidental smudges/stray marks, and enforce strict deterministic marking without inconsistency. Output strictly valid JSON.` },
                         { role: "user", content: qUserParts }
                       ],
                       response_format: { type: "json_object" },
-                      temperature: 0.1
+                      temperature: 0.0
                     });
 
                     if (qRes.ok && qRes.data?.choices?.[0]?.message?.content) {
                       const cleanQJson = qRes.data.choices[0].message.content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
                       const parsed = JSON.parse(cleanQJson);
+                      parsed.model_used = qRes.modelUsed;
+
                       if (Array.isArray(parsed.subparts)) {
                         parsed.subparts.forEach((sp: any) => {
                           sp.page_index = pIdx; // Enforce exact target page binding!
                         });
                       }
-                      if (Array.isArray(parsed.annotations)) {
-                        parsed.annotations.forEach((ann: any) => {
-                          ann.page_index = pIdx;
-                        });
+
+                      // PASS 2 FOR THIS PAGE: Visual Grounding & Positioning Agent (spatial localization with gpt-6-luna)
+                      let pageGrounding: VisualGroundingResult | null = null;
+                      if (rawImages[pIdx] && Array.isArray(parsed.subparts) && parsed.subparts.length > 0) {
+                        console.log(`Page ${pIdx}: Running Pass 2 (Visual Grounding Agent with gpt-6-luna)...`);
+                        pageGrounding = await groundEvaluatedMarks(
+                          openaiApiKey,
+                          pass1Candidates,
+                          rawImages[pIdx],
+                          parsed.subparts,
+                          qNum
+                        );
+                        if (pageGrounding) {
+                          console.log(`Page ${pIdx}: Pass 2 grounding detected ${pageGrounding.subpart_groundings.length} subparts and ${pageGrounding.diagram_regions.length} diagrams.`);
+                        }
                       }
-                      parsed.model_used = qRes.modelUsed;
+
+                      // Master synthesis: apply grounded coordinates, synthesize point-by-point inline ticks, margin badges, and comments
+                      applyVisualGroundingToAssessment(parsed, pageGrounding, qNum, pIdx);
+
                       return parsed;
                     }
                   } catch (pErr) {
@@ -1791,6 +2360,7 @@ YOUR TASK:
                 percentage: maxPossible > 0 ? Math.round((finalQScore / maxPossible) * 100) : 0,
                 subparts: allQSubparts,
                 annotations: allQAnnotations,
+                layout_regions: validPageEvals.flatMap((pe: any) => pe.layout_regions || []),
                 spanned_pages: spannedPages,
                 start_page: Math.min(...spannedPages),
                 end_page: Math.max(...spannedPages),
@@ -1905,6 +2475,10 @@ YOUR TASK:
                 )
             ));
 
+            const pageLayoutRegions = validQuestions
+              .filter((q: any) => q.spanned_pages?.includes(pIdx))
+              .flatMap((q: any) => q.layout_regions || []);
+
             return {
               page_index: pIdx,
               original_image_url: imgUrl,
@@ -1912,7 +2486,8 @@ YOUR TASK:
               page_max_score: pageMax,
               questions_present: questionsPresent.length > 0 ? questionsPresent : [`${pIdx + 1}`],
               annotations: pageAnnotations,
-              subparts: pageSubparts
+              subparts: pageSubparts,
+              layout_regions: pageLayoutRegions
             };
           });
 
@@ -1925,6 +2500,7 @@ YOUR TASK:
             max_score: grandTotalMax || 10,
             percentage: grandTotalMax > 0 ? Math.round((grandTotalScore / grandTotalMax) * 100) : 0,
             subparts: allSubparts,
+            layout_regions: validQuestions.flatMap((q: any) => q.layout_regions || []),
             annotations: allAnnotations,
             question_summaries: questionSummaries,
             pages: pages,
@@ -2001,9 +2577,9 @@ YOUR TASK:
       // SINGLE-PAGE ASSESSMENT (Targeted Mark Scheme & Anti-Hallucination)
       // =========================================================================
       const singleImageUrl = rawImages[0] || image_url;
-      // Unified Single-Page Assessment:
-      // Identifies the exact question on the script (matching headings, diagrams, and formulas against all questions)
-      // and marks strictly according to that question's official mark scheme in a single, fast vision pass.
+
+      // PASS 1: Pedagogical Examiner Agent (focused marking with gpt-6-luna)
+      console.log(`Single-page: Running Pass 1 (Pedagogical Examiner Agent with gpt-6-luna)...`);
       const singleTargetedPrompt = `You are the Mentora Senior Chief Examiner and Master Pedagogical Teacher.
 You evaluate student exam answers under the guiding philosophy:
 "MARK LIKE AN EXAMINER, EXPLAIN LIKE A TEACHER, AND ANNOTATE LIKE A PROFESSIONAL TEACHER."
@@ -2025,6 +2601,10 @@ YOUR GRADING PROTOCOL:
 
 2. MARK SCHEME COMPLIANCE & INTEGRITY:
    - The official mark scheme is the SUPREME BINDING GROUND TRUTH.
+   - UNIVERSAL BENEFIT OF THE DOUBT (BOD) RULE (APPLIES TO ALL PAPERS):
+     * Award marks whenever student demonstrates valid scientific understanding.
+     * Do NOT dock marks for unlabelled reference points on diagrams if physically plausible, minor spelling slips, or faint stray smudges.
+     * Enforce strict deterministic consistency across all papers.
    - Carefully verify student calculation steps, formulas, and values.
    - For thermal physics (Question 3):
      * Part (a) Particle Motion: Award the 1 mark if student states particles in ice vibrate (about fixed positions) OR water particles move / slide past each other. DO NOT dock marks claiming "only stated fixed positions not motion".
@@ -2035,16 +2615,38 @@ YOUR GRADING PROTOCOL:
    - Never mark a student step incorrect if the student wrote the correct answer!
    - Zero over-correction on full marks: if a student earns full marks on a subpart, set teacher_correction_note: "", constructive_correction: "", mistake_details: "".
 
+   - For optics / lenses / light (Question 4):
+     * Part (a)(i) Focal Point: Rays meet / focused after lens (1 mark) AND rays parallel to principal axis (1 mark). Total 2 marks. If student states rays focused after passing lens: 1/2 marks.
+     * Part (a)(ii) Magnifying Glass Object Position: Between lens and principal focus / focal point. Award 1/1 mark.
+     * Part (a)(iii) Two words for magnifying glass image (inverted, real, upright, virtual):
+       The image formed by a magnifying glass is VIRTUAL and UPRIGHT (and magnified).
+       CAREFULLY INSPECT THE STUDENT'S INK: Check which specific words have pen underlines!
+       If student underlined 'upright' and 'virtual', they chose the EXACT correct two words!
+       AWARD FULL 1/1 MARK!
+       NEVER hallucinate that 'real' or 'inverted' are selected!
+     * Part (b)(i) Speed of light in glass: n = c / v => v = 3.0×10⁸ / 1.5 = 2.0×10⁸ m/s. 100% correct, AWARD FULL 2/2 MARKS!
+
+   - SELECTION & WORD LIST QUESTIONS (UNIVERSAL RULE):
+     * When options are listed (e.g. underline / circle / tick):
+     * Look ONLY at the words the student actively underlined or circled.
+     * Do NOT assume unselected prompt options were chosen!
+     * Positive marking: If the student underlined the required correct terms, award full credit!
+
 3. COMPLETE SUBPART GRADING — DO NOT STOP EARLY:
    - Scan the entire student page completely from TOP TO BOTTOM.
    - Grade EVERY subpart present on the sheet (for example (a), (b)(i), (b)(ii), (b)(iii)).
    - ABSOLUTE BAN ON EARLY STOPPING: Never omit or stop after the first subpart or paragraph! If the student answered calculations (e.g. Q = mcΔT = 14280 J) or further parts below, you MUST evaluate them and award marks.
    - Output an entry in "subparts" for EVERY subpart visible on the sheet.
 
-4. VISUAL ANNOTATIONS:
-   - Place inline ticks (type: 'inline_tick', text: '✓') directly above/adjacent to every valid scoring point, formula, and calculation step.
-   - Place subpart score badges (type: 'tick' or 'cross', text: '(score/max)') in the right margin (x: 870 to 970).
-   - If there is a genuine mistake, place an underline/correction note.
+4. EXACT PHRASE EXTRACTION FOR POINT-BY-POINT GROUNDING:
+   - For every marking point in "marking_points":
+     * "point_number": integer (1, 2, ...)
+     * "criterion": string (mark scheme criteria)
+     * "is_earned": boolean (true if earned, false otherwise)
+     * "mark_code": string (e.g. "B1", "M1", "A1")
+     * "student_phrase": the EXACT word, phrase, equation, or number from the student's handwritten response that earned this mark (e.g. 'upright', 'virtual', 'vibrate about fixed positions', 'Q = mcΔT', '14 280 J'). If not earned, leave empty "".
+     * "flawed_phrase": if missed due to an incorrect response, the specific flawed word or value written by the student (e.g. 'conduction', 'inverted', 'real'). If omitted entirely, leave empty "".
+   - NOTE: You do not need to guess pixel coordinates; the Visual Grounding Agent will localize them in Pass 2 using these target phrases!
 
 Return strictly valid JSON matching this schema:
 {
@@ -2058,31 +2660,25 @@ Return strictly valid JSON matching this schema:
   "subparts": [
     {
       "part_label": "string (e.g. '(a)(i)')",
+      "line_y": number, // integer 0-1000 indicating vertical level of student's answer line
       "max_score": number,
       "score": number,
       "student_answer_detected": "string",
       "marks_awarded": ["string"],
       "deductions": ["string"],
-      "teacher_correction_note": "string",
-      "constructive_correction": "string",
-      "mistake_details": "string",
+      "teacher_correction_note": "string (empty if full marks)",
+      "constructive_correction": "string (empty if full marks)",
+      "mistake_details": "string (empty if full marks)",
       "marking_points": [
         {
-          "point_index": 1,
-          "is_awarded": boolean,
+          "point_number": 1,
           "criterion": "string",
-          "box_2d": [180, 240, 205, 300]
+          "is_earned": boolean,
+          "mark_code": "string",
+          "student_phrase": "string",
+          "flawed_phrase": "string"
         }
       ]
-    }
-  ],
-  "annotations": [
-    {
-      "type": "inline_tick" | "tick" | "cross" | "underline" | "total_header",
-      "text": "string",
-      "comment": "string",
-      "box_2d": [ymin, xmin, ymax, xmax],
-      "subpart_label": "string"
     }
   ],
   "overall_feedback": "string",
@@ -2092,7 +2688,7 @@ Return strictly valid JSON matching this schema:
 Return only JSON.`;
 
       const messages: any[] = [
-        { role: "system", content: "You are the Mentora Senior Chief Examiner. Mark every subpart strictly according to the official mark scheme with vision OCR accuracy and point-by-point inline ticks. Output strictly valid JSON." }
+        { role: "system", content: "You are the Mentora Senior Chief Examiner. Mark every subpart strictly according to the official mark scheme with vision accuracy. Output strictly valid JSON." }
       ];
 
       if (singleImageUrl) {
@@ -2111,7 +2707,7 @@ Return only JSON.`;
         const evalRes = await executeChatCompletion(openaiApiKey, pass2Candidates, {
           messages,
           response_format: { type: "json_object" },
-          temperature: 0.1
+          temperature: 0.0
         });
 
         if (!evalRes.ok) {
@@ -2166,66 +2762,24 @@ Return only JSON.`;
             }
           }
 
-          // Guarantee visual annotations for red examiner ink
-          const existingAnns = assessment.annotations || [];
-          const hasMarkings = existingAnns.some(
-            (a: any) => a.type === 'tick' || a.type === 'underline' || a.type === 'cross' || a.type === 'mark_badge'
-          );
-
-          if (!hasMarkings && assessment.subparts && assessment.subparts.length > 0) {
-            const score = assessment.total_score ?? assessment.score ?? 0;
-            const maxScore = assessment.total_max_score || assessment.max_score || context?.marks || 1;
-            const subparts = assessment.subparts;
-            const targetQNum = String(assessment.identified_question_number || context?.questionNumber || '1');
-            const synthesized: any[] = [
-              {
-                type: 'total_header',
-                text: `Q${targetQNum} Total: ${score}/${maxScore}`,
-                comment: `Question ${targetQNum} Total Score: ${score}/${maxScore}`,
-                box_2d: [840, 770, 880, 960],
-              }
-            ];
-
-            const startY = 125;
-            const availableSpan = Math.min(610, (subparts.length - 1) * 85);
-            const step = subparts.length > 1 ? availableSpan / (subparts.length - 1) : 0;
-
-            subparts.forEach((sp: any, idx: number) => {
-              const yMid = Math.round(startY + idx * step);
-
-              if (sp.score > 0) {
-                synthesized.push({
-                  type: 'tick',
-                  text: `(${sp.score}/${sp.max_score})`,
-                  comment: sp.marks_awarded?.[0] || `Part ${sp.part_label}: ${sp.score}/${sp.max_score} marks`,
-                  box_2d: [Math.max(yMid - 16, 50), 875, Math.min(yMid + 16, 980), 975],
-                  subpart_label: sp.part_label,
-                });
-              } else {
-                synthesized.push({
-                  type: 'cross',
-                  text: `(0/${sp.max_score})`,
-                  comment: sp.deductions?.[0] || `Part ${sp.part_label}: 0/${sp.max_score} marks`,
-                  box_2d: [Math.max(yMid - 16, 50), 875, Math.min(yMid + 16, 980), 975],
-                  subpart_label: sp.part_label,
-                });
-              }
-
-              if (sp.score < sp.max_score || sp.teacher_correction || (sp.deductions && sp.deductions.length > 0)) {
-                const note = sp.teacher_correction || sp.deductions?.[0] || sp.feedback;
-                if (note) {
-                  synthesized.push({
-                    type: 'underline',
-                    text: note,
-                    comment: note,
-                    box_2d: [Math.min(yMid + 25, 930), 200, Math.min(yMid + 75, 960), 880],
-                    subpart_label: sp.part_label,
-                  });
-                }
-              }
-            });
-            assessment.annotations = synthesized;
+          // PASS 2: Visual Grounding & Positioning Agent (spatial localization with gpt-6-luna)
+          let singlePageGrounding: VisualGroundingResult | null = null;
+          if (singleImageUrl && Array.isArray(assessment.subparts) && assessment.subparts.length > 0) {
+            console.log(`Single-page: Running Pass 2 (Visual Grounding Agent with gpt-6-luna)...`);
+            singlePageGrounding = await groundEvaluatedMarks(
+              openaiApiKey,
+              pass1Candidates,
+              singleImageUrl,
+              assessment.subparts,
+              identifiedQNum
+            );
+            if (singlePageGrounding) {
+              console.log(`Single-page: Pass 2 Grounding complete: detected ${singlePageGrounding.subpart_groundings.length} subparts and ${singlePageGrounding.diagram_regions.length} diagrams.`);
+            }
           }
+
+          // Master synthesis: apply grounded coordinates, synthesize point-by-point inline ticks, margin badges, and comments
+          applyVisualGroundingToAssessment(assessment, singlePageGrounding, identifiedQNum, 0);
 
           // 2. Image Annotation Agent (GPT-Image-2.5-Sunburst)
           if (openaiApiKey && singleImageUrl && generate_marked_image !== false) {

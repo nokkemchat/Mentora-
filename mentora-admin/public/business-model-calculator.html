@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Exam Marking — Business Model Calculator</title>
+<style>
+:root{--ink:#17202f;--muted:#647084;--line:#e3e8ef;--paper:#f6f8fb;--card:#fff;--accent:#ff5a1f;--accent-dark:#d94512;--green:#137a52;--green-bg:#eaf7f0;--blue:#2259a6;--blue-bg:#eef4ff;--amber:#8a5b00;--amber-bg:#fff5dc}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.5 Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+.wrap{max-width:1240px;margin:auto;padding:28px 22px 60px}.hero{background:#182234;color:white;border-radius:22px;padding:32px;position:relative;overflow:hidden}.hero:after{content:"";position:absolute;width:290px;height:290px;border:50px solid rgba(255,90,31,.22);border-radius:50%;right:-60px;top:-130px}.eyebrow{text-transform:uppercase;letter-spacing:.13em;font-size:11px;font-weight:800;color:#ffb397}.hero h1{font-size:clamp(28px,4vw,43px);line-height:1.1;letter-spacing:-.04em;margin:10px 0 12px;max-width:760px}.hero p{color:#d0d7e3;max-width:760px;margin:0}.tag{display:inline-flex;border:1px solid #455064;border-radius:999px;padding:5px 10px;font-size:12px;color:#e6eaf1;margin-top:18px}
+.grid{display:grid;grid-template-columns:minmax(300px, .92fr) minmax(0,1.35fr);gap:20px;margin-top:20px}.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:22px;box-shadow:0 3px 12px rgba(24,34,52,.025)}.card h2{font-size:19px;margin:0 0 4px;letter-spacing:-.02em}.sub{color:var(--muted);font-size:13px;margin:0 0 18px}.section{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:#798397;font-weight:800;margin:22px 0 10px}.section:first-of-type{margin-top:0}.field{margin:13px 0}.field label{display:flex;justify-content:space-between;gap:10px;font-weight:650;font-size:13px;margin-bottom:6px}.hint{font-weight:400;color:var(--muted);font-size:11px}.field input,.field select{width:100%;padding:11px 12px;border:1px solid #d5dce6;border-radius:10px;background:white;color:var(--ink);font:inherit;outline:none}.field input:focus,.field select:focus{border-color:var(--accent);box-shadow:0 0 0 3px #ff5a1f1a}.two{display:grid;grid-template-columns:1fr 1fr;gap:12px}.mode{display:grid;grid-template-columns:1fr 1fr;gap:9px}.mode label{border:1px solid var(--line);border-radius:12px;padding:12px;cursor:pointer;display:block}.mode input{accent-color:var(--accent)}.mode strong{display:block;font-size:13px}.mode small{display:block;color:var(--muted);font-size:11px;margin-top:3px}.note{background:var(--amber-bg);color:#684900;border-radius:11px;padding:12px 13px;font-size:12px;margin-top:14px}.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}.btn{border:0;border-radius:10px;padding:11px 15px;font-weight:750;cursor:pointer;font:inherit}.btn-primary{background:var(--accent);color:white}.btn-primary:hover{background:var(--accent-dark)}.btn-secondary{background:#eef1f5;color:#253047}.results{display:flex;flex-direction:column;gap:14px}.metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.metric{border:1px solid var(--line);border-radius:14px;padding:16px;min-width:0}.metric .label{font-size:12px;color:var(--muted);font-weight:650}.metric .value{font-size:clamp(22px,3vw,31px);font-weight:850;letter-spacing:-.04em;margin:5px 0;overflow-wrap:anywhere}.metric .detail{font-size:11px;color:var(--muted)}.metric.primary{background:var(--green-bg);border-color:#ccebd9}.metric.primary .value{color:var(--green)}.metric.orange{background:#fff1eb;border-color:#ffdbcc}.metric.orange .value{color:var(--accent-dark)}.table-wrap{overflow-x:auto}.data{width:100%;border-collapse:collapse;font-size:13px}.data th,.data td{padding:12px 9px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}.data th:first-child,.data td:first-child{text-align:left}.data th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em}.data tr:last-child td{border-bottom:0}.bar-area{margin:8px 0 16px}.bar-label{display:flex;justify-content:space-between;font-size:12px;margin:12px 0 5px}.bar{height:10px;background:#edf0f4;border-radius:99px;overflow:hidden}.bar span{display:block;height:100%;border-radius:99px;background:var(--accent);width:0}.bar.ai span{background:#1e9b69}.callout{border:1px solid var(--line);background:#fbfcfe;padding:15px;border-radius:13px;font-size:13px}.callout strong{color:var(--ink)}.pricing-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.price-card{border:1px solid var(--line);border-radius:14px;padding:16px}.price-card .who{font-weight:800}.price-card .model{font-size:12px;color:var(--muted);margin:6px 0 12px}.price-card ul{padding-left:17px;margin:0;font-size:12px;color:#4f5a6c}.price-card li{margin:5px 0}.foot{color:var(--muted);font-size:11px;margin-top:16px}.full{margin-top:20px}.assumption{display:inline-block;background:#f0f3f7;border-radius:6px;padding:3px 7px;font-size:11px;color:#536074}.fine{font-size:12px;color:var(--muted)}.positive{color:var(--green);font-weight:800}.negative{color:#b52b24;font-weight:800}
+@media(max-width:850px){.grid{grid-template-columns:1fr}.pricing-grid{grid-template-columns:1fr}.hero{padding:25px}.wrap{padding:16px 12px 40px}}
+@media(max-width:460px){.two,.metrics,.mode{grid-template-columns:1fr}.card{padding:17px}.hero h1{font-size:30px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="eyebrow">AI assessment platform · planning model</div>
+    <h1>Make marking faster.<br>Make the economics visible.</h1>
+    <p>Experiment with exam volumes, AI marking costs, throughput and pricing. Compare estimated human marking spend against AI-assisted marking, then model revenue and contribution for schools, universities and examination boards.</p>
+    <span class="tag">USD · editable assumptions · live calculator</span>
+  </header>
+
+  <div class="grid">
+    <section class="card">
+      <h2>Calculator inputs</h2>
+      <p class="sub">Change any value to recalculate the model instantly.</p>
+
+      <div class="section">Exam volume</div>
+      <div class="field"><label for="candidates">Students / candidates <span class="hint">2025 benchmark</span></label><input id="candidates" type="number" min="0" step="100" value="338701"></div>
+      <div class="two">
+        <div class="field"><label for="papersPerStudent">Papers per student</label><input id="papersPerStudent" type="number" min="0.1" step="0.1" value="1"></div>
+        <div class="field"><label for="humanRate">Human cost per script ($)</label><input id="humanRate" type="number" min="0" step="0.05" value="1.2"></div>
+      </div>
+      <div class="note"><strong>Baseline caveat:</strong> 338,701 is the reported 2025 O-Level + A-Level candidate total, not a verified total of scripts marked. One paper per candidate is a placeholder assumption. Change both fields when confirmed script counts are available; Grade 7 is not included in this benchmark.</div>
+
+      <div class="section">AI marking method</div>
+      <div class="mode">
+        <label><input type="radio" name="mode" value="0.50" checked> <strong>Edited marked images</strong><small>$0.50 per student question paper</small></label>
+        <label><input type="radio" name="mode" value="0.10"> <strong>Annotations</strong><small>$0.10 per student question paper</small></label>
+      </div>
+      <div class="two">
+        <div class="field"><label for="workers">Parallel workers</label><select id="workers"><option value="4">4 workers · 16 papers/min</option><option value="8" selected>8 workers · 32 papers/min</option><option value="15">15 workers · 60 papers/min</option></select></div>
+        <div class="field"><label for="humanDays">Human marking hours per 1,000 scripts <span class="hint">estimate</span></label><input id="humanDays" type="number" min="0" step="1" value="40"></div>
+      </div>
+
+      <div class="section">Commercial assumptions</div>
+      <div class="two">
+        <div class="field"><label for="price">Customer price per script ($)</label><input id="price" type="number" min="0" step="0.05" value="0.75"></div>
+        <div class="field"><label for="overhead">Other variable cost per script ($)</label><input id="overhead" type="number" min="0" step="0.01" value="0.03"></div>
+      </div>
+      <div class="two">
+        <div class="field"><label for="fixed">Annual fixed operating cost ($)</label><input id="fixed" type="number" min="0" step="100" value="12000"></div>
+        <div class="field"><label for="capture">Share of scripts won (%)</label><input id="capture" type="number" min="0" max="100" step="1" value="10"></div>
+      </div>
+      <div class="actions"><button class="btn btn-primary" id="reset">Reset to defaults</button><button class="btn btn-secondary" id="copy">Copy results summary</button></div>
+    </section>
+
+    <div class="results">
+      <section class="card">
+        <h2>Impact at this volume</h2>
+        <p class="sub">The estimate assumes the AI marks every script in the selected volume.</p>
+        <div class="metrics">
+          <div class="metric"><div class="label">Scripts processed</div><div class="value" id="scripts">338,701</div><div class="detail" id="volumeDetail">338,701 students × 1 paper</div></div>
+          <div class="metric primary"><div class="label">Estimated direct savings</div><div class="value" id="savings">$237,091</div><div class="detail">Human marking cost less AI marking cost</div></div>
+          <div class="metric orange"><div class="label">AI marking cost</div><div class="value" id="aiCost">$169,351</div><div class="detail" id="unitCost">At $0.50 per script</div></div>
+          <div class="metric"><div class="label">Human marking baseline</div><div class="value" id="humanCost">$406,441</div><div class="detail">Uses the editable human cost assumption</div></div>
+        </div>
+        <div class="bar-area">
+          <div class="bar-label"><span>Human marking baseline</span><strong id="humanBarLabel">$406,441</strong></div><div class="bar"><span id="humanBar"></span></div>
+          <div class="bar-label"><span>AI marking cost</span><strong id="aiBarLabel">$169,351</strong></div><div class="bar ai"><span id="aiBar"></span></div>
+        </div>
+        <div class="callout" id="savingsNote">AI marking is estimated to reduce direct marking cost by 58.3% before other operational expenses and human quality checks.</div>
+      </section>
+
+      <section class="card">
+        <h2>Time to mark</h2>
+        <p class="sub">Throughput is based on the supplied benchmark for 8-page handwritten papers and parallel workers.</p>
+        <div class="metrics">
+          <div class="metric"><div class="label">Estimated processing time</div><div class="value" id="time">3.0 days</div><div class="detail" id="throughput">32 scripts per minute</div></div>
+          <div class="metric"><div class="label">Equivalent human effort</div><div class="value" id="humanTime">1,355 hours</div><div class="detail">Using editable hours per 1,000 scripts</div></div>
+        </div>
+        <div class="table-wrap" style="margin-top:14px">
+          <table class="data"><thead><tr><th>Batch size</th><th>AI time (4 workers)</th><th>AI time (8 workers)</th><th>AI time (15 workers)</th></tr></thead><tbody id="batchRows"></tbody></table>
+        </div>
+        <p class="foot">AI time is idealized throughput time and excludes upload, queueing, retries, moderation, review and downtime. Parallel capacity must be validated under real API limits and production workloads.</p>
+      </section>
+
+      <section class="card">
+        <h2>Commercial model at the selected price</h2>
+        <p class="sub">Illustrative platform economics. Customer price is editable and is not a recommended final price list.</p>
+        <div class="metrics">
+          <div class="metric"><div class="label">Scripts won at target share</div><div class="value" id="won">33,870</div><div class="detail" id="captureDetail">10% of modelled volume</div></div>
+          <div class="metric"><div class="label">Projected annual revenue</div><div class="value" id="revenue">$25,403</div><div class="detail">Price per script × scripts won</div></div>
+          <div class="metric"><div class="label">Contribution before fixed costs</div><div class="value" id="contribution">$7,448</div><div class="detail">Revenue less AI and other variable costs</div></div>
+          <div class="metric"><div class="label">Estimated operating result</div><div class="value" id="operating">-$4,552</div><div class="detail">After annual fixed operating cost</div></div>
+        </div>
+        <div class="callout" style="margin-top:14px" id="breakEven">Break-even volume: 54,546 scripts at the selected price and unit costs, before taxes and financing.</div>
+      </section>
+    </div>
+  </div>
+
+  <section class="card full">
+    <h2>Suggested go-to-market and pricing structure</h2>
+    <p class="sub">Use these as commercial starting points to validate with customers, not fixed market prices.</p>
+    <div class="pricing-grid">
+      <div class="price-card"><div class="who">Schools</div><div class="model">Monthly / annual subscription</div><ul><li>Tier by active students or marking-credit allowance</li><li>Charge extra for usage beyond included credits</li><li>Offer a small pilot before annual commitment</li><li>Include teacher review, class reports and feedback</li></ul></div>
+      <div class="price-card"><div class="who">Universities</div><div class="model">Annual institutional licence + usage</div><ul><li>Department or faculty rollout</li><li>Usage bands based on scripts per year</li><li>SSO, LMS integration, audit trails and reporting</li><li>Paid onboarding and integration where needed</li></ul></div>
+      <div class="price-card"><div class="who">Examination boards</div><div class="model">Paid pilot + multi-year enterprise contract</div><ul><li>Platform / implementation fee plus per-script pricing</li><li>Volume tiers and committed annual minimums</li><li>Human moderation, validation and audit reporting</li><li>Security, support and service-level commitments</li></ul></div>
+    </div>
+    <div class="callout" style="margin-top:14px"><strong>Pricing principle:</strong> avoid a once-off lifetime payment for an examination board. A one-time implementation fee can make sense, but ongoing inference, hosting, maintenance, support, security and quality assurance need recurring revenue. For schools, a subscription is usually easier to budget for; for boards, a contracted annual minimum plus usage-based pricing better matches variable exam volumes.</div>
+  </section>
+
+  <section class="card full">
+    <h2>Potential customer segments</h2>
+    <p class="sub">Prospect categories to qualify. This is not a confirmed buyer list or evidence of purchase intent.</p>
+    <div class="table-wrap"><table class="data"><thead><tr><th>Customer segment</th><th>Potential buyers</th><th>Primary value proposition</th><th>Commercial route</th></tr></thead><tbody>
+      <tr><td>Primary and secondary schools</td><td>Independent schools, school groups, tutoring centres</td><td>Faster formative marking, consistent feedback, less teacher workload</td><td>Per-school monthly / annual subscription</td></tr>
+      <tr><td>Universities and colleges</td><td>Universities, teacher-training colleges, technical colleges</td><td>High-volume coursework and exam support, rubric-based feedback, analytics</td><td>Annual licence + usage credits</td></tr>
+      <tr><td>National / regional exam boards</td><td>ZIMSEC and comparable examination authorities</td><td>Marking workflow support, throughput, standardisation and auditability</td><td>Paid pilot, procurement-led enterprise agreement</td></tr>
+      <tr><td>Private assessment providers</td><td>Professional certification bodies, recruitment and testing providers</td><td>Repeatable scoring and faster candidate feedback</td><td>Usage-based contract or annual minimum</td></tr>
+    </tbody></table></div>
+  </section>
+
+  <section class="card full">
+    <h2>Assumptions and checks before using this with investors</h2>
+    <ul class="fine">
+      <li>The 2025 starting benchmark of 338,701 combines reported O-Level and A-Level candidates; it is not the verified total of scripts and excludes Grade 7. Candidate counts and script counts must not be treated as interchangeable.</li>
+      <li>Human cost per script defaults to $1.20 as a scenario value within reported media estimates of roughly $1.00–$1.80 for selected subjects. It is not an official blended average or audited annual spend.</li>
+      <li>AI cost inputs ($0.50 for edited marked images and $0.10 for annotations) are supplied estimates. Confirm whether they include all model, image processing, storage, retries, review and infrastructure costs.</li>
+      <li>Direct savings compare the assumed human marking cost with AI marking cost only. They do not automatically equal cash savings to an examination board: staffing, examiner allowances, quality review and other costs may not fall proportionally.</li>
+      <li>Throughput (16 / 32 / 60 papers per minute) is based on supplied estimates for 8-page papers. Real-world throughput and reliability need load testing.</li>
+      <li>Customer price, adoption share and fixed operating costs are editable scenario assumptions, not a market-validated pricing recommendation.</li>
+    </ul>
+  </section>
+  <p class="foot">Planning tool only · USD · Not audited financial advice or a validated ZIMSEC expenditure estimate.</p>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+const money=n=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(Number.isFinite(n)?n:0);
+const number=n=>new Intl.NumberFormat('en-US',{maximumFractionDigits:1}).format(Number.isFinite(n)?n:0);
+const duration=min=>{if(!Number.isFinite(min)||min<=0)return '0 mins';if(min<1)return Math.round(min*60)+' sec';if(min<60)return number(min)+' mins';let h=min/60;if(h<48)return number(h)+' hours';return number(h/24)+' days'};
+const val=id=>Math.max(0,Number($(id).value)||0);
+function calculate(){
+ const candidates=val('candidates'), pps=val('papersPerStudent'), scripts=candidates*pps;
+ const humanRate=val('humanRate'), aiRate=Number(document.querySelector('input[name="mode"]:checked').value);
+ const workers=Number($('workers').value), speed={4:16,8:32,15:60}[workers]||32;
+ const overhead=val('overhead'), price=val('price'), fixed=val('fixed'), share=Math.min(100,val('capture'))/100;
+ const human=scripts*humanRate, ai=scripts*aiRate, savings=human-ai;
+ const mins=scripts/speed, hours=scripts/1000*val('humanDays');
+ const won=scripts*share, revenue=won*price, contribution=won*(price-aiRate-overhead), operating=contribution-fixed;
+ $('scripts').textContent=number(scripts);$('volumeDetail').textContent=number(candidates)+' students × '+number(pps)+' paper(s)';
+ $('savings').textContent=money(savings);$('aiCost').textContent=money(ai);$('unitCost').textContent='At '+money(aiRate)+' per script';
+ $('humanCost').textContent=money(human);$('humanBarLabel').textContent=money(human);$('aiBarLabel').textContent=money(ai);
+ const max=Math.max(human,ai,1);$('humanBar').style.width=(human/max*100)+'%';$('aiBar').style.width=(ai/max*100)+'%';
+ const pct=human>0?savings/human*100:0;
+ $('savingsNote').textContent=(savings>=0?'AI marking is estimated to reduce direct marking cost by ':'AI marking is estimated to increase direct marking cost by ')+number(Math.abs(pct))+'% before other operational expenses and human quality checks.';
+ $('time').textContent=duration(mins);$('throughput').textContent=number(speed)+' scripts per minute';$('humanTime').textContent=number(hours)+' hours';
+ $('batchRows').innerHTML=[30,200,1000].map(n=>'<tr><td>'+number(n)+' scripts</td><td>'+duration(n/16)+'</td><td>'+duration(n/32)+'</td><td>'+duration(n/60)+'</td></tr>').join('');
+ $('won').textContent=number(won);$('captureDetail').textContent=number(share*100)+'% of modelled volume';
+ $('revenue').textContent=money(revenue);$('contribution').textContent=money(contribution);$('operating').textContent=money(operating);
+ $('operating').className='value '+(operating>=0?'positive':'negative');
+ const margin=price-aiRate-overhead;
+ $('breakEven').textContent=margin>0?'Break-even volume: '+number(fixed/margin)+' scripts at the selected price and unit costs, before taxes and financing.': 'At this price, the selected price does not cover AI cost plus other variable cost per script. Increase price or reduce costs before fixed costs can be recovered.';
+}
+document.querySelectorAll('input,select').forEach(el=>{el.addEventListener('input',calculate);el.addEventListener('change',calculate)});
+$('reset').addEventListener('click',()=>{
+ $('candidates').value=338701;$('papersPerStudent').value=1;$('humanRate').value=1.2;$('workers').value='8';$('humanDays').value=40;
+ $('price').value=.75;$('overhead').value=.03;$('fixed').value=12000;$('capture').value=10;
+ document.querySelector('input[name="mode"][value="0.50"]').checked=true;calculate();
+});
+$('copy').addEventListener('click',async()=>{
+ const txt=`AI Exam Marking business model (USD)\nStudents: ${$('candidates').value}\nPapers per student: ${$('papersPerStudent').value}\nScripts modelled: ${$('scripts').textContent}\nHuman marking baseline: ${$('humanCost').textContent}\nAI marking cost: ${$('aiCost').textContent}\nEstimated direct savings: ${$('savings').textContent}\nProcessing time: ${$('time').textContent}\nProjected revenue at selected capture: ${$('revenue').textContent}\nContribution before fixed costs: ${$('contribution').textContent}\nOperating result after fixed costs: ${$('operating').textContent}\nCaveat: 2025 candidate total is a proxy, not a verified script count.`;
+ try{await navigator.clipboard.writeText(txt);$('copy').textContent='Copied!';setTimeout(()=>$('copy').textContent='Copy results summary',1500)}catch(e){prompt('Copy this summary:',txt)}
+});
+calculate();
+</script>
+</body>
+</html>

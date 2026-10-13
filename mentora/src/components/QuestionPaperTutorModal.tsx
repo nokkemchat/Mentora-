@@ -188,7 +188,7 @@ export function QuestionPaperTutorModal({
         total_score: 7,
         total_max_score: 10,
         generated_marked_image_url: sampleImageUri,
-        model_used: 'gpt-4o',
+        model_used: 'gpt-6-luna',
         overall_feedback: "Solid understanding of reversible reactions, dynamic equilibrium, and Le Chatelier's principle. 7 out of 10 marks awarded with teacher red ink corrections noted directly on the sheet.",
         annotations: [
           {
@@ -401,7 +401,7 @@ export function QuestionPaperTutorModal({
         total_score: 7,
         total_max_score: 10,
         generated_marked_image_url: sampleImageUri,
-        model_used: 'gpt-4o',
+        model_used: 'gpt-6-luna',
         overall_feedback: "Solid understanding of reversible reactions, dynamic equilibrium, and Le Chatelier's principle. 7 out of 10 marks awarded with teacher red ink corrections noted directly on the sheet.",
         annotations: [
           {
@@ -606,7 +606,8 @@ export function QuestionPaperTutorModal({
           answer_files: finalAttachments,
           images: finalImageUris.length > 0 ? finalImageUris : undefined,
           answer_image_url: finalAttachment?.type === 'image' ? (finalAttachment.base64 || finalAttachment.uri) : undefined,
-          answer_text: messageContent
+          answer_text: messageContent,
+          model_override: 'gpt-6-luna'
         } : undefined,
         chatHistory
       );
@@ -695,11 +696,11 @@ export function QuestionPaperTutorModal({
       const chatHistory = messages.map(m => ({ role: m.role, content: m.content }));
       const response = await QuestionPaperTutorAgent.processStudentTurn(
         sessionState,
-        'Please re-evaluate this handwritten script using GPT-4o vision with maximum precision.',
+        'Please re-evaluate this handwritten script using GPT-6 Luna vision with maximum precision.',
         'submit_answer',
         {
           answer_image_url: msg.imageUrl,
-          model_override: 'gpt-4o'
+          model_override: 'gpt-6-luna'
         },
         chatHistory
       );
@@ -718,7 +719,7 @@ export function QuestionPaperTutorModal({
       );
     } catch (err) {
       console.warn('Re-evaluation error:', err);
-      Alert.alert('Re-grade Error', 'Could not complete re-grading with GPT-4o. Please try again.');
+      Alert.alert('Re-grade Error', 'Could not complete re-grading with GPT-6 Luna. Please try again.');
     } finally {
       setIsReevaluatingId(null);
     }

@@ -15,8 +15,9 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import Svg, { Line, Circle, G } from 'react-native-svg';
 import { AssessmentResult, VisualAnnotation, TutorAgentTools } from '@/lib/tutorAgent';
-import { reconcileAssessment } from '@/lib/annotationUtils';
+import { reconcileAssessment, ensureAssessmentAnnotations } from '@/lib/annotationUtils';
 
 interface MarkedAnswerSheetViewerProps {
   imageUri: string;
@@ -35,12 +36,6 @@ export function MarkedAnswerSheetViewer({
   isReevaluating = false,
   onUpdateAssessment,
 }: MarkedAnswerSheetViewerProps) {
-  const [showMarkings, setShowMarkings] = useState(true);
-  const [isFullScreen, setIsFullScreen] = useState(false);
-  const [containerWidth, setContainerWidth] = useState<number>(Dimensions.get('window').width - 32);
-  const [containerHeight, setContainerHeight] = useState<number>(460);
-  const [aspectRatio, setAspectRatio] = useState<number>(3 / 4);
-
   // Multi-page booklet state
   const pages = assessment.pages || [];
   const isMultiPage = pages.length > 1;
@@ -48,6 +43,15 @@ export function MarkedAnswerSheetViewer({
 
   const safePageIndex = isMultiPage ? Math.min(Math.max(0, currentPageIndex), pages.length - 1) : 0;
   const activePage = isMultiPage ? pages[safePageIndex] : null;
+
+  type ViewerDisplayMode = 'annotations' | 'ai_photo' | 'original';
+  const hasExistingMarked = !!(activePage?.marked_image_url || assessment.generated_marked_image_url);
+  const [displayMode, setDisplayMode] = useState<ViewerDisplayMode>(hasExistingMarked ? 'ai_photo' : 'annotations');
+  const [isFullScreen, setIsFullScreen] = useState(false);
+  const [containerWidth, setContainerWidth] = useState<number>(Dimensions.get('window').width - 32);
+  const [containerHeight, setContainerHeight] = useState<number>(460);
+  const [aspectRatio, setAspectRatio] = useState<number>(3 / 4);
+  const [imageNaturalDimensions, setImageNaturalDimensions] = useState<{ width: number; height: number } | null>(null);
 
   const currentImageUri = activePage?.original_image_url || (imageUris && imageUris[safePageIndex]) || imageUri;
 
@@ -63,6 +67,7 @@ export function MarkedAnswerSheetViewer({
         currentImageUri,
         (w, h) => {
           if (w > 0 && h > 0) {
+            setImageNaturalDimensions({ width: w, height: h });
             setAspectRatio(w / h);
           }
         },
@@ -102,70 +107,243 @@ export function MarkedAnswerSheetViewer({
     }
   }, [safePageIndex, activePage?.marked_image_url, assessment.generated_marked_image_url]);
 
-  // Concurrently generate authentic AI teacher marked photos for ALL pages in parallel!
+  // On-demand generator: Synthesize photorealistic AI marked image only when user triggers AI Photo mode
+  const triggerAiPhotoGeneration = (pageIdx: number = safePageIndex) => {
+    const targetUri = (isMultiPage && pages[pageIdx]?.original_image_url)
+      ? pages[pageIdx].original_image_url
+      : (imageUris && imageUris[pageIdx]) || currentImageUri;
+
+    if (!targetUri || isGeneratingMarkings) return;
+    setIsGeneratingMarkings(true);
+
+    TutorAgentTools.generate_ai_marked_exam_photo(reconciled, targetUri, isMultiPage ? pageIdx : undefined)
+      .then((aiUrl) => {
+        if (aiUrl && !aiUrl.startsWith('ERROR:')) {
+          if (pageIdx === safePageIndex) {
+            setAiMarkedImageUrl(aiUrl);
+          }
+          if (pages[pageIdx]) {
+            pages[pageIdx].marked_image_url = aiUrl;
+          }
+          if (pageIdx === 0) {
+            assessment.generated_marked_image_url = aiUrl;
+          }
+          if (onUpdateAssessment) {
+            onUpdateAssessment({ ...reconciled });
+          }
+        } else {
+          autoTriggeredRef.current[pageIdx] = false;
+        }
+      })
+      .catch((err) => {
+        console.warn(`generate_ai_marked_exam_photo error for page ${pageIdx}:`, err);
+        autoTriggeredRef.current[pageIdx] = false;
+      })
+      .finally(() => {
+        setIsGeneratingMarkings(false);
+      });
+  };
+
+  // Only auto-trigger AI photo generation if user explicitly selected 'ai_photo' mode!
+  // When in 'annotations' mode, ZERO image generation tokens are consumed!
   useEffect(() => {
-    // 1. Single page or active page immediate generation
+    if (displayMode !== 'ai_photo') return;
     if (currentImageUri) {
       const pageMarked = activePage?.marked_image_url || (safePageIndex === 0 ? assessment.generated_marked_image_url : null);
       if (!pageMarked && !autoTriggeredRef.current[safePageIndex]) {
         autoTriggeredRef.current[safePageIndex] = true;
-        setIsGeneratingMarkings(true);
-
-        TutorAgentTools.generate_ai_marked_exam_photo(reconciled, currentImageUri, isMultiPage ? safePageIndex : undefined)
-          .then((aiUrl) => {
-            if (aiUrl && !aiUrl.startsWith('ERROR:')) {
-              setAiMarkedImageUrl(aiUrl);
-              if (activePage) {
-                activePage.marked_image_url = aiUrl;
-              }
-              if (safePageIndex === 0) {
-                assessment.generated_marked_image_url = aiUrl;
-              }
-              if (onUpdateAssessment) {
-                onUpdateAssessment({ ...reconciled });
-              }
-            } else {
-              autoTriggeredRef.current[safePageIndex] = false;
-            }
-          })
-          .catch((err) => {
-            console.warn(`generate_ai_marked_exam_photo error for active page ${safePageIndex}:`, err);
-            autoTriggeredRef.current[safePageIndex] = false;
-          })
-          .finally(() => {
-            setIsGeneratingMarkings(false);
-          });
+        triggerAiPhotoGeneration(safePageIndex);
       }
     }
+  }, [displayMode, safePageIndex, currentImageUri]);
 
-    // 2. Pre-generate all OTHER pages concurrently in parallel in the background!
-    if (isMultiPage && pages.length > 1) {
-      pages.forEach((page, pIdx) => {
-        if (pIdx === safePageIndex) return; // Active page is handled above
-        const pageImageUri = page.original_image_url || (imageUris && imageUris[pIdx]);
-        if (!pageImageUri) return;
-        if (page.marked_image_url) return;
-        if (autoTriggeredRef.current[pIdx]) return;
-        autoTriggeredRef.current[pIdx] = true;
-
-        TutorAgentTools.generate_ai_marked_exam_photo(reconciled, pageImageUri, pIdx)
-          .then((aiUrl) => {
-            if (aiUrl && !aiUrl.startsWith('ERROR:')) {
-              page.marked_image_url = aiUrl;
-              if (onUpdateAssessment) {
-                onUpdateAssessment({ ...reconciled });
-              }
-            } else {
-              autoTriggeredRef.current[pIdx] = false;
-            }
-          })
-          .catch((err) => {
-            console.warn(`generate_ai_marked_exam_photo background error for page ${pIdx}:`, err);
-            autoTriggeredRef.current[pIdx] = false;
-          });
-      });
+  /**
+   * Calculates the exact letterboxed/pillarboxed inner rectangle of an image
+   * rendered with resizeMode="contain" inside a container of width/height.
+   * This guarantees that (0,0) is the physical top-left of the paper and
+   * (width, height) is the physical bottom-right of the paper.
+   */
+  const getImageLayoutRect = (cWidth: number, cHeight: number) => {
+    if (!aspectRatio || aspectRatio <= 0 || cWidth <= 0 || cHeight <= 0) {
+      return { left: 0, top: 0, width: Math.max(cWidth, 1), height: Math.max(cHeight, 1) };
     }
-  }, [safePageIndex, currentImageUri, reconciled, isMultiPage, pages, imageUris]);
+    const containerRatio = cWidth / cHeight;
+    let renderedW = cWidth;
+    let renderedH = cHeight;
+    let offsetX = 0;
+    let offsetY = 0;
+
+    if (containerRatio > aspectRatio) {
+      // Container is wider than image => pillarbox (empty space on left and right)
+      renderedW = cHeight * aspectRatio;
+      renderedH = cHeight;
+      offsetX = (cWidth - renderedW) / 2;
+      offsetY = 0;
+    } else {
+      // Container is taller than image => letterbox (empty space on top and bottom)
+      renderedW = cWidth;
+      renderedH = cWidth / aspectRatio;
+      offsetX = 0;
+      offsetY = (cHeight - renderedH) / 2;
+    }
+
+    return {
+      left: Math.round(offsetX),
+      top: Math.round(offsetY),
+      width: Math.round(renderedW),
+      height: Math.round(renderedH),
+    };
+  };
+
+  // Vector annotation overlay renderer (Zero Image Tokens - Native React Native vector ink layer)
+  // Implements OpenAI Normalized Page Coordinates [0.0, 1.0] converted to pixels strictly at render time.
+  const renderAnnotationOverlay = (containerW: number, containerH: number) => {
+    const currentAnnotations = ensureAssessmentAnnotations(reconciled, safePageIndex);
+    if (!currentAnnotations || currentAnnotations.length === 0) return null;
+
+    const rect = getImageLayoutRect(containerW, containerH);
+    const overlayW = rect.width;
+    const overlayH = rect.height;
+
+    return (
+      <View
+        pointerEvents="none"
+        style={{
+          position: 'absolute',
+          left: rect.left,
+          top: rect.top,
+          width: overlayW,
+          height: overlayH,
+        }}
+      >
+        {/* Connector lines removed to prevent artificial dashed lines across student script */}
+
+        {currentAnnotations.map((ann, idx) => {
+          // 1. Pixel conversion strictly at render time from normalized coordinates [0.0, 1.0]
+          const normX = ann.bbox ? ann.bbox.x : (ann.box_2d ? ann.box_2d[1] / 1000 : 0.85);
+          const normY = ann.bbox ? ann.bbox.y : (ann.box_2d ? ann.box_2d[0] / 1000 : 0.2);
+          const normW = ann.bbox ? ann.bbox.width : (ann.box_2d ? Math.max(0.04, (ann.box_2d[3] - ann.box_2d[1]) / 1000) : 0.08);
+
+          const pixelLeft = Math.round(normX * overlayW);
+          const pixelTop = Math.round(normY * overlayH);
+          const pixelWidth = Math.round(normW * overlayW);
+
+          const rawType = ((ann as any).type || '').toLowerCase();
+          const key = `ann_${idx}_${rawType}`;
+
+          // Strictly clamp within page borders so annotations NEVER spill outside the image
+          const safeLeft = (rawType === 'comment' || rawType === 'teacher_note')
+            ? Math.max(8, Math.min(pixelLeft, Math.round(overlayW * 0.22)))
+            : (rawType === 'tick' || rawType === 'inline_tick')
+              ? Math.max(8, Math.min(pixelLeft, Math.round(overlayW * 0.76)))
+              : Math.max(8, Math.min(pixelLeft, overlayW - Math.min(pixelWidth, 180) - 8));
+          const safeTop = Math.max(8, Math.min(pixelTop, overlayH - 28));
+
+          // Detect if this is a right-margin mark badge (e.g. "✗ 0/3", "✓ 3/3", "(0/3)")
+          const isScorePill =
+            rawType === 'mark_badge' ||
+            (ann.text && (ann.text.includes('/') || ann.text.includes('Total')) && normX >= 0.70) ||
+            normX >= 0.82;
+
+          // 1. Right Margin Score Badges (Authentic Teacher Red Pen: (2/2), (3/4), (0/3))
+          if (isScorePill && rawType !== 'total_header') {
+            const match = (ann.text || '').match(/(\d+\s*(?:\/\s*\d+)?)/);
+            const scoreText = match ? match[1].replace(/\s+/g, '') : (ann.text || '').replace(/[^0-9/]/g, '');
+
+            return (
+              <View
+                key={key}
+                style={[
+                  styles.marginBadgeBox,
+                  {
+                    top: Math.max(6, Math.round(safeTop - 22)),
+                    right: 10,
+                  },
+                ]}
+              >
+                <Text style={styles.marginBadgeRedText}>
+                  ({scoreText || '0'})
+                </Text>
+              </View>
+            );
+          }
+
+          // 2. Total Senior Examiner Header Stamp (Always at Top Right Header to prevent bottom collisions)
+          if (rawType === 'total_header') {
+            const stampText = ann.text || `Total: ${pageScore}/${pageMax}`;
+            const fullStamp = stampText.includes('|')
+              ? stampText
+              : (stampText.toLowerCase().includes('booklet')
+                  ? stampText
+                  : `${stampText} | Booklet Total: ${stampText.replace(/.*?Total:\s*/i, '')}`);
+
+            return (
+              <View
+                key={key}
+                style={[
+                  styles.totalStampBox,
+                  { top: 10, right: 12 },
+                ]}
+              >
+                <Text style={styles.totalStampText}>{fullStamp}</Text>
+              </View>
+            );
+          }
+
+          // 3. Teacher Cross (Authentic Teacher Red Pen: ✗)
+          if (rawType === 'cross' || ann.text === '✗') {
+            return (
+              <View key={key} style={[styles.crossOverlayBox, { top: Math.round(safeTop - 6), left: safeLeft }]}>
+                <Text style={styles.redPenCross}>✗</Text>
+              </View>
+            );
+          }
+
+          // 4. Inline Tick placed directly after student formula/expression
+          if (rawType === 'tick' || rawType === 'inline_tick') {
+            const textStr = typeof ann.text === 'string' ? ann.text.trim() : '';
+            const isStrictMarkCode = /^[A-Z]\d{1,2}$/i.test(textStr) && textStr.length <= 4;
+            const markCode = isStrictMarkCode ? textStr.toUpperCase() : null;
+
+            return (
+              <View key={key} style={[styles.inlineTickOverlayBox, { top: Math.round(safeTop - 6), left: safeLeft }]}>
+                <Text style={styles.redPenInlineTick}>✓</Text>
+                {markCode && (
+                  <View style={styles.markCodeBadge}>
+                    <Text style={styles.redPenInlineLabel}>{markCode}</Text>
+                  </View>
+                )}
+              </View>
+            );
+          }
+
+          // 5. Underline / Standalone Teacher Note with caret ^
+          if (rawType === 'underline' || rawType === 'comment' || rawType === 'teacher_note') {
+            const w = Math.min(overlayW * 0.72, Math.max(pixelWidth || 180, 160));
+            const noteText = (ann.teacher_correction || ann.text || ann.comment || '')
+              .replace(/^✍️\s*/, '')
+              .replace(/^\^\s*/, '')
+              .trim();
+
+            return (
+              <View key={key} style={[styles.underlineOverlayBox, { top: Math.round(safeTop), left: safeLeft, width: w }]}>
+                {rawType === 'underline' && <View style={styles.redWavyLine} />}
+                {noteText ? (
+                  <View style={styles.correctionNotePill}>
+                    <Text style={styles.redPenCorrectionNote} numberOfLines={2}>
+                      ^ {noteText}
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
+            );
+          }
+
+          return null;
+        })}
+      </View>
+    );
+  };
 
   const handleShare = async () => {
     const targetUri = aiMarkedImageUrl || currentImageUri;
@@ -190,7 +368,9 @@ export function MarkedAnswerSheetViewer({
     }
   };
 
-  const activeImageSourceUri = showMarkings ? (aiMarkedImageUrl || currentImageUri) : currentImageUri;
+  const activeImageSourceUri = (displayMode === 'ai_photo' && aiMarkedImageUrl)
+    ? aiMarkedImageUrl
+    : currentImageUri;
 
   return (
     <View style={styles.imageCardWrapper}>
@@ -276,18 +456,36 @@ export function MarkedAnswerSheetViewer({
           resizeMode="contain"
         />
 
-        {/* Clear Inking Overlay — Informs student that marks are being rendered onto this page */}
-        {showMarkings && !aiMarkedImageUrl && (
-          <View pointerEvents="none" style={styles.markingOverlayContainer}>
+        {/* Vector Red Ink Teacher Annotation Layer (0 Image Tokens) */}
+        {displayMode === 'annotations' && renderAnnotationOverlay(containerWidth, containerHeight)}
+
+        {/* AI Inpainting Loading / Call-to-action Card */}
+        {displayMode === 'ai_photo' && !aiMarkedImageUrl && (
+          <View pointerEvents="auto" style={styles.markingOverlayContainer}>
             <View style={styles.markingOverlayCard}>
-              <ActivityIndicator size="small" color="#DC2626" />
-              <Text style={styles.markingOverlayTitle}>✍️ Applying Teacher Red Markings</Text>
+              <Ionicons name="sparkles" size={24} color="#DC2626" />
+              <Text style={styles.markingOverlayTitle}>
+                {isGeneratingMarkings ? '✍️ Applying Teacher Red Markings' : '🤖 AI Inpainted Photo'}
+              </Text>
               <Text style={styles.markingOverlayScore}>
-                Page Score: {pageScore}/{pageMax} Marks Verified
+                Page Score: {pageScore}/{pageMax} Marks
               </Text>
               <Text style={styles.markingOverlaySubtitle}>
-                Drawing authentic examiner ticks, crosses & handwritten corrections on Page {safePageIndex + 1}...
+                {isGeneratingMarkings
+                  ? `Rendering authentic examiner ticks & handwritten corrections on Page ${safePageIndex + 1}...`
+                  : 'You are viewing this script in Token-Saver mode. Tap below to synthesize an AI-edited photo with authentic red ballpoint pen.'}
               </Text>
+              {!isGeneratingMarkings ? (
+                <TouchableOpacity
+                  style={styles.generateAiPhotoBtn}
+                  onPress={() => triggerAiPhotoGeneration(safePageIndex)}
+                >
+                  <Ionicons name="color-wand-outline" size={14} color="#FFFFFF" style={{ marginRight: 6 }} />
+                  <Text style={styles.generateAiPhotoBtnText}>Generate AI Photo (Uses Tokens)</Text>
+                </TouchableOpacity>
+              ) : (
+                <ActivityIndicator size="small" color="#DC2626" style={{ marginTop: 8 }} />
+              )}
             </View>
           </View>
         )}
@@ -295,17 +493,52 @@ export function MarkedAnswerSheetViewer({
         {/* Floating controls at top right of the marked photo */}
         <View style={styles.floatingControls}>
           <TouchableOpacity
-            style={styles.floatingBtn}
-            onPress={() => setShowMarkings(!showMarkings)}
-            accessibilityLabel="Toggle Markings"
+            style={[styles.floatingBtn, displayMode === 'annotations' && styles.floatingBtnActive]}
+            onPress={() => setDisplayMode('annotations')}
+            accessibilityLabel="Vector Annotations"
           >
             <Ionicons
-              name={showMarkings ? 'eye' : 'eye-off'}
-              size={13}
-              color="#FFFFFF"
+              name="pencil"
+              size={12}
+              color={displayMode === 'annotations' ? '#FCA5A5' : '#FFFFFF'}
             />
-            <Text style={styles.floatingBtnText}>
-              {showMarkings ? 'Marked' : 'Original'}
+            <Text style={[styles.floatingBtnText, displayMode === 'annotations' && styles.floatingBtnTextActive]}>
+              Annotations
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.floatingBtn, displayMode === 'ai_photo' && styles.floatingBtnActive]}
+            onPress={() => {
+              setDisplayMode('ai_photo');
+              if (!aiMarkedImageUrl && !isGeneratingMarkings) {
+                triggerAiPhotoGeneration(safePageIndex);
+              }
+            }}
+            accessibilityLabel="AI Photo Inpainting"
+          >
+            <Ionicons
+              name="sparkles"
+              size={12}
+              color={displayMode === 'ai_photo' ? '#FCA5A5' : '#FFFFFF'}
+            />
+            <Text style={[styles.floatingBtnText, displayMode === 'ai_photo' && styles.floatingBtnTextActive]}>
+              AI Photo
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.floatingBtn, displayMode === 'original' && styles.floatingBtnActive]}
+            onPress={() => setDisplayMode('original')}
+            accessibilityLabel="Original Script"
+          >
+            <Ionicons
+              name="document-text-outline"
+              size={12}
+              color={displayMode === 'original' ? '#FCA5A5' : '#FFFFFF'}
+            />
+            <Text style={[styles.floatingBtnText, displayMode === 'original' && styles.floatingBtnTextActive]}>
+              Original
             </Text>
           </TouchableOpacity>
 
@@ -339,19 +572,34 @@ export function MarkedAnswerSheetViewer({
                 {isMultiPage ? `Page: ${pageScore}/${pageMax} marks • Total: ${grandScore}/${grandMax}` : `Total Score: ${grandScore} / ${grandMax} marks`}
               </Text>
             </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
               <TouchableOpacity
-                style={styles.modalToggleBtn}
-                onPress={() => setShowMarkings(!showMarkings)}
+                style={[styles.modalToggleBtn, displayMode === 'annotations' && styles.modalToggleBtnActive]}
+                onPress={() => setDisplayMode('annotations')}
               >
-                <Ionicons
-                  name={showMarkings ? 'eye' : 'eye-off'}
-                  size={15}
-                  color="#0F172A"
-                  style={{ marginRight: 4 }}
-                />
-                <Text style={styles.modalToggleBtnText}>
-                  {showMarkings ? 'Marked' : 'Original'}
+                <Text style={[styles.modalToggleBtnText, displayMode === 'annotations' && styles.modalToggleBtnTextActive]}>
+                  ✏️ Annotations
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalToggleBtn, displayMode === 'ai_photo' && styles.modalToggleBtnActive]}
+                onPress={() => {
+                  setDisplayMode('ai_photo');
+                  if (!aiMarkedImageUrl && !isGeneratingMarkings) {
+                    triggerAiPhotoGeneration(safePageIndex);
+                  }
+                }}
+              >
+                <Text style={[styles.modalToggleBtnText, displayMode === 'ai_photo' && styles.modalToggleBtnTextActive]}>
+                  🤖 AI Photo
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalToggleBtn, displayMode === 'original' && styles.modalToggleBtnActive]}
+                onPress={() => setDisplayMode('original')}
+              >
+                <Text style={[styles.modalToggleBtnText, displayMode === 'original' && styles.modalToggleBtnTextActive]}>
+                  📄 Original
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -406,7 +654,8 @@ export function MarkedAnswerSheetViewer({
                 style={StyleSheet.absoluteFill}
                 resizeMode="contain"
               />
-              {showMarkings && !aiMarkedImageUrl && isGeneratingMarkings && (
+              {displayMode === 'annotations' && renderAnnotationOverlay(Dimensions.get('window').width, Dimensions.get('window').height * 0.85)}
+              {displayMode === 'ai_photo' && !aiMarkedImageUrl && isGeneratingMarkings && (
                 <View pointerEvents="none" style={styles.generatingBadge}>
                   <ActivityIndicator size="small" color="#C82333" />
                   <Text style={styles.generatingBadgeText}>Applying teacher markings...</Text>
@@ -463,14 +712,22 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 14,
+  },
+  floatingBtnActive: {
+    backgroundColor: 'rgba(220, 38, 38, 0.45)',
   },
   floatingBtnText: {
     color: '#FFFFFF',
     fontSize: 11,
     fontWeight: '600',
     letterSpacing: 0.2,
+  },
+  floatingBtnTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '800',
   },
   floatingIconBtn: {
     padding: 3,
@@ -540,12 +797,102 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,
   },
+  marginBadgeBox: {
+    position: 'absolute',
+    right: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    zIndex: 20,
+  },
+  marginBadgeRedText: {
+    color: '#DC2626',
+    fontSize: 13,
+    fontWeight: '800',
+    fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif',
+    textShadowColor: 'rgba(255, 255, 255, 0.95)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
+  marginBadgePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+  },
+  marginBadgePillZero: {
+    backgroundColor: 'transparent',
+  },
+  marginBadgePillEarned: {
+    backgroundColor: 'transparent',
+  },
+  marginBadgeTextZero: {
+    color: '#DC2626',
+    fontSize: 13,
+    fontWeight: '800',
+    fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif',
+    textShadowColor: 'rgba(255, 255, 255, 0.95)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
+  marginBadgeTextEarned: {
+    color: '#DC2626',
+    fontSize: 13,
+    fontWeight: '800',
+    fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif',
+    textShadowColor: 'rgba(255, 255, 255, 0.95)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
+  crossCircleBadge: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 3,
+  },
+  crossCommentContainer: {
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+  },
+  crossCommentText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#DC2626',
+    fontStyle: 'italic',
+    fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif',
+    lineHeight: 14,
+    textShadowColor: 'rgba(255, 255, 255, 0.95)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
+  crossCorrectionText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#DC2626',
+    fontStyle: 'italic',
+    fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif',
+    marginTop: 2,
+    lineHeight: 14,
+    textShadowColor: 'rgba(255, 255, 255, 0.95)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
+  markCodeBadge: {
+    backgroundColor: 'rgba(255, 255, 255, 0.45)',
+    borderWidth: 1,
+    borderColor: '#DC2626',
+    borderRadius: 4,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    marginLeft: 3,
+  },
   underlineOverlayBox: {
     position: 'absolute',
-    maxWidth: '85%',
+    maxWidth: '72%',
   },
   redWavyLine: {
-    height: 2,
+    height: 1.5,
     backgroundColor: '#DC2626',
     borderRadius: 1,
     marginBottom: 2,
@@ -553,45 +900,37 @@ const styles = StyleSheet.create({
     opacity: 0.85,
   },
   correctionNotePill: {
-    backgroundColor: 'rgba(254, 242, 242, 0.94)',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(239, 68, 68, 0.45)',
+    backgroundColor: 'transparent',
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+    borderWidth: 0,
     alignSelf: 'flex-start',
-    shadowColor: '#DC2626',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
   },
   redPenCorrectionNote: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#B91C1C',
+    fontSize: 9.5,
+    lineHeight: 12.5,
+    fontWeight: '800',
+    color: '#DC2626',
     fontStyle: 'italic',
+    fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif',
+    textShadowColor: 'rgba(255, 255, 255, 0.95)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 1.5,
   },
   totalStampBox: {
     position: 'absolute',
-    borderWidth: 2,
-    borderColor: '#DC2626',
-    borderRadius: 16,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    backgroundColor: 'rgba(254, 242, 242, 0.95)',
-    transform: [{ rotate: '-3deg' }],
-    shadowColor: '#DC2626',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    elevation: 3,
+    borderWidth: 0,
+    backgroundColor: 'transparent',
   },
   totalStampText: {
-    fontSize: 15,
-    fontWeight: '900',
+    fontSize: 12.5,
+    fontWeight: '800',
     color: '#DC2626',
-    letterSpacing: 0.3,
+    fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif',
+    letterSpacing: 0.2,
+    textShadowColor: 'rgba(255, 255, 255, 0.95)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
   modalContainer: {
     flex: 1,
@@ -640,10 +979,38 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     backgroundColor: '#F1F5F9',
   },
+  modalToggleBtnActive: {
+    backgroundColor: '#FEE2E2',
+    borderWidth: 1,
+    borderColor: '#FCA5A5',
+  },
   modalToggleBtnText: {
     fontSize: 12,
     fontWeight: '600',
     color: '#0F172A',
+  },
+  modalToggleBtnTextActive: {
+    color: '#B91C1C',
+    fontWeight: '700',
+  },
+  generateAiPhotoBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#DC2626',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginTop: 10,
+    shadowColor: '#DC2626',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  generateAiPhotoBtnText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
   },
   modalScrollContent: {
     flexGrow: 1,

@@ -98,12 +98,18 @@ export interface MarkingAction {
 }
 
 export interface VisualAnnotation {
-  type: 'tick' | 'cross' | 'inline_tick' | 'underline' | 'mark_badge' | 'total_header';
+  type: 'tick' | 'cross' | 'inline_tick' | 'underline' | 'mark_badge' | 'total_header' | 'comment';
   text?: string;
   comment?: string;
+  teacher_correction?: string;
   box_2d: [number, number, number, number]; // [ymin, xmin, ymax, xmax] normalized 0-1000
   subpart_label?: string;
   page_index?: number;
+  bbox?: { x: number; y: number; width: number; height: number };
+  target_id?: string;
+  connector?: { from: { x: number; y: number }; to: { x: number; y: number } } | null;
+  confidence?: number;
+  is_flagged_for_review?: boolean;
 }
 
 export interface ScriptPageEvaluation {
@@ -1735,13 +1741,24 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
    - "total_score" is the exact sum of marks earned on attempted parts only (e.g. 1 + 3 + 1 + 3 = 8).
    - "percentage" is Math.round((total_score / total_max_score) * 100) (e.g. Math.round((8 / 9) * 100) = 89%).
 
-3. VISUAL INK ANNOTATIONS & COORDINATE DETECTION:
-   Whenever an image is provided, detect physical coordinates for teacher red-ink marks on the sheet on a 0 to 1000 scale: [ymin, xmin, ymax, xmax]:
-   - "tick": Place a red tick directly next to each correct or partial credit answer in the right margin, with marks in parentheses (e.g. text: "(3/3)", "(1/1)", or "(1/2)"). NEVER use a cross when marks > 0!
-   - "cross": Place a red cross ONLY next to completely incorrect subparts (0 marks) in the right margin, with marks in parentheses (e.g. text: "(0/1)" or "(0/2)").
-   - "underline": Place a red handwritten note directly underneath any mistakes explaining the correction.
-   - "total_header": Write the final score at the bottom right corner of the page (e.g. text: "Total: 8/9").
-   NO circle badges, NO rectangular boxes, NO digital overlays.
+3. NORMALIZED PAGE COORDINATES & ANNOTATION ANCHORS:
+   Do NOT guess arbitrary pixel coordinates. Every annotation MUST be placed using normalized page coordinates [0.0, 1.0] where (0,0) is top-left and (1,1) is bottom-right:
+   - PRIMARY ANSWER GROUNDING RULE:
+     * When student answers or repeated attempts appear both above and below a diagram, ALWAYS ground marks and comments to the PRIMARY answer line ABOVE the diagram (Y ~ 0.44 - 0.55).
+     * NEVER place ticks, crosses, badges, or comment boxes below a diagram (Y > 0.65). Post-diagram notes or scratchpad at the bottom of the sheet MUST remain clean and unmarked.
+     * For equation questions (e.g. 8(a)(i)), place ticks directly on Line 1 (Y ~ 0.050 - 0.065) level with each equation term, NEVER on subsequent repeat lines.
+   a) "detected_regions": Identify semantic layout regions on the student sheet:
+      - individual written answer lines (e.g. id: "answer_3b_line_1", type: "answer_line", bbox: { x: 0.21, y: 0.43, width: 0.62, height: 0.035 }, confidence: 0.95)
+      - question numbers (type: "question_number")
+      - diagrams (type: "diagram")
+      - margins (type: "margin")
+   b) "annotations": Return structured annotations anchored to a target region ID:
+      - "tick" / "inline_tick": target_id of the earned step, anchor: "right_of_target", text: "✓" or mark code (e.g. "C1", "M1", "A1").
+      - "cross": target_id of the mistake line, anchor: "under_target" or "right_of_target", text: "✗", with teacher_correction on how to answer correctly.
+      - "mark_badge": target_id of the answer line, anchor: "right_margin", text: "✓ (score/max)" or "✗ (0/max)".
+      - "comment": target_id of the mistake, anchor: "right_margin" or "under_target", text: constructive examiner note.
+      - "total_header": anchor: "bottom_right_stamp", text: "Total: score/max".
+      Allowed annotation targets MUST be limited to detected region IDs.
 
 4. STRUCTURED EXAMINER REPORT:
    Provide an itemised subpart breakdown, note omitted subparts, explain deductions, and provide the examiner model solution.`;
@@ -1868,7 +1885,7 @@ STUDENT SAYS:
           question_text: isAnswerSubmission ? submissionQuestionsContext : (hasQuestionSpecificIntent ? activeQ.content_text : undefined),
           mark_scheme: activeQ?.mark_scheme || state.retrieved_mark_scheme || undefined,
           student_answer: payload?.answer_text || studentInput,
-          model_override: payload?.model_override || undefined
+          model_override: payload?.model_override || 'gpt-6-luna'
         }
       });
 
@@ -1943,7 +1960,7 @@ STUDENT SAYS:
           question_text: isAnswerSubmission ? submissionQuestionsContext : (hasQuestionSpecificIntent ? activeQ.content_text : undefined),
           mark_scheme: activeQ?.mark_scheme || state.retrieved_mark_scheme || undefined,
           student_answer: payload?.answer_text || studentInput,
-          model_override: payload?.model_override || undefined
+          model_override: payload?.model_override || 'gpt-6-luna'
         })
       });
 

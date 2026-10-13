@@ -28,3 +28,14 @@ temp/
 .system_generated/
 Mentora/mentora/
 mentora-ingestion-agent/vendor/
+
+# Temporary testing files and scratch artifacts
+crop_*.jpg
+original_physics_paper.png
+test_diagram_marks*.jpg
+Mentora/*.html
+Mentora/crop_*.jpg
+Mentora/original_*.png
+Mentora/test_diagram_*.jpg
+Mentora/scripts/local_marking_test/
+mentora-serverless-marking/

@@ -26,3 +26,38 @@ export async function extractFirstPageText(file: File): Promise<string> {
     throw new Error("Failed to extract text from PDF");
   }
 }
+
+/**
+ * Renders all pages of a PDF into high-resolution JPG images for vision-based marking.
+ */
+export async function renderPdfToPageImages(file: File): Promise<{ file: File; name: string }[]> {
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    const pages: { file: File; name: string }[] = [];
+    const baseName = file.name.replace(/\.pdf$/i, '');
+
+    for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+      const page = await pdf.getPage(pageNum);
+      const viewport = page.getViewport({ scale: 1.8 });
+      const canvas = document.createElement('canvas');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) continue;
+
+      await (page.render({ canvasContext: ctx, viewport } as any) as any).promise;
+      const blob = await new Promise<Blob | null>(res => canvas.toBlob(res, 'image/jpeg', 0.88));
+      if (blob) {
+        const pageFileName = `${baseName}_page_${pageNum}.jpg`;
+        const pageFile = new File([blob], pageFileName, { type: 'image/jpeg' });
+        pages.push({ file: pageFile, name: pageFileName });
+      }
+    }
+
+    return pages;
+  } catch (error) {
+    console.error('Error rendering PDF pages to images:', error);
+    throw error;
+  }
+}

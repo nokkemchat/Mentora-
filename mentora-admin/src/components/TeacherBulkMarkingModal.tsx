@@ -2,8 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import {X, Sparkles, Plus, UploadCloud, Search, Trash2, Eye, CheckCircle2, 
   AlertCircle, ChevronRight, ChevronLeft, Award, FileText, ArrowUp, 
   ArrowDown, RotateCcw, ZoomIn, ZoomOut, Check, HelpCircle, BookOpen, 
-  Users, BarChart3, Clock, CheckCheck, RefreshCw, Layers, Maximize2, Minimize2, PanelRight, PanelRightClose} from 'lucide-react';
+  Users, BarChart3, Clock, CheckCheck, RefreshCw, Layers, Maximize2, Minimize2, PanelRight, 
+  PanelRightClose, Play, Pause, SlidersHorizontal, FolderUp, FileCheck, Loader2} from 'lucide-react';
+import { renderPdfToPageImages } from '../lib/pdf-parser';
 import { supabase } from '../lib/supabase';
+import MarkedPaperOverlay from './MarkedPaperOverlay';
+import { ensureAssessmentAnnotations } from '../lib/annotationUtils';
 
 interface TeacherBulkMarkingModalProps {
   paper: any;
@@ -16,12 +20,24 @@ interface MarkingQueueItem {
   studentName: string;
   studentIdNumber?: string;
   studentNotes?: string;
+  markingMode: 'annotations' | 'ai_image';
   files: { file: File; name: string }[];
   status: 'queued' | 'uploading' | 'marking' | 'completed' | 'error';
   progress: number;
   stepDescription: string;
   errorMessage?: string;
+  retries?: number;
   createdAt: number;
+}
+
+interface BatchStudentEntry {
+  id: string;
+  studentName: string;
+  studentIdNumber?: string;
+  sourceFileName: string;
+  files: { file: File; name: string }[];
+  pageCount: number;
+  selected: boolean;
 }
 
 interface MarkedStudentPaper {
@@ -34,7 +50,7 @@ interface MarkedStudentPaper {
   percentage: number;
   page_images: string[];
   marked_image_url?: string;
-  assessment_result: any;
+  assessment_result?: any;
   created_at: string;
 }
 
@@ -124,30 +140,53 @@ export default function TeacherBulkMarkingModal({ paper, onClose, onPaperUpdated
   const [studentIdNumber, setStudentIdNumber] = useState('');
   const [studentNotes, setStudentNotes] = useState('');
   const [selectedFiles, setSelectedFiles] = useState<{ file: File; preview: string; name: string }[]>([]);
-  // Sequential Background Marking Queue
+  // Parallel Background Marking Queue & Worker Pool
   const [queue, setQueue] = useState<MarkingQueueItem[]>([]);
   const queueRef = useRef<MarkingQueueItem[]>([]);
   queueRef.current = queue;
-  const isProcessingRef = useRef(false);
+  
+  const [concurrency, setConcurrency] = useState<number>(4);
+  const [isPaused, setIsPaused] = useState(false);
+  const isPausedRef = useRef(false);
+  isPausedRef.current = isPaused;
+
+  const [activeCount, setActiveCount] = useState(0);
+  const activeWorkerIdsRef = useRef<Set<string>>(new Set());
+  const cachedPaperContextRef = useRef<{ manifestOverview: string; submissionQuestionsContext: string } | null>(null);
+
+  // Upload Modal State (Single vs Batch Class)
+  const [uploadTab, setUploadTab] = useState<'single' | 'batch'>('batch');
+  const [batchEntries, setBatchEntries] = useState<BatchStudentEntry[]>([]);
+  const [isParsingBatchPdfs, setIsParsingBatchPdfs] = useState(false);
+  const [batchParsingProgress, setBatchParsingProgress] = useState('');
+  const [isRenderingSinglePdf, setIsRenderingSinglePdf] = useState(false);
+  const batchFileInputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
 
   // Viewer State
   const [viewerPageIdx, setViewerPageIdx] = useState(0);
   const [viewerTab, setViewerTab] = useState<'script' | 'report'>('script');
-  const [viewerMode, setViewerMode] = useState<'marked' | 'original'>('marked');
+  // Marking Mode (Token-Saver Vector Annotations vs Generative AI Inpaint Photos)
+  const [markingPipelineMode, setMarkingPipelineMode] = useState<'annotations' | 'ai_image'>('annotations');
+  const [viewerMode, setViewerMode] = useState<'annotations' | 'marked' | 'original'>('annotations');
   const [showSidebar, setShowSidebar] = useState(true); // Width in px for natural vertical scrolling
   const [selectedAnnotation, setSelectedAnnotation] = useState<any | null>(null);
   const [generatingPages, setGeneratingPages] = useState<Record<number, boolean>>({});
+  const [loadingViewerId, setLoadingViewerId] = useState<string | null>(null);
+  const [showAnnotationsComments, setShowAnnotationsComments] = useState(true);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchMarkedPapers = async () => {
-    if (!paper?.id) return;
+    if (!paper?.id) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const { data, error } = await supabase
         .from('marked_student_papers')
-        .select('*')
+        .select('id, paper_id, student_name, student_id_number, total_score, max_score, percentage, page_images, created_at')
         .eq('paper_id', paper.id)
         .order('created_at', { ascending: false });
 
@@ -160,9 +199,47 @@ export default function TeacherBulkMarkingModal({ paper, onClose, onPaperUpdated
     }
   };
 
+  const handleOpenViewer = async (paperItem: MarkedStudentPaper) => {
+    if (paperItem.assessment_result) {
+      setViewingPaper(paperItem);
+      setViewerPageIdx(0);
+      return;
+    }
+    setLoadingViewerId(paperItem.id);
+    try {
+      const { data, error } = await supabase
+        .from('marked_student_papers')
+        .select('id, paper_id, student_name, student_id_number, total_score, max_score, percentage, page_images, marked_image_url, assessment_result, created_at')
+        .eq('id', paperItem.id)
+        .single();
+
+      if (error) throw error;
+      if (data) {
+        setViewingPaper(data);
+        setViewerPageIdx(0);
+        setMarkedPapers(prev => prev.map(p => p.id === data.id ? { ...p, ...data } : p));
+      }
+    } catch (err: any) {
+      console.error('Failed to load marked script details:', err);
+      alert('Failed to load marked script: ' + (err.message || err));
+    } finally {
+      setLoadingViewerId(null);
+    }
+  };
+
   useEffect(() => {
     fetchMarkedPapers();
   }, [paper?.id]);
+
+  useEffect(() => {
+    if (viewingPaper) {
+      if (viewingPaper.marked_image_url || viewingPaper.assessment_result?.marking_mode === 'ai_image') {
+        setViewerMode('marked');
+      } else {
+        setViewerMode('annotations');
+      }
+    }
+  }, [viewingPaper?.id]);
 
   // Clean up object URLs on unmount
   useEffect(() => {
@@ -171,9 +248,9 @@ export default function TeacherBulkMarkingModal({ paper, onClose, onPaperUpdated
     };
   }, [selectedFiles]);
 
-  // Eager generation of marked image if missing for active page (same as mobile app)
+  // Eager generation of marked image ONLY when user is in 'marked' (AI Photo) mode
   useEffect(() => {
-    if (!viewingPaper) return;
+    if (!viewingPaper || viewerMode !== 'marked') return;
     const pageData = viewingPaper.assessment_result?.pages?.[viewerPageIdx];
     const hasMarked = pageData?.marked_image_url || (viewerPageIdx === 0 && viewingPaper.marked_image_url);
     const origImg = pageData?.original_image_url || viewingPaper.page_images?.[viewerPageIdx];
@@ -217,19 +294,65 @@ export default function TeacherBulkMarkingModal({ paper, onClose, onPaperUpdated
         setGeneratingPages(prev => ({ ...prev, [viewerPageIdx]: false }));
       });
     }
-  }, [viewingPaper?.id, viewerPageIdx]);
+  }, [viewingPaper?.id, viewerPageIdx, viewerMode]);
 
-  const handleFilesSelected = (files: FileList | null) => {
+  // Helper to cleanly extract a readable student name from file naming conventions
+  const cleanStudentNameFromFilename = (filename: string): string => {
+    let name = filename.replace(/\.(pdf|jpe?g|png|webp)$/i, '');
+    name = name.replace(/^(student|candidate|paper|exam)[_\-\s]*\d+/i, '');
+    name = name.replace(/[_\-\s]*(paper|physics|chem|bio|math|zimsec|cambridge|igcse|o_level|a_level)[_\-\s\d]*/gi, ' ');
+    name = name.replace(/[_\-]+/g, ' ').trim();
+    name = name.replace(/\s+/g, ' ');
+    if (!name || name.length < 2) {
+      return `Candidate ${Math.floor(100 + Math.random() * 900)}`;
+    }
+    return name
+      .split(' ')
+      .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+      .join(' ');
+  };
+
+  const handleFilesSelected = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
-    const newItems = Array.from(files)
-      .filter(file => file.type.startsWith('image/'))
-      .map(file => ({
+    const fileList = Array.from(files);
+
+    const pdfFiles = fileList.filter(f => f.name.toLowerCase().endsWith('.pdf') || f.type === 'application/pdf');
+    const imgFiles = fileList.filter(f => f.type.startsWith('image/'));
+
+    // Handle standard images
+    if (imgFiles.length > 0) {
+      const newItems = imgFiles.map(file => ({
         file,
         preview: URL.createObjectURL(file),
         name: file.name
       }));
+      setSelectedFiles(prev => [...prev, ...newItems]);
+    }
 
-    setSelectedFiles(prev => [...prev, ...newItems]);
+    // Handle single PDF dropped in single mode (render pages to images)
+    if (pdfFiles.length > 0) {
+      setIsRenderingSinglePdf(true);
+      try {
+        for (const pdf of pdfFiles) {
+          if (!studentName.trim()) {
+            setStudentName(cleanStudentNameFromFilename(pdf.name));
+          }
+          const renderedPages = await renderPdfToPageImages(pdf);
+          const newItems = renderedPages.map(p => ({
+            file: p.file,
+            preview: URL.createObjectURL(p.file),
+            name: p.name
+          }));
+          setSelectedFiles(prev => [...prev, ...newItems]);
+        }
+      } catch (err) {
+        console.error('Error rendering PDF:', err);
+        alert('Could not render PDF pages: ' + (err as any).message);
+      } finally {
+        setIsRenderingSinglePdf(false);
+      }
+    }
+
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -237,6 +360,269 @@ export default function TeacherBulkMarkingModal({ paper, onClose, onPaperUpdated
     e.preventDefault();
     setDragOver(false);
     handleFilesSelected(e.dataTransfer.files);
+  };
+
+  // Batch Multi-PDF / Class Upload Handlers
+  // Helper to read all entries in a DirectoryEntry in batches (Chromium requires while loop)
+  const readAllEntriesInDir = async (dirEntry: any): Promise<any[]> => {
+    const dirReader = dirEntry.createReader();
+    const allEntries: any[] = [];
+    while (true) {
+      const batch: any[] = await new Promise((resolve) => {
+        dirReader.readEntries((ents: any[]) => resolve(ents || []));
+      });
+      if (!batch || batch.length === 0) break;
+      allEntries.push(...batch);
+    }
+    return allEntries;
+  };
+
+  // Recursively read all image & PDF files from a leaf directory entry
+  const readDirectoryFiles = async (dirEntry: any): Promise<{ file: File; name: string }[]> => {
+    const entries = await readAllEntriesInDir(dirEntry);
+    const results: { file: File; name: string }[] = [];
+
+    for (const ent of entries) {
+      if (ent.isFile) {
+        const f: File = await new Promise((resolve) => ent.file(resolve));
+        if (f.name.toLowerCase().endsWith('.pdf') || f.type === 'application/pdf') {
+          try {
+            const pages = await renderPdfToPageImages(f);
+            results.push(...pages);
+          } catch (e) {
+            console.warn('PDF parse error inside directory:', f.name, e);
+          }
+        } else if (f.type.startsWith('image/') || f.name.match(/\.(png|jpe?g|webp)$/i)) {
+          results.push({ file: f, name: f.name });
+        }
+      } else if (ent.isDirectory) {
+        const nested = await readDirectoryFiles(ent);
+        results.push(...nested);
+      }
+    }
+    return results;
+  };
+
+  // Batch Multi-PDF / Class Upload Handlers (Handles files and folder inputs)
+  const handleBatchFilesSelected = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const fileList = Array.from(files);
+    setIsParsingBatchPdfs(true);
+    setBatchParsingProgress('Analyzing files...');
+
+    const newEntries: BatchStudentEntry[] = [];
+
+    try {
+      // Check if files come from directories (webkitRelativePath)
+      const hasRelativePaths = fileList.some(f => Boolean(f.webkitRelativePath && f.webkitRelativePath.includes('/')));
+      if (hasRelativePaths) {
+        // Group files by immediate parent folder
+        const folderGroups = new Map<string, File[]>();
+        for (const file of fileList) {
+          if (!file.type.startsWith('image/') && !file.name.match(/\.(png|jpe?g|webp|pdf)$/i)) continue;
+          const parts = file.webkitRelativePath.split('/').filter(Boolean);
+          // If path is "Students_Batch_Marking/01_Tinashe_Moyo/Page_1.png", folder name is 01_Tinashe_Moyo
+          const folderName = parts.length >= 2 ? parts[parts.length - 2] : parts[0];
+          if (!folderGroups.has(folderName)) {
+            folderGroups.set(folderName, []);
+          }
+          folderGroups.get(folderName)!.push(file);
+        }
+
+        for (const [folderName, grpFiles] of folderGroups.entries()) {
+          grpFiles.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+          newEntries.push({
+            id: `batch-${Date.now()}-${newEntries.length}-${Math.random().toString(36).substring(5)}`,
+            studentName: cleanStudentNameFromFilename(folderName),
+            sourceFileName: folderName,
+            files: grpFiles.map(f => ({ file: f, name: f.name })),
+            pageCount: grpFiles.length,
+            selected: true
+          });
+        }
+        setBatchEntries(prev => [...prev, ...newEntries]);
+        return;
+      }
+
+      // Standard standalone files
+      const total = fileList.length;
+      for (let i = 0; i < fileList.length; i++) {
+        const file = fileList[i];
+        setBatchParsingProgress(`Processing file ${i + 1} of ${total}: "${file.name}"...`);
+
+        if (file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf') {
+          try {
+            const pages = await renderPdfToPageImages(file);
+            if (pages.length > 0) {
+              newEntries.push({
+                id: `batch-${Date.now()}-${i}-${Math.random().toString(36).substring(5)}`,
+                studentName: cleanStudentNameFromFilename(file.name),
+                sourceFileName: file.name,
+                files: pages,
+                pageCount: pages.length,
+                selected: true
+              });
+            }
+          } catch (pdfErr) {
+            console.warn('Failed to parse PDF', file.name, pdfErr);
+          }
+        } else if (file.type.startsWith('image/')) {
+          newEntries.push({
+            id: `batch-${Date.now()}-${i}-${Math.random().toString(36).substring(5)}`,
+            studentName: cleanStudentNameFromFilename(file.name),
+            sourceFileName: file.name,
+            files: [{ file, name: file.name }],
+            pageCount: 1,
+            selected: true
+          });
+        }
+      }
+
+      setBatchEntries(prev => [...prev, ...newEntries]);
+    } catch (err: any) {
+      console.error('Batch parse error:', err);
+      alert('Error analyzing batch files: ' + (err.message || err));
+    } finally {
+      setIsParsingBatchPdfs(false);
+      setBatchParsingProgress('');
+      if (batchFileInputRef.current) batchFileInputRef.current.value = '';
+    }
+  };
+
+  const handleBatchDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+
+    // CRITICAL: Extract ALL DataTransferItem entries synchronously BEFORE any await!
+    // Chromium invalidates DataTransferItems on the next event loop tick if await is called.
+    const rawEntries: any[] = [];
+    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+      for (let i = 0; i < e.dataTransfer.items.length; i++) {
+        const item = e.dataTransfer.items[i];
+        try {
+          const entry = (item as any).webkitGetAsEntry?.();
+          if (entry) {
+            rawEntries.push(entry);
+          }
+        } catch (err) {
+          console.warn('Error extracting webkit entry:', err);
+        }
+      }
+    }
+
+    if (rawEntries.length === 0) {
+      // Fallback to standard files if no webkit entries
+      handleBatchFilesSelected(e.dataTransfer.files);
+      return;
+    }
+
+    setIsParsingBatchPdfs(true);
+    setBatchParsingProgress('Scanning dropped folders & files...');
+    const newEntries: BatchStudentEntry[] = [];
+
+    try {
+      // Expand any container directory (e.g. if teacher dropped the parent "Students_Batch_Marking" folder)
+      const studentTargets: { name: string; entry: any }[] = [];
+
+      for (const entry of rawEntries) {
+        if (entry.isDirectory) {
+          const children = await readAllEntriesInDir(entry);
+          const subDirs = children.filter(c => c.isDirectory);
+          if (subDirs.length > 0) {
+            // Container directory: unpack each subfolder as an individual student
+            for (const sub of subDirs) {
+              studentTargets.push({ name: sub.name, entry: sub });
+            }
+          } else {
+            // Leaf directory for one student
+            studentTargets.push({ name: entry.name, entry });
+          }
+        } else if (entry.isFile) {
+          studentTargets.push({ name: entry.name, entry });
+        }
+      }
+
+      // Process all detected student targets
+      for (let idx = 0; idx < studentTargets.length; idx++) {
+        const target = studentTargets[idx];
+        setBatchParsingProgress(`Reading student ${idx + 1} of ${studentTargets.length}: "${target.name}"...`);
+
+        if (target.entry.isDirectory) {
+          const dirFiles = await readDirectoryFiles(target.entry);
+          // Sort pages naturally: Page_1, Page_2, etc.
+          dirFiles.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+
+          if (dirFiles.length > 0) {
+            newEntries.push({
+              id: `batch-${Date.now()}-${idx}-${Math.random().toString(36).substring(5)}`,
+              studentName: cleanStudentNameFromFilename(target.name),
+              sourceFileName: target.name,
+              files: dirFiles,
+              pageCount: dirFiles.length,
+              selected: true
+            });
+          }
+        } else if (target.entry.isFile) {
+          const file: File = await new Promise((resolve) => target.entry.file(resolve));
+          if (file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf') {
+            const pages = await renderPdfToPageImages(file);
+            if (pages.length > 0) {
+              newEntries.push({
+                id: `batch-${Date.now()}-${idx}-${Math.random().toString(36).substring(5)}`,
+                studentName: cleanStudentNameFromFilename(file.name),
+                sourceFileName: file.name,
+                files: pages,
+                pageCount: pages.length,
+                selected: true
+              });
+            }
+          } else if (file.type.startsWith('image/')) {
+            newEntries.push({
+              id: `batch-${Date.now()}-${idx}-${Math.random().toString(36).substring(5)}`,
+              studentName: cleanStudentNameFromFilename(file.name),
+              sourceFileName: file.name,
+              files: [{ file, name: file.name }],
+              pageCount: 1,
+              selected: true
+            });
+          }
+        }
+      }
+
+      // Sort entries naturally by student name / folder prefix
+      newEntries.sort((a, b) => a.sourceFileName.localeCompare(b.sourceFileName, undefined, { numeric: true }));
+      setBatchEntries(prev => [...prev, ...newEntries]);
+    } catch (err: any) {
+      console.error('Batch drop parsing error:', err);
+      alert('Error parsing dropped folders: ' + (err.message || err));
+    } finally {
+      setIsParsingBatchPdfs(false);
+      setBatchParsingProgress('');
+    }
+  };
+
+  const handleQueueBatchStudents = () => {
+    const selected = batchEntries.filter(b => b.selected);
+    if (selected.length === 0) {
+      alert('Please select at least one student paper to queue.');
+      return;
+    }
+
+    const newQueueItems: MarkingQueueItem[] = selected.map((item, idx) => ({
+      id: `queue-${Date.now()}-${idx}-${Math.random().toString(36).substring(5)}`,
+      studentName: item.studentName.trim() || `Candidate ${idx + 1}`,
+      studentIdNumber: item.studentIdNumber?.trim() || undefined,
+      markingMode: markingPipelineMode,
+      files: item.files,
+      status: 'queued',
+      progress: 0,
+      stepDescription: 'Waiting in queue...',
+      createdAt: Date.now() + idx
+    }));
+
+    setQueue(prev => [...prev, ...newQueueItems]);
+    setBatchEntries([]);
+    setShowUploadModal(false);
   };
 
   const handleMoveFile = (idx: number, direction: 'up' | 'down') => {
@@ -353,6 +739,7 @@ export default function TeacherBulkMarkingModal({ paper, onClose, onPaperUpdated
       studentName: studentName.trim(),
       studentIdNumber: studentIdNumber.trim() || undefined,
       studentNotes: studentNotes.trim() || undefined,
+      markingMode: markingPipelineMode,
       files: selectedFiles.map(f => ({ file: f.file, name: f.name })),
       status: 'queued',
       progress: 0,
@@ -365,67 +752,70 @@ export default function TeacherBulkMarkingModal({ paper, onClose, onPaperUpdated
     resetUploadForm();
   };
 
-  const processNextInQueue = async () => {
-    if (isProcessingRef.current) return;
+    const handleClearCompleted = () => {
+    setQueue(prev => prev.filter(item => item.status !== 'completed'));
+  };
 
-    const currentItem = queueRef.current.find(item => item.status === 'queued');
+  const handleCancelQueued = () => {
+    setQueue(prev => prev.filter(item => item.status !== 'queued'));
+  };
+
+  const getPaperQuestionsContext = async () => {
+    if (cachedPaperContextRef.current) {
+      return cachedPaperContextRef.current;
+    }
+    const ctx = await fetchCompletePaperQuestionsContext(paper.id, paper);
+    cachedPaperContextRef.current = ctx;
+    return ctx;
+  };
+
+  const processQueueItem = async (currentId: string) => {
+    const currentItem = queueRef.current.find(item => item.id === currentId);
     if (!currentItem) return;
-
-    isProcessingRef.current = true;
-    const currentId = currentItem.id;
 
     setQueue(prev => prev.map(it => it.id === currentId ? {
       ...it,
       status: 'uploading',
-      stepDescription: 'Uploading page scans to storage...',
+      stepDescription: `Uploading ${currentItem.files.length} scans to storage in parallel...`,
       progress: 15
     } : it));
 
     try {
-      // Step 1: Upload images to Supabase storage bucket 'student_attempts'
-      const uploadedUrls: string[] = [];
-      for (let i = 0; i < currentItem.files.length; i++) {
-        const item = currentItem.files[i];
-        const ext = item.file.name.split('.').pop() || 'jpg';
+      // Step 1: Upload images in parallel to Supabase storage bucket 'student_attempts'
+      const uploadPromises = currentItem.files.map(async (fItem, i) => {
+        const ext = fItem.file.name.split('.').pop() || 'jpg';
         const storagePath = `bulk_markings/${paper.id}/${Date.now()}_${i}_${Math.random().toString(36).substring(7)}.${ext}`;
-
         try {
           const { error: uploadErr } = await supabase.storage
             .from('student_attempts')
-            .upload(storagePath, item.file, { cacheControl: '3600', upsert: true });
+            .upload(storagePath, fItem.file, { cacheControl: '3600', upsert: true });
 
           if (uploadErr) {
             console.warn('Storage upload error, using base64 fallback:', uploadErr);
-            const b64 = await fileToBase64(item.file);
-            uploadedUrls.push(b64);
+            return await fileToBase64(fItem.file);
           } else {
             const { data: pubData } = supabase.storage
               .from('student_attempts')
               .getPublicUrl(storagePath);
-            uploadedUrls.push(pubData.publicUrl);
+            return pubData.publicUrl;
           }
         } catch (upErr) {
           console.warn('Upload catch, using base64:', upErr);
-          const b64 = await fileToBase64(item.file);
-          uploadedUrls.push(b64);
+          return await fileToBase64(fItem.file);
         }
+      });
 
-        setQueue(prev => prev.map(it => it.id === currentId ? {
-          ...it,
-          progress: Math.round(15 + ((i + 1) / currentItem.files.length) * 20),
-          stepDescription: `Uploading scan ${i + 1} of ${currentItem.files.length}...`
-        } : it));
-      }
+      const uploadedUrls = await Promise.all(uploadPromises);
 
-      // Step 2: Fetch complete questions & official mark scheme context
+      // Step 2: Fetch complete questions & official mark scheme context (cached)
       setQueue(prev => prev.map(it => it.id === currentId ? {
         ...it,
         status: 'marking',
-        stepDescription: 'Matching with official mark schemes & syllabus...',
-        progress: 40
+        stepDescription: 'Chief Examiner evaluating working & inking marks...',
+        progress: 45
       } : it));
 
-      const { manifestOverview, submissionQuestionsContext } = await fetchCompletePaperQuestionsContext(paper.id, paper);
+      const { manifestOverview, submissionQuestionsContext } = await getPaperQuestionsContext();
 
       const paperTitle = `${paper.subject} Paper ${paper.paper_number} (${paper.year})`;
       const subject = paper.subject;
@@ -453,49 +843,89 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
 
 3. VISUAL INK ANNOTATIONS & INKING:
    - Apply inline checkmarks (✓) at each earned point.
-   - Stamp margin subpart fractions (e.g. "✓ (2/2)").
+   - Stamp margin subpart fractions (e.g. "(2/2)").
    - Stamp question total score (e.g. "Total: 8/9").`;
 
-      setQueue(prev => prev.map(it => it.id === currentId ? {
-        ...it,
-        stepDescription: 'Chief Examiner evaluating working & inking red marks...',
-        progress: 65
-      } : it));
+      // Step 3: Invoke tutor-chat with exponential backoff on 429
+      let data: any = null;
+      let error: any = null;
+      const maxRetries = 3;
 
-      // Step 3: Invoke tutor-chat
-      const { data, error } = await supabase.functions.invoke('tutor-chat', {
-        body: {
-          action: 'assess_attempt',
-          paper_id: paper.id,
-          message: contextualizedMessage,
-          context: {
-            questionText: submissionQuestionsContext,
-            allQuestionsContext: submissionQuestionsContext,
-            manifestOverview,
-            subject: paper.subject,
-            curriculum: paper.curriculum
-          },
-          all_questions_context: submissionQuestionsContext,
-          question_text: submissionQuestionsContext,
-          images: uploadedUrls,
-          student_answer: currentItem.studentNotes?.trim() || undefined,
-          generate_marked_image: true,
-          metadata: {
-            student_name: currentItem.studentName.trim(),
-            student_id_number: currentItem.studentIdNumber?.trim() || undefined,
-            role: 'teacher_bulk_marking'
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+          const resp = await supabase.functions.invoke('tutor-chat', {
+            body: {
+              action: 'assess_attempt',
+              paper_id: paper.id,
+              message: contextualizedMessage,
+              context: {
+                questionText: submissionQuestionsContext,
+                allQuestionsContext: submissionQuestionsContext,
+                manifestOverview,
+                subject: paper.subject,
+                curriculum: paper.curriculum
+              },
+              all_questions_context: submissionQuestionsContext,
+              question_text: submissionQuestionsContext,
+              images: uploadedUrls,
+              seed: 42,
+              temperature: 0.0,
+              student_answer: currentItem.studentNotes?.trim() || undefined,
+              generate_marked_image: currentItem.markingMode === 'ai_image',
+              metadata: {
+                student_name: currentItem.studentName.trim(),
+                student_id_number: currentItem.studentIdNumber?.trim() || undefined,
+                role: 'teacher_bulk_marking'
+              }
+            }
+          });
+
+          if (resp.error) {
+            const errStr = resp.error.message || String(resp.error);
+            const isRateLimit = errStr.includes('429') || errStr.toLowerCase().includes('rate limit');
+            const isTimeout = errStr.includes('504') || errStr.toLowerCase().includes('timeout');
+            if ((isRateLimit || isTimeout) && attempt < maxRetries) {
+              const backoffSec = Math.round(2 + attempt * 3 + Math.random() * 2);
+              setQueue(prev => prev.map(it => it.id === currentId ? {
+                ...it,
+                retries: attempt + 1,
+                stepDescription: `Rate limit hit — cooling down for ${backoffSec}s (retry ${attempt + 1}/${maxRetries})...`
+              } : it));
+              await new Promise(r => setTimeout(r, backoffSec * 1000));
+              continue;
+            }
+            throw new Error(errStr);
           }
-        }
-      });
 
-      if (error) {
-        throw new Error(error.message || 'Marking agent failed to assess attempt');
+          data = resp.data;
+          error = null;
+          break;
+        } catch (callErr: any) {
+          const errStr = callErr.message || String(callErr);
+          const isRateLimit = errStr.includes('429') || errStr.toLowerCase().includes('rate limit');
+          if (isRateLimit && attempt < maxRetries) {
+            const backoffSec = Math.round(2 + attempt * 3 + Math.random() * 2);
+            setQueue(prev => prev.map(it => it.id === currentId ? {
+              ...it,
+              retries: attempt + 1,
+              stepDescription: `Rate limit hit — cooling down for ${backoffSec}s (retry ${attempt + 1}/${maxRetries})...`
+            } : it));
+            await new Promise(r => setTimeout(r, backoffSec * 1000));
+            continue;
+          }
+          error = callErr;
+          break;
+        }
+      }
+
+      if (error || !data) {
+        throw error || new Error('Marking agent failed to assess attempt');
       }
 
       setQueue(prev => prev.map(it => it.id === currentId ? {
         ...it,
         stepDescription: 'Finalizing assessment & saving marked script...',
-        progress: 90
+        progress: 88
       } : it));
 
       const assessment = data?.assessment || {};
@@ -505,8 +935,56 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
         ? Math.round((totalScore / maxScore) * 100) 
         : Number(assessment.percentage ?? 0);
 
-      // Reconcile primary marked image
-      const primaryMarkedUrl = data?.marked_image_url || assessment.pages?.[0]?.marked_image_url || null;
+      // Reconcile primary marked image and ensure it is uploaded to storage if base64
+      let primaryMarkedUrl = data?.marked_image_url || assessment.pages?.[0]?.marked_image_url || null;
+      if (primaryMarkedUrl && typeof primaryMarkedUrl === 'string' && (primaryMarkedUrl.startsWith('data:image') || primaryMarkedUrl.length > 500)) {
+        try {
+          const b64Data = primaryMarkedUrl.includes(',') ? primaryMarkedUrl.split(',')[1] : primaryMarkedUrl;
+          const byteCharacters = atob(b64Data);
+          const byteNumbers = new Array(byteCharacters.length);
+          for (let b = 0; b < byteCharacters.length; b++) {
+            byteNumbers[b] = byteCharacters.charCodeAt(b);
+          }
+          const byteArray = new Uint8Array(byteNumbers);
+          const blob = new Blob([byteArray], { type: 'image/png' });
+          const storagePath = `bulk_markings/${paper.id}/${Date.now()}_marked_${Math.random().toString(36).substring(7)}.png`;
+          const { error: upErr } = await supabase.storage
+            .from('student_attempts')
+            .upload(storagePath, blob, { contentType: 'image/png', upsert: true });
+          if (!upErr) {
+            const { data: pubData } = supabase.storage.from('student_attempts').getPublicUrl(storagePath);
+            primaryMarkedUrl = pubData.publicUrl;
+            if (assessment.pages?.[0]?.marked_image_url) {
+              assessment.pages[0].marked_image_url = pubData.publicUrl;
+            }
+          } else {
+            console.warn('Could not upload marked image to storage:', upErr);
+            primaryMarkedUrl = null;
+            if (assessment.pages?.[0]?.marked_image_url) {
+              assessment.pages[0].marked_image_url = null;
+            }
+          }
+        } catch (e) {
+          console.warn('Could not upload marked image to storage:', e);
+          primaryMarkedUrl = null;
+          if (assessment.pages?.[0]?.marked_image_url) {
+            assessment.pages[0].marked_image_url = null;
+          }
+        }
+      }
+
+      // Sanitize assessment pages so no huge base64 strings get saved into JSON
+      if (Array.isArray(assessment.pages)) {
+        for (const p of assessment.pages) {
+          if (p.marked_image_url && typeof p.marked_image_url === 'string' && (p.marked_image_url.startsWith('data:image') || p.marked_image_url.length > 500)) {
+            if (primaryMarkedUrl && !primaryMarkedUrl.startsWith('data:image')) {
+              p.marked_image_url = primaryMarkedUrl;
+            } else {
+              p.marked_image_url = null;
+            }
+          }
+        }
+      }
 
       // Reconcile canonical page images in sorted order
       const canonicalPageImages = Array.isArray(assessment.pages) && assessment.pages.length > 0
@@ -532,13 +1010,15 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
       const { data: inserted, error: insertErr } = await supabase
         .from('marked_student_papers')
         .insert(newRecord)
-        .select()
+        .select('id, paper_id, student_name, student_id_number, total_score, max_score, percentage, page_images, created_at')
         .single();
 
       if (insertErr) throw insertErr;
 
-      // Refresh list
-      await fetchMarkedPapers();
+      // Optimistic instant update of table
+      if (inserted) {
+        setMarkedPapers(prev => [inserted, ...prev.filter(p => p.id !== inserted.id)]);
+      }
       if (onPaperUpdated) onPaperUpdated();
 
       setQueue(prev => prev.map(it => it.id === currentId ? {
@@ -548,33 +1028,52 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
         stepDescription: `Marking complete! Scored ${totalScore}/${maxScore} (${percentage}%)`
       } : it));
 
-      // Remove completed item after 5 seconds
+      // Auto-remove completed item after 6 seconds
       setTimeout(() => {
         setQueue(prev => prev.filter(it => it.id !== currentId));
-      }, 5000);
+      }, 6000);
 
     } catch (err: any) {
-      console.error('Queue processing error:', err);
+      console.error('Queue processing error for', currentItem?.studentName, err);
       setQueue(prev => prev.map(it => it.id === currentId ? {
         ...it,
         status: 'error',
         errorMessage: err.message || 'Marking failed',
         stepDescription: 'Marking encountered an error'
       } : it));
-    } finally {
-      isProcessingRef.current = false;
-      // 1500ms safety buffer before starting next queued paper to prevent rate limits
-      setTimeout(() => {
-        processNextInQueue();
-      }, 1500);
+    }
+  };
+
+  const dispatchQueue = () => {
+    if (isPausedRef.current) return;
+
+    const currentQueue = queueRef.current;
+    const queuedItems = currentQueue.filter(
+      item => item.status === 'queued' && !activeWorkerIdsRef.current.has(item.id)
+    );
+
+    const availableSlots = concurrency - activeWorkerIdsRef.current.size;
+    if (availableSlots <= 0 || queuedItems.length === 0) return;
+
+    const itemsToStart = queuedItems.slice(0, availableSlots);
+    for (const item of itemsToStart) {
+      activeWorkerIdsRef.current.add(item.id);
+      setActiveCount(activeWorkerIdsRef.current.size);
+
+      processQueueItem(item.id).finally(() => {
+        activeWorkerIdsRef.current.delete(item.id);
+        setActiveCount(activeWorkerIdsRef.current.size);
+        // Stagger dispatch slightly to spread API calls smoothly
+        setTimeout(() => {
+          dispatchQueue();
+        }, 350);
+      });
     }
   };
 
   useEffect(() => {
-    if (!isProcessingRef.current && queue.some(q => q.status === 'queued')) {
-      processNextInQueue();
-    }
-  }, [queue]);
+    dispatchQueue();
+  }, [queue, concurrency, isPaused]);
 
   const handleDeleteMarkedPaper = async (paperId: string, studentName: string) => {
     if (!window.confirm(`Are you sure you want to delete the marked paper for "${studentName}"?`)) return;
@@ -644,10 +1143,10 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
           </div>
 
           <div className="flex items-center gap-3">
-            {queue.some(q => q.status === 'uploading' || q.status === 'marking') && (
+            {activeCount > 0 && (
               <div className="hidden sm:flex items-center gap-2 bg-primary/10 border border-primary/25 text-primary text-xs font-semibold px-3 py-2 rounded-2xl animate-pulse">
                 <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                <span>Marking Active ({queue.filter(q => q.status === 'uploading' || q.status === 'marking').length}/1)</span>
+                <span>Parallel Marking Active ({activeCount}/{concurrency} Workers)</span>
               </div>
             )}
             <button
@@ -740,143 +1239,251 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
         {/* Students Table / List */}
         <div className="flex-1 overflow-y-auto p-6">
           {/* Active Marking Queue Panel */}
-          {queue.length > 0 && (
-            <div className="mb-6 bg-surface border border-primary/30 rounded-2xl p-4 shadow-sm space-y-3">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shrink-0">
-                    <Sparkles className="w-4 h-4 animate-spin" style={{ animationDuration: '4s' }} />
+          {queue.length > 0 && (() => {
+            const activeItems = queue.filter(q => q.status === 'uploading' || q.status === 'marking');
+            const queuedItems = queue.filter(q => q.status === 'queued');
+            const completedItems = queue.filter(q => q.status === 'completed');
+            const errorItems = queue.filter(q => q.status === 'error');
+            const totalCount = queue.length;
+            const progressPct = totalCount > 0 ? Math.round((completedItems.length / totalCount) * 100) : 0;
+
+            // Sort queue: active first, then queued, then error, then completed
+            const sortedQueue = [...queue].sort((a, b) => {
+              const score = (s: string) => s === 'uploading' || s === 'marking' ? 1 : s === 'queued' ? 2 : s === 'error' ? 3 : 4;
+              return score(a.status) - score(b.status);
+            });
+
+            return (
+              <div className="mb-6 bg-surface border border-primary/30 rounded-2xl p-4 shadow-sm space-y-4">
+                {/* Panel Header & Controls */}
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-border/80">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shrink-0">
+                      <Sparkles className="w-4 h-4 animate-spin" style={{ animationDuration: '4s' }} />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-text uppercase tracking-wider flex items-center gap-2 flex-wrap">
+                        <span>Parallel Examiner Pool</span>
+                        <span className="bg-primary/20 text-primary text-[10px] px-2 py-0.5 rounded-full font-semibold">
+                          {activeItems.length > 0 ? `${activeItems.length} Active` : isPaused ? 'Paused' : 'Idle'}
+                          {queuedItems.length > 0 && ` • ${queuedItems.length} Queued`}
+                          {completedItems.length > 0 && ` • ${completedItems.length} Done`}
+                        </span>
+                      </h4>
+                      <p className="text-[11px] text-textMuted mt-0.5">
+                        Grading multi-student batches concurrently with OpenAI prompt caching and collision-free grounding.
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <h4 className="text-xs font-bold text-text uppercase tracking-wider flex items-center gap-2">
-                      <span>Live Marking Queue</span>
-                      <span className="bg-primary/20 text-primary text-[10px] px-2 py-0.5 rounded-full font-semibold">
-                        {queue.some(q => q.status === 'uploading' || q.status === 'marking') ? '1 Active' : 'Idle'}
-                        {queue.filter(q => q.status === 'queued').length > 0 && ` • ${queue.filter(q => q.status === 'queued').length} Queued`}
+
+                  {/* Worker Concurrency & Action Controls */}
+                  <div className="flex items-center gap-2 flex-wrap self-start lg:self-auto">
+                    {/* Concurrency Selector */}
+                    <div className="flex items-center bg-background border border-border rounded-xl p-0.5 text-xs">
+                      <span className="px-2 text-[10px] text-textMuted font-semibold flex items-center gap-1">
+                        <SlidersHorizontal className="w-3 h-3" />
+                        Workers:
                       </span>
-                    </h4>
-                    <p className="text-[11px] text-textMuted">
-                      Papers are graded sequentially one-by-one by the Senior Examiner to prevent API rate limits.
-                    </p>
+                      {[2, 4, 6].map((num) => (
+                        <button
+                          key={num}
+                          onClick={() => setConcurrency(num)}
+                          className={`px-2 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                            concurrency === num
+                              ? 'bg-primary text-white shadow-sm'
+                              : 'text-textMuted hover:text-text hover:bg-border/40'
+                          }`}
+                          title={`Run ${num} student papers concurrently`}
+                        >
+                          {num}x{num === 4 ? ' ★' : ''}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Pause / Resume Button */}
+                    <button
+                      onClick={() => setIsPaused(prev => !prev)}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
+                        isPaused
+                          ? 'bg-amber-500/15 border-amber-500/30 text-amber-400 hover:bg-amber-500/25'
+                          : 'bg-background hover:bg-border/50 border-border text-textMuted hover:text-text'
+                      }`}
+                      title={isPaused ? 'Resume marking queue' : 'Pause queue after active papers'}
+                    >
+                      {isPaused ? <Play className="w-3.5 h-3.5 fill-current" /> : <Pause className="w-3.5 h-3.5" />}
+                      <span>{isPaused ? 'Resume' : 'Pause'}</span>
+                    </button>
+
+                    {/* Clear / Cancel Controls */}
+                    {completedItems.length > 0 && (
+                      <button
+                        onClick={handleClearCompleted}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-background hover:bg-border/50 border border-border text-textMuted hover:text-text rounded-xl text-xs font-medium transition-colors cursor-pointer"
+                        title="Clear completed students from queue"
+                      >
+                        Clear Done
+                      </button>
+                    )}
+
+                    {queuedItems.length > 0 && (
+                      <button
+                        onClick={handleCancelQueued}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-background hover:bg-error/15 border border-border hover:border-error/30 text-textMuted hover:text-error rounded-xl text-xs font-medium transition-colors cursor-pointer"
+                        title="Cancel all waiting student papers"
+                      >
+                        Cancel Waiting
+                      </button>
+                    )}
+
+                    <button
+                      onClick={() => {
+                        resetUploadForm();
+                        setShowUploadModal(true);
+                      }}
+                      className="inline-flex items-center gap-1.5 bg-primary/15 hover:bg-primary/25 text-primary border border-primary/30 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ml-auto sm:ml-0"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Add Papers</span>
+                    </button>
                   </div>
                 </div>
 
-                <button
-                  onClick={() => {
-                    resetUploadForm();
-                    setShowUploadModal(true);
-                  }}
-                  className="inline-flex items-center gap-1.5 bg-primary/15 hover:bg-primary/25 text-primary border border-primary/30 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Queue Another Student</span>
-                </button>
-              </div>
-
-              {/* Queue Items */}
-              <div className="space-y-2 pt-1">
-                {queue.map((item, idx) => {
-                  const isActive = item.status === 'uploading' || item.status === 'marking';
-                  const isQueued = item.status === 'queued';
-                  const isCompleted = item.status === 'completed';
-                  const isError = item.status === 'error';
-
-                  return (
-                    <div 
-                      key={item.id}
-                      className={`p-3 rounded-xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-                        isActive 
-                          ? 'bg-primary/5 border-primary/40 shadow-sm'
-                          : isCompleted
-                          ? 'bg-emerald-500/5 border-emerald-500/30'
-                          : isError
-                          ? 'bg-error/5 border-error/30'
-                          : 'bg-background/60 border-border'
-                      }`}
-                    >
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 ${
-                          isActive 
-                            ? 'bg-primary/20 text-primary animate-pulse'
-                            : isCompleted
-                            ? 'bg-emerald-500/20 text-emerald-400'
-                            : isError
-                            ? 'bg-error/20 text-error'
-                            : 'bg-surface border border-border text-textMuted'
-                        }`}>
-                          {isCompleted ? <Check className="w-4 h-4" /> : isError ? <AlertCircle className="w-4 h-4" /> : idx + 1}
-                        </div>
-
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="font-semibold text-text text-xs truncate">{item.studentName}</span>
-                            {item.studentIdNumber && (
-                              <span className="text-[10px] text-textMuted font-mono">({item.studentIdNumber})</span>
-                            )}
-                            <span className="text-[10px] text-textMuted">• {item.files.length} {item.files.length === 1 ? 'page' : 'pages'}</span>
-                          </div>
-                          <div className="flex items-center gap-2 mt-0.5">
-                            <span className={`text-[11px] font-medium ${
-                              isActive ? 'text-primary' : isCompleted ? 'text-emerald-400' : isError ? 'text-error' : 'text-textMuted'
-                            }`}>
-                              {item.stepDescription}
-                            </span>
-                            {isActive && (
-                              <span className="text-[10px] font-mono text-primary/70">({item.progress}%)</span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Right status or action */}
-                      <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
-                        {isActive && (
-                          <div className="w-24 sm:w-32 bg-border/60 rounded-full h-1.5 overflow-hidden">
-                            <div 
-                              className="bg-primary h-full transition-all duration-300 rounded-full"
-                              style={{ width: `${item.progress}%` }}
-                            />
-                          </div>
-                        )}
-
-                        {isQueued && (
-                          <div className="flex items-center gap-2">
-                            <span className="text-[10px] font-medium bg-border/60 text-textMuted px-2 py-0.5 rounded-md">
-                              In Line
-                            </span>
-                            <button
-                              onClick={() => handleRemoveFromQueue(item.id)}
-                              className="p-1 hover:bg-error/15 text-textMuted hover:text-error rounded transition-colors cursor-pointer"
-                              title="Remove from queue"
-                            >
-                              <X className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        )}
-
-                        {isError && (
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => handleRetryQueueItem(item.id)}
-                              className="px-2.5 py-1 bg-error/15 hover:bg-error/25 text-error rounded-lg text-xs font-semibold transition-colors cursor-pointer"
-                            >
-                              Retry
-                            </button>
-                            <button
-                              onClick={() => handleRemoveFromQueue(item.id)}
-                              className="p-1 hover:bg-border/60 text-textMuted rounded cursor-pointer"
-                            >
-                              <X className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        )}
-                      </div>
+                {/* Batch Progress Bar */}
+                {totalCount > 1 && (
+                  <div className="bg-background/60 border border-border/60 rounded-xl p-2.5 space-y-1.5">
+                    <div className="flex items-center justify-between text-xs text-textMuted">
+                      <span className="font-medium text-text">
+                        Batch Progress: {completedItems.length} of {totalCount} Papers Graded
+                      </span>
+                      <span className="font-mono font-bold text-primary">{progressPct}%</span>
                     </div>
-                  );
-                })}
+                    <div className="w-full bg-border/60 rounded-full h-2 overflow-hidden">
+                      <div
+                        className="bg-primary h-full transition-all duration-500 rounded-full"
+                        style={{ width: `${progressPct}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Queue Items List */}
+                <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+                  {sortedQueue.map((item, idx) => {
+                    const isActive = item.status === 'uploading' || item.status === 'marking';
+                    const isQueued = item.status === 'queued';
+                    const isCompleted = item.status === 'completed';
+                    const isError = item.status === 'error';
+
+                    return (
+                      <div 
+                        key={item.id}
+                        className={`p-3 rounded-xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                          isActive 
+                            ? 'bg-primary/5 border-primary/40 shadow-sm'
+                            : isCompleted
+                            ? 'bg-emerald-500/5 border-emerald-500/30'
+                            : isError
+                            ? 'bg-error/5 border-error/30'
+                            : 'bg-background/60 border-border'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 ${
+                            isActive 
+                              ? 'bg-primary/20 text-primary animate-pulse'
+                              : isCompleted
+                              ? 'bg-emerald-500/20 text-emerald-400'
+                              : isError
+                              ? 'bg-error/20 text-error'
+                              : 'bg-surface border border-border text-textMuted'
+                          }`}>
+                            {isActive ? (
+                              <RefreshCw className="w-3.5 h-3.5 animate-spin text-primary" />
+                            ) : isCompleted ? (
+                              <Check className="w-4 h-4" />
+                            ) : isError ? (
+                              <AlertCircle className="w-4 h-4" />
+                            ) : (
+                              idx + 1
+                            )}
+                          </div>
+
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-text text-xs truncate">{item.studentName}</span>
+                              {item.studentIdNumber && (
+                                <span className="text-[10px] text-textMuted font-mono">({item.studentIdNumber})</span>
+                              )}
+                              <span className="text-[10px] text-textMuted">• {item.files.length} {item.files.length === 1 ? 'page' : 'pages'}</span>
+                              {item.retries && item.retries > 0 && (
+                                <span className="text-[9px] bg-amber-500/15 text-amber-400 border border-amber-500/30 px-1.5 py-0.2 rounded font-mono">
+                                  Retry {item.retries}/3
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <span className={`text-[11px] font-medium ${
+                                isActive ? 'text-primary' : isCompleted ? 'text-emerald-400' : isError ? 'text-error' : 'text-textMuted'
+                              }`}>
+                                {item.stepDescription}
+                              </span>
+                              {isActive && (
+                                <span className="text-[10px] font-mono text-primary/70">({item.progress}%)</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Right status or action */}
+                        <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                          {isActive && (
+                            <div className="w-24 sm:w-32 bg-border/60 rounded-full h-1.5 overflow-hidden">
+                              <div 
+                                className="bg-primary h-full transition-all duration-300 rounded-full"
+                                style={{ width: `${item.progress}%` }}
+                              />
+                            </div>
+                          )}
+
+                          {isQueued && (
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] font-medium bg-border/60 text-textMuted px-2 py-0.5 rounded-md">
+                                In Line
+                              </span>
+                              <button
+                                onClick={() => handleRemoveFromQueue(item.id)}
+                                className="p-1 hover:bg-error/15 text-textMuted hover:text-error rounded transition-colors cursor-pointer"
+                                title="Remove from queue"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          )}
+
+                          {isError && (
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => handleRetryQueueItem(item.id)}
+                                className="px-2.5 py-1 bg-error/15 hover:bg-error/25 text-error rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                              >
+                                Retry
+                              </button>
+                              <button
+                                onClick={() => handleRemoveFromQueue(item.id)}
+                                className="p-1 hover:bg-border/60 text-textMuted rounded cursor-pointer"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
           {loading ? (
             <div className="flex flex-col items-center justify-center py-20 text-textMuted space-y-3">
               <RefreshCw className="w-8 h-8 animate-spin text-primary" />
@@ -1009,15 +1616,17 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                         <td className="p-4 text-right">
                           <div className="flex items-center justify-end gap-2">
                             <button
-                              onClick={() => {
-                                setViewingPaper(paperItem);
-                                setViewerPageIdx(0);
-                              }}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-all cursor-pointer shadow-sm"
+                              onClick={() => handleOpenViewer(paperItem)}
+                              disabled={loadingViewerId === paperItem.id}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-all cursor-pointer shadow-sm disabled:opacity-50"
                               title="View Full Marked Paper Script"
                             >
-                              <Eye className="w-3.5 h-3.5" />
-                              <span>View Marked Script</span>
+                              {loadingViewerId === paperItem.id ? (
+                                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <Eye className="w-3.5 h-3.5" />
+                              )}
+                              <span>{loadingViewerId === paperItem.id ? 'Loading...' : 'View Marked Script'}</span>
                             </button>
                             <button
                               onClick={() => handleDeleteMarkedPaper(paperItem.id, paperItem.student_name)}
@@ -1040,11 +1649,11 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
       </div>
 
       {/* ========================================================================= */}
-      {/* SUB-MODAL: MARK NEW STUDENT PAPER (UPLOAD & AGENT MARKING)                */}
+      {/* SUB-MODAL: MARK NEW STUDENT PAPERS (SINGLE OR BATCH WHOLE CLASS) */}
       {/* ========================================================================= */}
       {showUploadModal && (
         <div className="fixed inset-0 z-60 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-6">
-          <div className="bg-surface border border-border rounded-3xl w-full max-w-2xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden relative">
+          <div className="bg-surface border border-border rounded-3xl w-full max-w-3xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden relative">
             
             {/* Modal Header */}
             <div className="px-6 py-5 border-b border-border bg-background/50 flex items-center justify-between shrink-0">
@@ -1053,7 +1662,7 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                   <Sparkles className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-lg font-bold text-text">Mark New Student Paper</h3>
+                  <h3 className="text-lg font-bold text-text">Mark Student Papers</h3>
                   <p className="text-xs text-textMuted">
                     {paper?.subject} Paper {paper?.paper_number} • {paper?.curriculum} ({paper?.year})
                   </p>
@@ -1068,11 +1677,262 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
               </button>
             </div>
 
-            {/* Modal Body / Form */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-5">
-<form onSubmit={handleQueueStudentPaper} className="space-y-5">
-                  
+            {/* Mode Switcher Tabs */}
+            <div className="px-6 pt-4 pb-1 border-b border-border/80 bg-background/30 flex items-center gap-2">
+              <button
+                onClick={() => setUploadTab('batch')}
+                className={`flex items-center gap-2 px-4 py-2 rounded-2xl text-xs font-bold transition-all cursor-pointer ${
+                  uploadTab === 'batch'
+                    ? 'bg-primary text-white shadow-md shadow-primary/20'
+                    : 'text-textMuted hover:text-text hover:bg-surface border border-transparent'
+                }`}
+              >
+                <FolderUp className="w-4 h-4" />
+                <span>Batch Upload Class (Multi-PDF / Folder)</span>
+                <span className={`text-[10px] px-2 py-0.2 rounded-full ${
+                  uploadTab === 'batch' ? 'bg-white/20 text-white' : 'bg-primary/10 text-primary'
+                }`}>
+                  High-Throughput
+                </span>
+              </button>
 
+              <button
+                onClick={() => setUploadTab('single')}
+                className={`flex items-center gap-2 px-4 py-2 rounded-2xl text-xs font-bold transition-all cursor-pointer ${
+                  uploadTab === 'single'
+                    ? 'bg-primary text-white shadow-md shadow-primary/20'
+                    : 'text-textMuted hover:text-text hover:bg-surface border border-transparent'
+                }`}
+              >
+                <FileCheck className="w-4 h-4" />
+                <span>Single Student Paper</span>
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-5">
+              
+              {/* Marking Pipeline Mode (Vector Annotations vs Generative AI Inpaint) */}
+              <div>
+                <label className="block text-xs font-semibold text-textMuted uppercase tracking-wider mb-2">
+                  Examiner Marking Pipeline
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div
+                    onClick={() => setMarkingPipelineMode('annotations')}
+                    className={`p-3.5 rounded-2xl border cursor-pointer transition-all ${
+                      markingPipelineMode === 'annotations'
+                        ? 'border-primary bg-primary/10 shadow-sm'
+                        : 'border-border bg-background/50 hover:bg-background'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span className="text-base">✏️</span>
+                      <span className="text-xs font-bold text-text">Vector Annotations</span>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#10b981]/15 text-[#10b981] border border-[#10b981]/30 ml-auto">
+                        0 Image Tokens
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-textMuted leading-relaxed">
+                      Examiner visual assessment with collision-free checkmarks, subpart fractions & handwritten red teacher corrections.
+                    </p>
+                  </div>
+
+                  <div
+                    onClick={() => setMarkingPipelineMode('ai_image')}
+                    className={`p-3.5 rounded-2xl border cursor-pointer transition-all ${
+                      markingPipelineMode === 'ai_image'
+                        ? 'border-primary bg-primary/10 shadow-sm'
+                        : 'border-border bg-background/50 hover:bg-background'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span className="text-base">🤖</span>
+                      <span className="text-xs font-bold text-text">AI Photo Inpaint</span>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/30 ml-auto">
+                        Uses Image Tokens
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-textMuted leading-relaxed">
+                      Synthesizes red ballpoint pen directly into pixels using generative image models. Consumes image tokens.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* TAB 1: BATCH CLASS UPLOAD */}
+              {uploadTab === 'batch' && (
+                <div className="space-y-4">
+                  {/* Batch Drop Zone */}
+                  <div>
+                    <label className="block text-xs font-semibold text-textMuted uppercase tracking-wider mb-2">
+                      Upload Class Exams (Drop Multiple PDFs or Scans)
+                    </label>
+
+                    <div
+                      onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                      onDragLeave={() => setDragOver(false)}
+                      onDrop={handleBatchDrop}
+                      onClick={() => !isParsingBatchPdfs && batchFileInputRef.current?.click()}
+                      className={`border-2 border-dashed rounded-3xl p-7 text-center cursor-pointer transition-all flex flex-col items-center justify-center gap-3 ${
+                        isParsingBatchPdfs
+                          ? 'border-primary/50 bg-primary/5 cursor-wait'
+                          : dragOver 
+                          ? 'border-primary bg-primary/10 scale-[1.01]' 
+                          : 'border-border hover:border-primary/50 bg-background/50 hover:bg-background'
+                      }`}
+                    >
+                      <input 
+                        type="file" 
+                        ref={batchFileInputRef}
+                        multiple 
+                        accept=".pdf,image/*" 
+                        onChange={(e) => handleBatchFilesSelected(e.target.files)} 
+                        className="hidden" 
+                      />
+
+                      {isParsingBatchPdfs ? (
+                        <>
+                          <div className="w-12 h-12 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary">
+                            <Loader2 className="w-6 h-6 animate-spin" />
+                          </div>
+                          <div>
+                            <p className="text-sm font-bold text-text">Rendering and analyzing student papers...</p>
+                            <p className="text-xs text-primary font-mono mt-1">{batchParsingProgress}</p>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="w-12 h-12 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary">
+                            <FolderUp className="w-6 h-6" />
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold text-text">
+                              Click or drag and drop up to 200 student PDFs or scanned booklets
+                            </p>
+                            <p className="text-xs text-textMuted mt-1">
+                              Supports multi-page PDFs (e.g. 7 pages per paper). Student names are auto-detected from filenames.
+                            </p>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Batch Entries Table */}
+                  {batchEntries.length > 0 && (
+                    <div className="space-y-3 pt-2">
+                      <div className="flex items-center justify-between text-xs px-1">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={batchEntries.every(b => b.selected)}
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              setBatchEntries(prev => prev.map(b => ({ ...b, selected: checked })));
+                            }}
+                            className="rounded border-border text-primary cursor-pointer"
+                          />
+                          <span className="font-semibold text-text">
+                            {batchEntries.filter(b => b.selected).length} of {batchEntries.length} Students Selected
+                          </span>
+                          <span className="text-textMuted font-mono">
+                            ({batchEntries.reduce((acc, b) => b.selected ? acc + b.pageCount : acc, 0)} Total Pages)
+                          </span>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => setBatchEntries([])}
+                          className="text-error hover:underline text-[11px] font-medium cursor-pointer"
+                        >
+                          Clear list
+                        </button>
+                      </div>
+
+                      <div className="border border-border rounded-2xl max-h-72 overflow-y-auto divide-y divide-border/60 bg-background/50">
+                        {batchEntries.map((entry, idx) => (
+                          <div key={entry.id} className="p-3 flex items-center justify-between gap-3 hover:bg-surface/50 transition-colors">
+                            <div className="flex items-center gap-3 min-w-0 flex-1">
+                              <input
+                                type="checkbox"
+                                checked={entry.selected}
+                                onChange={(e) => {
+                                  const checked = e.target.checked;
+                                  setBatchEntries(prev => prev.map(b => b.id === entry.id ? { ...b, selected: checked } : b));
+                                }}
+                                className="rounded border-border text-primary cursor-pointer shrink-0"
+                              />
+                              <span className="text-xs font-mono text-textMuted w-5 shrink-0">#{idx + 1}</span>
+                              <div className="flex-1 min-w-0">
+                                <input
+                                  type="text"
+                                  value={entry.studentName}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setBatchEntries(prev => prev.map(b => b.id === entry.id ? { ...b, studentName: val } : b));
+                                  }}
+                                  placeholder="Student Name"
+                                  className="w-full px-2.5 py-1 text-xs font-semibold text-text bg-background border border-border/80 rounded-lg focus:outline-none focus:border-primary"
+                                />
+                                <div className="flex items-center gap-2 mt-1 text-[10px] text-textMuted">
+                                  <span className="truncate max-w-[200px]" title={entry.sourceFileName}>
+                                    📄 {entry.sourceFileName}
+                                  </span>
+                                  <span className="px-1.5 py-0.2 rounded bg-primary/10 text-primary font-bold">
+                                    {entry.pageCount} {entry.pageCount === 1 ? 'page' : 'pages'}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => setBatchEntries(prev => prev.filter(b => b.id !== entry.id))}
+                              className="p-1.5 text-textMuted hover:text-error hover:bg-error/10 rounded-lg transition-colors cursor-pointer shrink-0"
+                              title="Remove"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Batch Action Bar */}
+                      <div className="pt-3 border-t border-border flex items-center justify-between gap-3">
+                        <div className="text-[11px] text-textMuted">
+                          Estimated marking duration: <span className="text-text font-semibold">~1-2 minutes</span> with {concurrency}x parallel workers.
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setShowUploadModal(false)}
+                            className="px-4 py-2 border border-border hover:bg-border/40 text-textMuted hover:text-text rounded-2xl text-xs font-medium transition-colors cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleQueueBatchStudents}
+                            disabled={batchEntries.filter(b => b.selected).length === 0 || isParsingBatchPdfs}
+                            className="flex items-center gap-2 bg-primary hover:bg-primaryHover disabled:opacity-50 text-white px-5 py-2.5 rounded-2xl text-xs font-bold transition-all shadow-md cursor-pointer"
+                          >
+                            <Sparkles className="w-4 h-4" />
+                            <span>
+                              Queue Batch ({batchEntries.filter(b => b.selected).length} Students)
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* TAB 2: SINGLE STUDENT PAPER FORM */}
+              {uploadTab === 'single' && (
+                <form onSubmit={handleQueueStudentPaper} className="space-y-4">
                   {/* Student Details */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
@@ -1103,20 +1963,21 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                     </div>
                   </div>
 
-                  {/* Image Upload Area */}
+                  {/* Image/PDF Upload Area */}
                   <div>
                     <label className="block text-xs font-semibold text-textMuted uppercase tracking-wider mb-2">
-                      Upload Student Answer Sheets / Booklet <span className="text-error">*</span>
+                      Upload Answer Script / Booklet <span className="text-error">*</span>
                     </label>
 
-                    {/* Drag and Drop Box */}
                     <div
                       onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
                       onDragLeave={() => setDragOver(false)}
                       onDrop={handleDrop}
-                      onClick={() => fileInputRef.current?.click()}
+                      onClick={() => !isRenderingSinglePdf && fileInputRef.current?.click()}
                       className={`border-2 border-dashed rounded-3xl p-6 text-center cursor-pointer transition-all flex flex-col items-center justify-center gap-2.5 ${
-                        dragOver 
+                        isRenderingSinglePdf
+                          ? 'border-primary/50 bg-primary/5 cursor-wait'
+                          : dragOver 
                           ? 'border-primary bg-primary/10 scale-[1.01]' 
                           : 'border-border hover:border-primary/50 bg-background/50 hover:bg-background'
                       }`}
@@ -1125,21 +1986,37 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                         type="file" 
                         ref={fileInputRef}
                         multiple 
-                        accept="image/*" 
+                        accept=".pdf,image/*" 
                         onChange={(e) => handleFilesSelected(e.target.files)} 
                         className="hidden" 
                       />
-                      <div className="w-12 h-12 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary">
-                        <UploadCloud className="w-6 h-6" />
-                      </div>
-                      <div>
-                        <p className="text-sm font-semibold text-text">
-                          Click to select or drag and drop handwritten answer pages
-                        </p>
-                        <p className="text-xs text-textMuted mt-0.5">
-                          Supports PNG, JPG, JPEG, WEBP. You can upload multiple pages.
-                        </p>
-                      </div>
+                      
+                      {isRenderingSinglePdf ? (
+                        <>
+                          <div className="w-12 h-12 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary">
+                            <Loader2 className="w-6 h-6 animate-spin" />
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold text-text">
+                              Rendering PDF pages into high-res images...
+                            </p>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="w-12 h-12 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary">
+                            <UploadCloud className="w-6 h-6" />
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold text-text">
+                              Click or drag and drop handwritten answer pages or PDF
+                            </p>
+                            <p className="text-xs text-textMuted mt-0.5">
+                              Supports multi-page PDFs, PNG, JPG, JPEG, WEBP.
+                            </p>
+                          </div>
+                        </>
+                      )}
                     </div>
 
                     {/* Page Previews List */}
@@ -1246,12 +2123,12 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                     </button>
                   </div>
                 </form>
+              )}
             </div>
 
           </div>
         </div>
       )}
-
       {/* ========================================================================= */}
       {/* FULLSCREEN / INTERACTIVE MARKED PAPER SCRIPT VIEWER                       */}
       {/* (NO ANNOTATIONS ON TOP OF MARKED IMAGES, FULL HEIGHT UNCROPPED VIEW)       */}
@@ -1386,23 +2263,53 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                       </button>
                     </div>
 
-                    {/* Mode selector: Marked vs Original */}
+                    {/* Comments on/off toggle for annotations mode */}
+                    {viewerMode === 'annotations' && (
+                      <button
+                        onClick={() => setShowAnnotationsComments(prev => !prev)}
+                        className={`px-2.5 py-1 text-xs rounded-xl font-medium border transition-colors cursor-pointer flex items-center gap-1.5 ${
+                          showAnnotationsComments
+                            ? 'bg-red-500/10 border-red-500/30 text-red-400 font-semibold shadow-xs'
+                            : 'bg-background border-border text-textMuted hover:text-text'
+                        }`}
+                        title="Toggle visible examiner comments and correction notes on the paper"
+                      >
+                        <span>💬</span>
+                        <span>{showAnnotationsComments ? 'Comments On' : 'Comments Off'}</span>
+                      </button>
+                    )}
+
+                    {/* Mode selector: Annotations vs AI Photo vs Original */}
                     <div className="flex items-center gap-1 bg-background border border-border rounded-xl p-0.5 text-xs">
                       <button
+                        onClick={() => setViewerMode('annotations')}
+                        className={`px-3 py-1 rounded-lg font-medium transition-colors cursor-pointer flex items-center gap-1.5 ${
+                          viewerMode === 'annotations' ? 'bg-primary/20 text-primary font-semibold shadow-sm' : 'text-textMuted hover:text-text'
+                        }`}
+                        title="Interactive vector ticks, mark badges & comments (Zero Image Tokens)"
+                      >
+                        <span>✏️</span>
+                        <span>Annotations</span>
+                      </button>
+                      <button
                         onClick={() => setViewerMode('marked')}
-                        className={`px-3 py-1 rounded-lg font-medium transition-colors cursor-pointer ${
+                        className={`px-3 py-1 rounded-lg font-medium transition-colors cursor-pointer flex items-center gap-1.5 ${
                           viewerMode === 'marked' ? 'bg-primary/20 text-primary font-semibold shadow-sm' : 'text-textMuted hover:text-text'
                         }`}
+                        title="Generative photorealistic marked image"
                       >
-                        Red-Ink Marked
+                        <span>🤖</span>
+                        <span>AI Photo</span>
                       </button>
                       <button
                         onClick={() => setViewerMode('original')}
-                        className={`px-3 py-1 rounded-lg font-medium transition-colors cursor-pointer ${
+                        className={`px-3 py-1 rounded-lg font-medium transition-colors cursor-pointer flex items-center gap-1.5 ${
                           viewerMode === 'original' ? 'bg-primary/20 text-primary font-semibold shadow-sm' : 'text-textMuted hover:text-text'
                         }`}
+                        title="Clean untouched student script"
                       >
-                        Original
+                        <span>📄</span>
+                        <span>Original</span>
                       </button>
                     </div>
 
@@ -1429,16 +2336,47 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                         </div>
                       )}
 
-                      {/* 
-                        CONTAINED IMAGE:
-                        max-h-full & max-w-full with object-contain ensures the entire page 
-                        (top to bottom, left to right) is 100% visible inside the window at all times!
-                      */}
-                      <img
-                        src={displayUrl}
-                        alt={`Student submission page ${viewerPageIdx + 1}`}
-                        className="max-h-full max-w-full w-auto h-auto object-contain rounded-xl shadow-2xl bg-white select-none border border-gray-300"
-                      />
+                      {viewerMode === 'annotations' ? (
+                        <MarkedPaperOverlay
+                          imageUrl={pageOriginalUrl}
+                          annotations={ensureAssessmentAnnotations(viewingPaper.assessment_result, viewerPageIdx)}
+                          showAnnotations={true}
+                          showComments={showAnnotationsComments}
+                          altText={`Student submission page ${viewerPageIdx + 1}`}
+                        />
+                      ) : viewerMode === 'marked' ? (
+                        pageMarkedUrl ? (
+                          <img
+                            src={pageMarkedUrl}
+                            alt={`Student submission marked page ${viewerPageIdx + 1}`}
+                            className="max-h-full max-w-full w-auto h-auto object-contain rounded-xl shadow-2xl bg-white select-none border border-gray-300"
+                          />
+                        ) : (
+                          <div className="flex flex-col items-center justify-center p-6 text-center max-w-md bg-surface/90 border border-border rounded-2xl shadow-xl">
+                            <div className="w-12 h-12 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary mb-3">
+                              <Sparkles className="w-6 h-6" />
+                            </div>
+                            <h4 className="text-sm font-bold text-text mb-1">No AI Photo Generated Yet</h4>
+                            <p className="text-xs text-textMuted mb-4 leading-relaxed">
+                              This submission was marked in <span className="text-primary font-semibold">Annotations Mode</span> (saving image tokens). You can render the photorealistic ballpoint pen photo now if needed.
+                            </p>
+                            <button
+                              onClick={() => handleRegeneratePageMarking(viewerPageIdx)}
+                              disabled={isPageGenerating}
+                              className="flex items-center gap-2 bg-primary hover:bg-primaryHover text-white px-4 py-2 rounded-xl text-xs font-semibold transition-all shadow-md cursor-pointer disabled:opacity-50"
+                            >
+                              {isPageGenerating ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                              <span>{isPageGenerating ? 'Rendering Teacher Ink...' : 'Generate AI Photo (Uses Tokens)'}</span>
+                            </button>
+                          </div>
+                        )
+                      ) : (
+                        <img
+                          src={pageOriginalUrl}
+                          alt={`Student submission page ${viewerPageIdx + 1}`}
+                          className="max-h-full max-w-full w-auto h-auto object-contain rounded-xl shadow-2xl bg-white select-none border border-gray-300"
+                        />
+                      )}
                     </div>
                   </div>
 
