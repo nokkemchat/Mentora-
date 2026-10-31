@@ -170,7 +170,7 @@ async function uploadBase64ToStorage(
 }
 
 export default function TeacherBulkMarkingModal({ paper, onClose, onPaperUpdated }: TeacherBulkMarkingModalProps) {
-  const { user, isStudent } = useAuth();
+  const { user, isStudent, isTeacher, isAdmin } = useAuth();
   const defaultStudentName = user?.user_metadata?.first_name 
     ? `${user.user_metadata.first_name} ${user.user_metadata.last_name || ''}`.trim()
     : (user?.email ? user.email.split('@')[0] : '');
@@ -259,6 +259,9 @@ export default function TeacherBulkMarkingModal({ paper, onClose, onPaperUpdated
       // Students must ONLY see their own marked papers!
       if (isStudent && user) {
         query = query.or(`created_by.eq.${user.id},student_name.ilike.%${defaultStudentName}%`);
+      } else if (isTeacher && user) {
+        // Teachers must ONLY see marked papers of students that they marked for!
+        query = query.eq('created_by', user.id);
       }
 
       const { data, error } = await query.order('created_at', { ascending: false });
@@ -275,6 +278,10 @@ export default function TeacherBulkMarkingModal({ paper, onClose, onPaperUpdated
   const handleOpenViewer = async (paperItem: MarkedStudentPaper) => {
     if (isStudent && user && (paperItem as any).created_by && (paperItem as any).created_by !== user.id) {
       alert("Access denied: You can only view your own marked papers.");
+      return;
+    }
+    if (isTeacher && user && (paperItem as any).created_by && (paperItem as any).created_by !== user.id) {
+      alert("Access denied: You can only view marked papers that you graded.");
       return;
     }
     if (paperItem.assessment_result) {
@@ -294,6 +301,10 @@ export default function TeacherBulkMarkingModal({ paper, onClose, onPaperUpdated
       if (data) {
         if (isStudent && user && data.created_by && data.created_by !== user.id) {
           alert("Access denied: You can only view your own marked papers.");
+          return;
+        }
+        if (isTeacher && user && data.created_by && data.created_by !== user.id) {
+          alert("Access denied: You can only view marked papers that you graded.");
           return;
         }
         setViewingPaper(data);
@@ -1241,10 +1252,16 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
   const handleDeleteMarkedPaper = async (paperId: string, studentName: string) => {
     if (!window.confirm(`Are you sure you want to delete the marked paper for "${studentName}"?`)) return;
     try {
-      const { error } = await supabase
+      let delQuery = supabase
         .from('marked_student_papers')
         .delete()
         .eq('id', paperId);
+
+      if (!isAdmin && user) {
+        delQuery = delQuery.eq('created_by', user.id);
+      }
+
+      const { error } = await delQuery;
 
       if (error) throw error;
       setMarkedPapers(prev => prev.filter(p => p.id !== paperId));

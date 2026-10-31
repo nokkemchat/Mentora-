@@ -305,7 +305,7 @@ const CombinedRecursivePart = ({
 };
 
 export default function PaperViewModal({ paperId, initialTab = 'questions', onClose }: PaperViewModalProps) {
-  const { user, isStudent } = useAuth();
+  const { user, isStudent, isTeacher } = useAuth();
   const [loading, setLoading] = useState(true);
   const [paper, setPaper] = useState<any>(null);
   const [questions, setQuestions] = useState<any[]>([]);
@@ -348,6 +348,8 @@ export default function PaperViewModal({ paperId, initialTab = 'questions', onCl
       if (isStudent && user) {
         const studentName = user.user_metadata?.first_name || user.email?.split('@')[0] || '';
         countQuery = countQuery.or(`created_by.eq.${user.id},student_name.ilike.%${studentName}%`);
+      } else if (isTeacher && user) {
+        countQuery = countQuery.eq('created_by', user.id);
       }
 
       const { count } = await countQuery;

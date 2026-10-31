@@ -149,6 +149,8 @@ export default function Papers() {
             if (isStudent && user) {
               const name = user.user_metadata?.first_name || user.email?.split('@')[0] || '';
               mq = mq.or(`created_by.eq.${user.id},student_name.ilike.%${name}%`);
+            } else if (isTeacher && user) {
+              mq = mq.eq('created_by', user.id);
             }
             return mq;
           })()
