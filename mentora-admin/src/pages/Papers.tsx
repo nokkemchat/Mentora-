@@ -331,206 +331,171 @@ export default function Papers() {
     });
   }
 
+  const hasActiveFilters = search.trim() !== '' || curriculumFilter !== 'All' || subjectFilter !== 'All' || yearFilter !== 'All';
+  const resetFilters = () => {
+    setSearch('');
+    setCurriculumFilter('All');
+    setSubjectFilter('All');
+    setYearFilter('All');
+  };
+
   return (
-    <div className="max-w-7xl mx-auto space-y-5 sm:space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-text tracking-tight">
-            {isStudent ? 'Past Papers & Marking Schemes' : 'Past Papers'}
+    <div className="max-w-7xl mx-auto space-y-4">
+      {/* Clean, Compact Header */}
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <h1 className="text-xl sm:text-2xl font-bold text-text tracking-tight">
+            Past Papers
           </h1>
-          <p className="text-xs sm:text-sm text-textMuted mt-1">
-            {isStudent
-              ? 'Explore official question papers and verified teacher marking schemes.'
-              : 'Manage and curate the AI Exam Intelligence database.'}
-          </p>
+          <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-surface border border-border text-textMuted">
+            {filteredPapers.length}
+          </span>
         </div>
 
-        {isStudent ? (
-          <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-2xl bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-semibold self-start sm:self-auto">
-            <GraduationCap className="w-4 h-4" />
-            <span>Student Practice Mode</span>
-          </div>
-        ) : (
-          <div className="flex items-center gap-2.5 w-full sm:w-auto">
+        {!isStudent && (
+          <div className="flex items-center gap-2">
             <button 
               onClick={() => setShowBulkModal(true)}
-              className="flex-1 sm:flex-none flex items-center justify-center space-x-2 bg-surface hover:bg-border/50 text-text border border-border px-3.5 py-2.5 rounded-2xl text-xs sm:text-sm font-medium transition-colors cursor-pointer"
+              className="flex items-center gap-1.5 bg-surface hover:bg-border/50 text-text border border-border px-3 py-1.5 rounded-xl text-xs font-medium transition-colors cursor-pointer"
             >
-              <UploadCloud className="w-4 h-4" />
-              <span>Bulk Upload</span>
+              <UploadCloud className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Bulk Upload</span>
             </button>
             <button 
               onClick={() => setShowFormModal(true)}
-              className="flex-1 sm:flex-none flex items-center justify-center space-x-2 bg-primary hover:bg-primaryHover text-white px-3.5 py-2.5 rounded-2xl text-xs sm:text-sm font-medium transition-colors cursor-pointer shadow-md shadow-primary/20"
+              className="flex items-center gap-1.5 bg-primary hover:bg-primaryHover text-white px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer shadow-sm shadow-primary/20"
             >
-              <Plus className="w-4 h-4" />
-              <span>Add Single Paper</span>
+              <Plus className="w-3.5 h-3.5" />
+              <span>Add Paper</span>
             </button>
           </div>
         )}
       </div>
 
-      {/* Student Banner */}
-      {isStudent && (
-        <div className="p-4 rounded-2xl bg-blue-500/10 border border-blue-500/20 text-text flex items-start gap-3">
-          <div className="p-2 rounded-xl bg-blue-500/20 text-blue-400 mt-0.5 shrink-0">
-            <GraduationCap className="w-5 h-5" />
-          </div>
-          <div>
-            <h4 className="font-semibold text-xs sm:text-sm text-blue-400">Exam Practice & AI Senior Examiner Marking</h4>
-            <p className="text-textMuted text-[11px] sm:text-xs mt-1 leading-relaxed">
-              Explore past papers, review questions against official marking schemes, and tap <strong className="text-text font-bold">"Mark My Paper"</strong> on any exam to upload handwritten working for instant AI grading and red-ink marks.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Toolbar & Search */}
-      <div className="space-y-3">
-        <div className="bg-surface border border-border rounded-3xl p-3 sm:p-4 space-y-3 shadow-sm">
-          {/* Search Input Row */}
-          <div className="flex items-center gap-2">
-            <div className="relative flex-1">
-              <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-textMuted" />
-              <input
-                type="text"
-                placeholder="Search by subject, year (e.g. '2024 Math', 'Cambridge P2')..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="w-full pl-9 pr-9 py-2.5 bg-background border border-border rounded-2xl text-xs sm:text-sm text-text focus:outline-none focus:border-primary transition-colors"
-              />
-              {search && (
-                <button
-                  type="button"
-                  onClick={() => setSearch('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-textMuted hover:text-text p-1 rounded-full cursor-pointer"
-                  title="Clear search"
-                >
-                  <CloseIcon className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-
-            {/* Quick reset if any filter active */}
-            {(search || curriculumFilter !== 'All' || subjectFilter !== 'All' || yearFilter !== 'All') && (
-              <button
-                type="button"
-                onClick={() => {
-                  setSearch('');
-                  setCurriculumFilter('All');
-                  setSubjectFilter('All');
-                  setYearFilter('All');
-                }}
-                className="px-3 py-2.5 rounded-2xl bg-border/40 hover:bg-border text-textMuted hover:text-text text-xs font-semibold shrink-0 transition-colors cursor-pointer"
-              >
-                Reset
-              </button>
-            )}
-          </div>
-
-          {/* Quick Curriculum Filter Pills */}
-          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
-            <span className="text-[11px] font-semibold text-textMuted uppercase tracking-wider shrink-0 mr-1">Board:</span>
-            {['All', 'ZIMSEC', 'Cambridge'].map((curr) => {
-              const isActive = curriculumFilter === curr;
-              return (
-                <button
-                  key={curr}
-                  type="button"
-                  onClick={() => setCurriculumFilter(curr)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all shrink-0 cursor-pointer ${
-                    isActive
-                      ? 'bg-primary text-white shadow-sm shadow-primary/25'
-                      : 'bg-background hover:bg-border/50 text-textMuted border border-border'
-                  }`}
-                >
-                  {curr === 'All' ? 'All Boards' : curr}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Quick Year Filter Horizontal Pill Bar */}
-          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
-            <span className="text-[11px] font-semibold text-textMuted uppercase tracking-wider shrink-0 mr-1 flex items-center gap-1">
-              <Calendar className="w-3 h-3 text-primary" />
-              Year:
-            </span>
+      {/* Sleek, Compact Filter Bar */}
+      <div className="bg-surface border border-border rounded-2xl p-2.5 sm:p-3 space-y-2 shadow-sm">
+        {/* Search Row */}
+        <div className="relative">
+          <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-textMuted" />
+          <input
+            type="text"
+            placeholder="Search by subject, year (e.g. '2024 Math', 'Cambridge P2')..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full pl-9 pr-8 py-2 bg-background border border-border rounded-xl text-xs sm:text-sm text-text placeholder:text-textMuted/70 focus:outline-none focus:border-primary transition-colors"
+          />
+          {search && (
             <button
               type="button"
-              onClick={() => setYearFilter('All')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all shrink-0 cursor-pointer ${
-                yearFilter === 'All'
-                  ? 'bg-primary text-white shadow-sm shadow-primary/25'
-                  : 'bg-background hover:bg-border/50 text-textMuted border border-border'
+              onClick={() => setSearch('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-textMuted hover:text-text p-1 rounded-full cursor-pointer"
+              title="Clear search"
+            >
+              <CloseIcon className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+
+        {/* Single Compact Scrollable Filter Strip */}
+        <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
+          {/* Board Pill */}
+          <div className="relative shrink-0">
+            <select
+              value={curriculumFilter}
+              onChange={(e) => setCurriculumFilter(e.target.value)}
+              className={`appearance-none text-xs font-semibold pl-3 pr-7 py-1.5 rounded-xl cursor-pointer border transition-colors ${
+                curriculumFilter !== 'All'
+                  ? 'bg-primary/10 border-primary text-primary font-bold'
+                  : 'bg-background hover:bg-border/50 text-text border-border'
               }`}
             >
-              All Years
+              <option value="All">Board: All</option>
+              <option value="ZIMSEC">Board: ZIMSEC</option>
+              <option value="Cambridge">Board: Cambridge</option>
+            </select>
+            <ChevronDown className={`w-3 h-3 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none ${curriculumFilter !== 'All' ? 'text-primary' : 'text-textMuted'}`} />
+          </div>
+
+          {/* Year Pill */}
+          <div className="relative shrink-0">
+            <select
+              value={yearFilter}
+              onChange={(e) => setYearFilter(e.target.value)}
+              className={`appearance-none text-xs font-semibold pl-3 pr-7 py-1.5 rounded-xl cursor-pointer border transition-colors ${
+                yearFilter !== 'All'
+                  ? 'bg-primary/10 border-primary text-primary font-bold'
+                  : 'bg-background hover:bg-border/50 text-text border-border'
+              }`}
+            >
+              <option value="All">Year: All</option>
+              {uniqueYears.map((yr) => (
+                <option key={yr as string} value={yr.toString()}>{yr as string}</option>
+              ))}
+            </select>
+            <ChevronDown className={`w-3 h-3 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none ${yearFilter !== 'All' ? 'text-primary' : 'text-textMuted'}`} />
+          </div>
+
+          {/* Subject Pill */}
+          <div className="relative shrink-0">
+            <select
+              value={subjectFilter}
+              onChange={(e) => setSubjectFilter(e.target.value)}
+              className={`appearance-none text-xs font-semibold pl-3 pr-7 py-1.5 rounded-xl cursor-pointer border transition-colors max-w-[140px] truncate ${
+                subjectFilter !== 'All'
+                  ? 'bg-primary/10 border-primary text-primary font-bold'
+                  : 'bg-background hover:bg-border/50 text-text border-border'
+              }`}
+            >
+              <option value="All">Subject: All</option>
+              {uniqueSubjects.map((sub) => (
+                <option key={sub as string} value={sub as string}>{sub as string}</option>
+              ))}
+            </select>
+            <ChevronDown className={`w-3 h-3 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none ${subjectFilter !== 'All' ? 'text-primary' : 'text-textMuted'}`} />
+          </div>
+
+          {/* Grouping Pill */}
+          <div className="relative shrink-0">
+            <select
+              value={groupBy}
+              onChange={(e) => setGroupBy(e.target.value as any)}
+              className="appearance-none bg-background hover:bg-border/50 text-text text-xs font-semibold pl-3 pr-7 py-1.5 rounded-xl cursor-pointer border border-border transition-colors"
+            >
+              <option value="year">Group: Year</option>
+              <option value="subject">Group: Subject</option>
+              <option value="none">Group: Flat</option>
+            </select>
+            <ChevronDown className="w-3 h-3 text-textMuted absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+          </div>
+
+          {/* Sort Pill */}
+          <div className="relative shrink-0">
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as any)}
+              className="appearance-none bg-background hover:bg-border/50 text-text text-xs font-semibold pl-3 pr-7 py-1.5 rounded-xl cursor-pointer border border-border transition-colors"
+            >
+              <option value="year_desc">Sort: Newest Year</option>
+              <option value="year_asc">Sort: Oldest Year</option>
+              <option value="subject_asc">Sort: Subject A-Z</option>
+              <option value="questions_desc">Sort: Questions</option>
+            </select>
+            <ChevronDown className="w-3 h-3 text-textMuted absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+          </div>
+
+          {/* Reset Action Pill */}
+          {hasActiveFilters && (
+            <button
+              type="button"
+              onClick={resetFilters}
+              className="shrink-0 flex items-center gap-1 text-xs text-primary hover:text-primaryHover font-semibold px-2.5 py-1.5 rounded-xl bg-primary/10 border border-primary/20 cursor-pointer transition-all"
+            >
+              <CloseIcon className="w-3 h-3" />
+              <span>Reset</span>
             </button>
-            {uniqueYears.map((yr) => {
-              const isActive = yearFilter === yr.toString();
-              return (
-                <button
-                  key={yr as string}
-                  type="button"
-                  onClick={() => setYearFilter(yr.toString())}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all shrink-0 cursor-pointer ${
-                    isActive
-                      ? 'bg-primary text-white shadow-sm shadow-primary/25'
-                      : 'bg-background hover:bg-border/50 text-textMuted border border-border'
-                  }`}
-                >
-                  {yr as string}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Subject Dropdown & Arrangement / Sorting Controls */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-2 border-t border-border/60">
-            {/* Subject Selector */}
-            <div className="col-span-2 sm:col-span-1">
-              <select
-                className="w-full bg-background border border-border text-text rounded-2xl px-3 py-2 text-xs sm:text-sm focus:outline-none focus:border-primary cursor-pointer truncate"
-                value={subjectFilter}
-                onChange={(e) => setSubjectFilter(e.target.value)}
-              >
-                <option value="All">All Subjects ({uniqueSubjects.length})</option>
-                {uniqueSubjects.map((sub) => (
-                  <option key={sub as string} value={sub as string}>{sub as string}</option>
-                ))}
-              </select>
-            </div>
-
-            {/* Arrange / Group By */}
-            <div>
-              <select
-                className="w-full bg-background border border-border text-text rounded-2xl px-3 py-2 text-xs sm:text-sm focus:outline-none focus:border-primary cursor-pointer truncate"
-                value={groupBy}
-                onChange={(e) => setGroupBy(e.target.value as any)}
-              >
-                <option value="year">Group: By Year</option>
-                <option value="subject">Group: By Subject</option>
-                <option value="none">Group: Flat List</option>
-              </select>
-            </div>
-
-            {/* Sort By */}
-            <div>
-              <select
-                className="w-full bg-background border border-border text-text rounded-2xl px-3 py-2 text-xs sm:text-sm focus:outline-none focus:border-primary cursor-pointer truncate"
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value as any)}
-              >
-                <option value="year_desc">Sort: Newest Year</option>
-                <option value="year_asc">Sort: Oldest Year</option>
-                <option value="subject_asc">Sort: Subject (A-Z)</option>
-                <option value="questions_desc">Sort: Most Questions</option>
-              </select>
-            </div>
-          </div>
+          )}
         </div>
+      </div>
 
         {/* Results Counter & Arrangement Indicator */}
         <div className="flex items-center justify-between text-xs text-textMuted px-2">
@@ -542,7 +507,6 @@ export default function Papers() {
             Arranged by {groupBy === 'year' ? 'Exam Year' : groupBy === 'subject' ? 'Subject' : 'Default'}
           </span>
         </div>
-      </div>
 
       {/* Mobile Card List (Visible on mobile/tablet < lg) */}
       <div className="block lg:hidden space-y-5">
