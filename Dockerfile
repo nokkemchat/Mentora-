@@ -1,10 +1,13 @@
-FROM node:20-bullseye-slim
+FROM node:20-bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
 
 # Install system dependencies required for pdf2pic, GraphicsMagick, and Ghostscript
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     graphicsmagick \
     ghostscript \
     curl \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
