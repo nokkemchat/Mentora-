@@ -227,8 +227,9 @@ export default function BulkUploadModal({ onClose, onSuccess }: BulkUploadModalP
             let triggered = false;
             try {
               const controller = new AbortController();
-              const timeoutId = setTimeout(() => controller.abort(), 1000);
-              const res = await fetch('http://localhost:3005/process', { method: 'POST', signal: controller.signal });
+              const timeoutId = setTimeout(() => controller.abort(), 4000);
+              const agentUrl = (import.meta.env.VITE_INGESTION_AGENT_URL || 'https://mentora-ingestion-agent.onrender.com').replace(/\/$/, '');
+              const res = await fetch(`${agentUrl}/process`, { method: 'POST', signal: controller.signal });
               clearTimeout(timeoutId);
               if (res.ok) triggered = true;
             } catch (e) {}

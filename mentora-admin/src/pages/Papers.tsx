@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Filter, Plus, Edit, Trash2, Eye, BarChart2, BookOpen, ChevronDown, ChevronUp, UploadCloud, FileText, ExternalLink, FileCheck, Sparkles, RefreshCw, CheckCircle2 } from 'lucide-react';
+import { Search, Filter, Plus, Edit, Trash2, Eye, BarChart2, BookOpen, ChevronDown, ChevronUp, UploadCloud, FileText, ExternalLink, FileCheck, Sparkles, RefreshCw, CheckCircle2, GraduationCap } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import PaperFormModal from '../components/PaperFormModal';
 import BulkUploadModal from '../components/BulkUploadModal';
@@ -9,7 +9,7 @@ import TeacherBulkMarkingModal from '../components/TeacherBulkMarkingModal';
 import { useAuth } from '../context/AuthContext';
 
 export default function Papers() {
-  const { user, isAdmin } = useAuth();
+  const { user, isAdmin, isTeacher, isStudent } = useAuth();
   const [search, setSearch] = useState('');
   const [showFormModal, setShowFormModal] = useState(false);
   const [showBulkModal, setShowBulkModal] = useState(false);
@@ -58,8 +58,9 @@ export default function Papers() {
       let localTriggered = false;
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 1000);
-        const res = await fetch('http://localhost:3005/process', { method: 'POST', signal: controller.signal });
+        const timeoutId = setTimeout(() => controller.abort(), 4000);
+        const agentUrl = (import.meta.env.VITE_INGESTION_AGENT_URL || 'https://mentora-ingestion-agent.onrender.com').replace(/\/$/, '');
+        const res = await fetch(`${agentUrl}/process`, { method: 'POST', signal: controller.signal });
         clearTimeout(timeoutId);
         if (res.ok) localTriggered = true;
       } catch (e) {}
@@ -84,9 +85,9 @@ export default function Papers() {
 
         const msCount = extractRes?.marking_scheme?.solutions_saved;
         if (msCount) {
-          alert(`Extraction successful! Extracted questions and ${msCount} marking scheme solutions.`);
+          alert(`Questions and ${msCount} marking scheme solutions extracted (text only). The ingestion agent will add the diagrams/images next time it runs.`);
         } else {
-          alert('Extraction started via Supabase Cloud Edge Function!');
+          alert('Questions extracted via cloud (text only, no images yet) — the ingestion agent will add the diagrams/images when it runs.');
         }
       }
       await fetchPapers();
@@ -126,20 +127,7 @@ export default function Papers() {
     setLoading(true);
     let query = supabase.from('papers').select('*, ingestion_jobs(status)').order('created_at', { ascending: false });
     
-    if (!isAdmin && user) {
-      const teacherName = `${user.user_metadata?.first_name || ''} ${user.user_metadata?.last_name || ''}`.trim();
-      if (teacherName) {
-        const { data: courses } = await supabase.from('courses').select('title').eq('teacher_name', teacherName);
-        if (courses && courses.length > 0) {
-          const subjects = Array.from(new Set(courses.map(c => c.title)));
-          query = query.in('subject', subjects);
-        } else {
-          setPapers([]);
-          setLoading(false);
-          return;
-        }
-      }
-    }
+    // Teachers, Admins, and Students all have access to explore and manage past papers
 
     const { data, error } = await query;
     if (error) {
@@ -248,28 +236,57 @@ export default function Papers() {
   return (
     <div className="max-w-7xl mx-auto space-y-6">
       {/* Header */}
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-text">Past Papers</h1>
-          <p className="text-textMuted mt-2">Manage the AI Exam Intelligence database</p>
+          <h1 className="text-3xl font-bold text-text">
+            {isStudent ? 'Past Papers & Marking Schemes' : 'Past Papers'}
+          </h1>
+          <p className="text-textMuted mt-1">
+            {isStudent
+              ? 'Explore official question papers and verified teacher marking schemes.'
+              : 'Manage and curate the AI Exam Intelligence database.'}
+          </p>
         </div>
-        <div className="flex items-center space-x-3">
-          <button 
-            onClick={() => setShowBulkModal(true)}
-            className="flex items-center space-x-2 bg-surface hover:bg-border/50 text-text border border-border px-4 py-2 rounded-2xl font-medium transition-colors cursor-pointer"
-          >
-            <UploadCloud className="w-5 h-5" />
-            <span>Bulk Upload</span>
-          </button>
-          <button 
-            onClick={() => setShowFormModal(true)}
-            className="flex items-center space-x-2 bg-primary hover:bg-primaryHover text-white px-4 py-2 rounded-2xl font-medium transition-colors cursor-pointer"
-          >
-            <Plus className="w-5 h-5" />
-            <span>Add Single Paper</span>
-          </button>
-        </div>
+
+        {isStudent ? (
+          <div className="flex items-center gap-2 px-4 py-2 rounded-2xl bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-semibold">
+            <GraduationCap className="w-4 h-4" />
+            <span>Student Mode (Read & Study Only)</span>
+          </div>
+        ) : (
+          <div className="flex items-center space-x-3">
+            <button 
+              onClick={() => setShowBulkModal(true)}
+              className="flex items-center space-x-2 bg-surface hover:bg-border/50 text-text border border-border px-4 py-2 rounded-2xl font-medium transition-colors cursor-pointer"
+            >
+              <UploadCloud className="w-5 h-5" />
+              <span>Bulk Upload</span>
+            </button>
+            <button 
+              onClick={() => setShowFormModal(true)}
+              className="flex items-center space-x-2 bg-primary hover:bg-primaryHover text-white px-4 py-2 rounded-2xl font-medium transition-colors cursor-pointer"
+            >
+              <Plus className="w-5 h-5" />
+              <span>Add Single Paper</span>
+            </button>
+          </div>
+        )}
       </div>
+
+      {/* Student Banner */}
+      {isStudent && (
+        <div className="p-4 rounded-2xl bg-blue-500/10 border border-blue-500/20 text-text flex items-start gap-3">
+          <div className="p-2 rounded-xl bg-blue-500/20 text-blue-400 mt-0.5">
+            <GraduationCap className="w-5 h-5" />
+          </div>
+          <div>
+            <h4 className="font-semibold text-sm text-blue-400">Exam Practice & AI Senior Examiner Marking</h4>
+            <p className="text-textMuted text-xs mt-1 leading-relaxed">
+              Explore past papers, review questions against official marking schemes, and click <strong className="text-text font-bold">"Mark My Paper"</strong> on any exam to upload your handwritten working for instant AI grading and red-ink corrections.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Toolbar */}
       <div className="bg-surface border border-border rounded-3xl p-4 flex flex-wrap gap-4 items-center justify-between">
@@ -330,7 +347,7 @@ export default function Papers() {
                 <th className="p-4 font-medium">Status</th>
                 <th className="p-4 font-medium">PDF File</th>
                 <th className="p-4 font-medium">Marking Scheme</th>
-                <th className="p-4 font-medium">Student Papers</th>
+                <th className="p-4 font-medium">{isStudent ? 'AI Paper Marking' : 'Student Papers'}</th>
                 <th className="p-4 font-medium text-right">Actions</th>
               </tr>
             </thead>
@@ -367,7 +384,7 @@ export default function Papers() {
                     </td>
                     <td className="p-4">
                       {paper.type === 'ms' ? (
-                        <span className="inline-flex items-center px-2.5 py-1 rounded-xl text-xs font-medium bg-[#10b981]/10 text-[#10b981] border border-[#10b981]/20">
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-xl text-xs font-medium bg-success/10 text-success border border-success/20">
                           Marking Scheme
                         </span>
                       ) : (
@@ -385,9 +402,9 @@ export default function Papers() {
                         {paper.ingestion_jobs && paper.ingestion_jobs.length > 0 ? (
                           <div className="flex flex-col gap-0.5">
                           <span className={`inline-flex items-center px-2.5 py-1 rounded-xl text-xs font-medium ${
-                            paper.ingestion_jobs[0].status === 'completed' ? 'bg-[#10b981]/10 text-[#10b981] border border-[#10b981]/20' :
+                            paper.ingestion_jobs[0].status === 'completed' ? 'bg-success/10 text-success border border-success/20' :
                             paper.ingestion_jobs[0].status === 'failed' ? 'bg-error/10 text-error border border-error/20' :
-                            'bg-[#f59e0b]/10 text-[#f59e0b] border border-[#f59e0b]/20'
+                            'bg-warning/10 text-warning border border-warning/20'
                           }`}>
                             {paper.ingestion_jobs[0].status.charAt(0).toUpperCase() + paper.ingestion_jobs[0].status.slice(1)}
                           </span>
@@ -443,13 +460,13 @@ export default function Papers() {
                                 setViewingPaperId(paper.id);
                                 setInitialModalTab('scheme');
                               }}
-                              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-semibold bg-[#10b981]/15 text-[#10b981] border border-[#10b981]/30 hover:bg-[#10b981]/25 transition-all cursor-pointer shadow-sm"
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-semibold bg-success/15 text-success border border-success/30 hover:bg-success/25 transition-all cursor-pointer shadow-sm"
                               title="View Extracted Marking Scheme Rubrics & Worked Solutions"
                             >
                               <FileCheck className="w-3.5 h-3.5" />
                               <span>View Scheme ({paper.solution_count})</span>
                             </button>
-                          ) : (
+                          ) : !isStudent ? (
                             <button
                               type="button"
                               onClick={() => handleProcessMarkScheme(paper.id, paper.mark_scheme_url)}
@@ -464,36 +481,40 @@ export default function Papers() {
                               )}
                               <span>{processingMsPaperId === paper.id ? 'Extracting...' : 'Extract Scheme'}</span>
                             </button>
-                          )}
+                          ) : null}
 
                           <a 
                             href={paper.mark_scheme_url} 
                             target="_blank" 
                             rel="noreferrer" 
-                            className="p-1.5 text-textMuted hover:text-[#10b981] hover:bg-[#10b981]/10 rounded-lg transition-colors"
+                            className="p-1.5 text-textMuted hover:text-success hover:bg-success/10 rounded-lg transition-colors"
                             title="Open Original Marking Scheme PDF in new tab"
                           >
                             <ExternalLink className="w-3.5 h-3.5 opacity-70" />
                           </a>
 
-                          <button
-                            type="button"
-                            onClick={() => setSelectedPaperForMs(paper)}
-                            className="p-1.5 text-textMuted hover:text-primary hover:bg-primary/10 rounded-lg transition-colors cursor-pointer"
-                            title="Update / Replace Marking Scheme"
-                          >
-                            <Edit className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteMarkScheme(paper)}
-                            className="p-1.5 text-textMuted hover:text-error hover:bg-error/10 rounded-lg transition-colors cursor-pointer"
-                            title="Delete Marking Scheme"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          {!isStudent && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => setSelectedPaperForMs(paper)}
+                                className="p-1.5 text-textMuted hover:text-primary hover:bg-primary/10 rounded-lg transition-colors cursor-pointer"
+                                title="Update / Replace Marking Scheme"
+                              >
+                                <Edit className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteMarkScheme(paper)}
+                                className="p-1.5 text-textMuted hover:text-error hover:bg-error/10 rounded-lg transition-colors cursor-pointer"
+                                title="Delete Marking Scheme"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </>
+                          )}
                         </div>
-                      ) : (
+                      ) : !isStudent ? (
                         <button
                           type="button"
                           onClick={() => setSelectedPaperForMs(paper)}
@@ -503,25 +524,44 @@ export default function Papers() {
                           <Plus className="w-3 h-3" />
                           <span>Attach Scheme</span>
                         </button>
+                      ) : (
+                        <span className="text-xs text-textMuted italic">Pending educator</span>
                       )}
                     </td>
 
                     {/* Student Papers / Bulk Marking Column */}
                     <td className="p-4">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedPaperForMarking(paper)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-primary/15 text-primary border border-primary/30 hover:bg-primary/25 transition-all cursor-pointer shadow-sm group"
-                        title="Mark student exam scripts with AI"
-                      >
-                        <Sparkles className="w-3.5 h-3.5 text-primary group-hover:rotate-12 transition-transform" />
-                        <span>Mark Students Papers</span>
-                        {paper.marked_count > 0 && (
-                          <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] bg-primary text-white font-bold">
-                            {paper.marked_count}
-                          </span>
-                        )}
-                      </button>
+                      {isStudent ? (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedPaperForMarking(paper)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-gradient-to-r from-primary/20 via-primary/10 to-purple-500/15 text-primary border border-primary/30 hover:bg-primary/25 hover:border-primary/50 transition-all cursor-pointer shadow-sm group"
+                          title="Upload your handwritten answers to get marked by the AI Senior Examiner"
+                        >
+                          <Sparkles className="w-3.5 h-3.5 text-primary group-hover:rotate-12 transition-transform" />
+                          <span>Mark My Paper</span>
+                          {paper.marked_count > 0 && (
+                            <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] bg-primary text-white font-bold">
+                              {paper.marked_count} marked
+                            </span>
+                          )}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedPaperForMarking(paper)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-primary/15 text-primary border border-primary/30 hover:bg-primary/25 transition-all cursor-pointer shadow-sm group"
+                          title="Mark student exam scripts with AI"
+                        >
+                          <Sparkles className="w-3.5 h-3.5 text-primary group-hover:rotate-12 transition-transform" />
+                          <span>Mark Students Papers</span>
+                          {paper.marked_count > 0 && (
+                            <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] bg-primary text-white font-bold">
+                              {paper.marked_count}
+                            </span>
+                          )}
+                        </button>
+                      )}
                     </td>
 
                     <td className="p-4 text-right">
@@ -537,14 +577,16 @@ export default function Papers() {
                           <Eye className="w-4 h-4" />
                           <span className="text-sm font-medium">View</span>
                         </button>
-                        <button 
-                          onClick={() => handleDelete(paper.id)}
-                          className="flex items-center space-x-1 p-2 text-textMuted hover:text-error hover:bg-error/10 rounded-xl transition-colors cursor-pointer" 
-                          title="Delete Paper"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                          <span className="text-sm font-medium">Delete</span>
-                        </button>
+                        {!isStudent && (
+                          <button 
+                            onClick={() => handleDelete(paper.id)}
+                            className="flex items-center space-x-1 p-2 text-textMuted hover:text-error hover:bg-error/10 rounded-xl transition-colors cursor-pointer" 
+                            title="Delete Paper"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                            <span className="text-sm font-medium">Delete</span>
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
