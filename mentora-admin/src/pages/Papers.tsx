@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Filter, Plus, Edit, Trash2, Eye, BarChart2, BookOpen, ChevronDown, ChevronUp, UploadCloud, FileText, ExternalLink, FileCheck, Sparkles, RefreshCw, CheckCircle2, GraduationCap } from 'lucide-react';
+import { Search, Filter, Plus, Edit, Trash2, Eye, BarChart2, BookOpen, ChevronDown, ChevronUp, UploadCloud, FileText, ExternalLink, FileCheck, Sparkles, RefreshCw, CheckCircle2, GraduationCap, Calendar, ArrowUpDown, SlidersHorizontal, X as CloseIcon } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import PaperFormModal from '../components/PaperFormModal';
 import BulkUploadModal from '../components/BulkUploadModal';
@@ -118,10 +118,12 @@ export default function Papers() {
   const [papers, setPapers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // Filters
+  // Filters & Arrangement
   const [curriculumFilter, setCurriculumFilter] = useState('All');
   const [subjectFilter, setSubjectFilter] = useState('All');
   const [yearFilter, setYearFilter] = useState('All');
+  const [sortBy, setSortBy] = useState<'year_desc' | 'year_asc' | 'subject_asc' | 'questions_desc'>('year_desc');
+  const [groupBy, setGroupBy] = useState<'year' | 'subject' | 'none'>('year');
 
   const fetchPapers = async () => {
     setLoading(true);
@@ -225,20 +227,107 @@ export default function Papers() {
   };
 
   const filteredPapers = papers.filter(paper => {
-    const searchLower = search.toLowerCase();
-    const matchesSearch = (paper.subject && paper.subject.toLowerCase().includes(searchLower)) || 
-                          (paper.paper_number && paper.paper_number.toString().includes(searchLower));
+    // Multi-token search across subject, year, paper_number, curriculum, session, variant, grade_level
+    if (search.trim()) {
+      const tokens = search.toLowerCase().trim().split(/\s+/);
+      const searchCorpus = [
+        paper.subject,
+        paper.curriculum,
+        paper.grade_level,
+        paper.year?.toString(),
+        paper.paper_number?.toString(),
+        `paper ${paper.paper_number}`,
+        `p${paper.paper_number}`,
+        paper.session,
+        paper.variant?.toString(),
+        paper.variant ? `var ${paper.variant}` : '',
+        paper.variant ? `v${paper.variant}` : ''
+      ].filter(Boolean).join(' ').toLowerCase();
+
+      const allTokensMatch = tokens.every(token => searchCorpus.includes(token));
+      if (!allTokensMatch) return false;
+    }
     
     const matchesCurriculum = curriculumFilter === 'All' || paper.curriculum === curriculumFilter;
     const matchesSubject = subjectFilter === 'All' || paper.subject === subjectFilter;
-    const matchesYear = yearFilter === 'All' || paper.year.toString() === yearFilter;
+    const matchesYear = yearFilter === 'All' || paper.year?.toString() === yearFilter;
     
-    return matchesSearch && matchesCurriculum && matchesSubject && matchesYear;
+    return matchesCurriculum && matchesSubject && matchesYear;
+  }).sort((a, b) => {
+    if (sortBy === 'year_desc') {
+      const diff = (b.year || 0) - (a.year || 0);
+      if (diff !== 0) return diff;
+      const sDiff = (a.subject || '').localeCompare(b.subject || '');
+      if (sDiff !== 0) return sDiff;
+      return (a.paper_number || 0) - (b.paper_number || 0);
+    }
+    if (sortBy === 'year_asc') {
+      const diff = (a.year || 0) - (b.year || 0);
+      if (diff !== 0) return diff;
+      const sDiff = (a.subject || '').localeCompare(b.subject || '');
+      if (sDiff !== 0) return sDiff;
+      return (a.paper_number || 0) - (b.paper_number || 0);
+    }
+    if (sortBy === 'subject_asc') {
+      const sDiff = (a.subject || '').localeCompare(b.subject || '');
+      if (sDiff !== 0) return sDiff;
+      return (b.year || 0) - (a.year || 0);
+    }
+    if (sortBy === 'questions_desc') {
+      return (b.question_count || 0) - (a.question_count || 0);
+    }
+    return 0;
   });
 
   // Extract unique subjects and years for filters
-  const uniqueSubjects = Array.from(new Set(papers.map(p => p.subject))).filter(Boolean);
+  const uniqueSubjects = Array.from(new Set(papers.map(p => p.subject))).filter(Boolean).sort();
   const uniqueYears = Array.from(new Set(papers.map(p => p.year))).filter(Boolean).sort((a: any, b: any) => b - a);
+
+  // Group papers for clean mobile section arrangement
+  const groupedPapers: { title: string; subtitle?: string; count: number; items: any[] }[] = [];
+  if (groupBy === 'year') {
+    const yearMap = new Map<string, any[]>();
+    filteredPapers.forEach(p => {
+      const y = p.year ? `${p.year}` : 'Unknown Year';
+      if (!yearMap.has(y)) yearMap.set(y, []);
+      yearMap.get(y)!.push(p);
+    });
+    const sortedYears = Array.from(yearMap.keys()).sort((a, b) => {
+      if (sortBy === 'year_asc') return (parseInt(a) || 0) - (parseInt(b) || 0);
+      return (parseInt(b) || 0) - (parseInt(a) || 0);
+    });
+    sortedYears.forEach(y => {
+      groupedPapers.push({
+        title: y,
+        subtitle: `${yearMap.get(y)!.length} ${yearMap.get(y)!.length === 1 ? 'Exam Paper' : 'Exam Papers'}`,
+        count: yearMap.get(y)!.length,
+        items: yearMap.get(y)!
+      });
+    });
+  } else if (groupBy === 'subject') {
+    const subMap = new Map<string, any[]>();
+    filteredPapers.forEach(p => {
+      const s = p.subject || 'Other Subjects';
+      if (!subMap.has(s)) subMap.set(s, []);
+      subMap.get(s)!.push(p);
+    });
+    const sortedSubs = Array.from(subMap.keys()).sort();
+    sortedSubs.forEach(s => {
+      groupedPapers.push({
+        title: s,
+        subtitle: `${subMap.get(s)!.length} ${subMap.get(s)!.length === 1 ? 'Paper' : 'Papers'}`,
+        count: subMap.get(s)!.length,
+        items: subMap.get(s)!
+      });
+    });
+  } else {
+    groupedPapers.push({
+      title: 'All Papers',
+      subtitle: `${filteredPapers.length} ${filteredPapers.length === 1 ? 'Paper' : 'Papers'}`,
+      count: filteredPapers.length,
+      items: filteredPapers
+    });
+  }
 
   return (
     <div className="max-w-7xl mx-auto space-y-5 sm:space-y-6">
@@ -295,187 +384,337 @@ export default function Papers() {
         </div>
       )}
 
-      {/* Toolbar */}
-      <div className="bg-surface border border-border rounded-3xl p-3 sm:p-4 flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
-        <div className="relative w-full md:flex-1 md:min-w-[200px]">
-          <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-textMuted" />
-          <input
-            type="text"
-            placeholder="Search papers by subject, year..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 bg-background border border-border rounded-2xl text-xs sm:text-sm text-text focus:outline-none focus:border-primary transition-colors"
-          />
+      {/* Toolbar & Search */}
+      <div className="space-y-3">
+        <div className="bg-surface border border-border rounded-3xl p-3 sm:p-4 space-y-3 shadow-sm">
+          {/* Search Input Row */}
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-textMuted" />
+              <input
+                type="text"
+                placeholder="Search by subject, year (e.g. '2024 Math', 'Cambridge P2')..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full pl-9 pr-9 py-2.5 bg-background border border-border rounded-2xl text-xs sm:text-sm text-text focus:outline-none focus:border-primary transition-colors"
+              />
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-textMuted hover:text-text p-1 rounded-full cursor-pointer"
+                  title="Clear search"
+                >
+                  <CloseIcon className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            {/* Quick reset if any filter active */}
+            {(search || curriculumFilter !== 'All' || subjectFilter !== 'All' || yearFilter !== 'All') && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearch('');
+                  setCurriculumFilter('All');
+                  setSubjectFilter('All');
+                  setYearFilter('All');
+                }}
+                className="px-3 py-2.5 rounded-2xl bg-border/40 hover:bg-border text-textMuted hover:text-text text-xs font-semibold shrink-0 transition-colors cursor-pointer"
+              >
+                Reset
+              </button>
+            )}
+          </div>
+
+          {/* Quick Curriculum Filter Pills */}
+          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
+            <span className="text-[11px] font-semibold text-textMuted uppercase tracking-wider shrink-0 mr-1">Board:</span>
+            {['All', 'ZIMSEC', 'Cambridge'].map((curr) => {
+              const isActive = curriculumFilter === curr;
+              return (
+                <button
+                  key={curr}
+                  type="button"
+                  onClick={() => setCurriculumFilter(curr)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all shrink-0 cursor-pointer ${
+                    isActive
+                      ? 'bg-primary text-white shadow-sm shadow-primary/25'
+                      : 'bg-background hover:bg-border/50 text-textMuted border border-border'
+                  }`}
+                >
+                  {curr === 'All' ? 'All Boards' : curr}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Quick Year Filter Horizontal Pill Bar */}
+          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
+            <span className="text-[11px] font-semibold text-textMuted uppercase tracking-wider shrink-0 mr-1 flex items-center gap-1">
+              <Calendar className="w-3 h-3 text-primary" />
+              Year:
+            </span>
+            <button
+              type="button"
+              onClick={() => setYearFilter('All')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all shrink-0 cursor-pointer ${
+                yearFilter === 'All'
+                  ? 'bg-primary text-white shadow-sm shadow-primary/25'
+                  : 'bg-background hover:bg-border/50 text-textMuted border border-border'
+              }`}
+            >
+              All Years
+            </button>
+            {uniqueYears.map((yr) => {
+              const isActive = yearFilter === yr.toString();
+              return (
+                <button
+                  key={yr as string}
+                  type="button"
+                  onClick={() => setYearFilter(yr.toString())}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all shrink-0 cursor-pointer ${
+                    isActive
+                      ? 'bg-primary text-white shadow-sm shadow-primary/25'
+                      : 'bg-background hover:bg-border/50 text-textMuted border border-border'
+                  }`}
+                >
+                  {yr as string}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Subject Dropdown & Arrangement / Sorting Controls */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-2 border-t border-border/60">
+            {/* Subject Selector */}
+            <div className="col-span-2 sm:col-span-1">
+              <select
+                className="w-full bg-background border border-border text-text rounded-2xl px-3 py-2 text-xs sm:text-sm focus:outline-none focus:border-primary cursor-pointer truncate"
+                value={subjectFilter}
+                onChange={(e) => setSubjectFilter(e.target.value)}
+              >
+                <option value="All">All Subjects ({uniqueSubjects.length})</option>
+                {uniqueSubjects.map((sub) => (
+                  <option key={sub as string} value={sub as string}>{sub as string}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Arrange / Group By */}
+            <div>
+              <select
+                className="w-full bg-background border border-border text-text rounded-2xl px-3 py-2 text-xs sm:text-sm focus:outline-none focus:border-primary cursor-pointer truncate"
+                value={groupBy}
+                onChange={(e) => setGroupBy(e.target.value as any)}
+              >
+                <option value="year">Group: By Year</option>
+                <option value="subject">Group: By Subject</option>
+                <option value="none">Group: Flat List</option>
+              </select>
+            </div>
+
+            {/* Sort By */}
+            <div>
+              <select
+                className="w-full bg-background border border-border text-text rounded-2xl px-3 py-2 text-xs sm:text-sm focus:outline-none focus:border-primary cursor-pointer truncate"
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as any)}
+              >
+                <option value="year_desc">Sort: Newest Year</option>
+                <option value="year_asc">Sort: Oldest Year</option>
+                <option value="subject_asc">Sort: Subject (A-Z)</option>
+                <option value="questions_desc">Sort: Most Questions</option>
+              </select>
+            </div>
+          </div>
         </div>
-        
-        <div className="grid grid-cols-3 gap-2 w-full md:w-auto">
-          <select 
-            className="bg-background border border-border text-text rounded-2xl px-2.5 sm:px-4 py-2 text-xs sm:text-sm focus:outline-none focus:border-primary cursor-pointer truncate"
-            value={curriculumFilter}
-            onChange={(e) => setCurriculumFilter(e.target.value)}
-          >
-            <option value="All">Curriculum: All</option>
-            <option value="ZIMSEC">ZIMSEC</option>
-            <option value="Cambridge">Cambridge</option>
-          </select>
-          <select 
-            className="bg-background border border-border text-text rounded-2xl px-2.5 sm:px-4 py-2 text-xs sm:text-sm focus:outline-none focus:border-primary cursor-pointer truncate"
-            value={subjectFilter}
-            onChange={(e) => setSubjectFilter(e.target.value)}
-          >
-            <option value="All">Subject: All</option>
-            {uniqueSubjects.map(sub => (
-              <option key={sub as string} value={sub as string}>{sub as string}</option>
-            ))}
-          </select>
-          <select 
-            className="bg-background border border-border text-text rounded-2xl px-2.5 sm:px-4 py-2 text-xs sm:text-sm focus:outline-none focus:border-primary cursor-pointer truncate"
-            value={yearFilter}
-            onChange={(e) => setYearFilter(e.target.value)}
-          >
-            <option value="All">Year: All</option>
-            {uniqueYears.map(yr => (
-              <option key={yr as string} value={yr as string}>{yr as string}</option>
-            ))}
-          </select>
+
+        {/* Results Counter & Arrangement Indicator */}
+        <div className="flex items-center justify-between text-xs text-textMuted px-2">
+          <span>
+            Found <strong className="text-text font-bold">{filteredPapers.length}</strong> {filteredPapers.length === 1 ? 'exam paper' : 'exam papers'}
+            {search ? ` matching "${search}"` : ''}
+          </span>
+          <span className="hidden sm:inline">
+            Arranged by {groupBy === 'year' ? 'Exam Year' : groupBy === 'subject' ? 'Subject' : 'Default'}
+          </span>
         </div>
       </div>
 
       {/* Mobile Card List (Visible on mobile/tablet < lg) */}
-      <div className="block lg:hidden space-y-3">
+      <div className="block lg:hidden space-y-5">
         {loading ? (
           <div className="bg-surface border border-border rounded-3xl p-8 text-center text-textMuted text-sm">
             Loading papers...
           </div>
         ) : filteredPapers.length === 0 ? (
-          <div className="bg-surface border border-border rounded-3xl p-8 text-center text-textMuted text-sm">
-            No papers found matching your criteria.
+          <div className="bg-surface border border-border rounded-3xl p-8 text-center text-textMuted text-sm space-y-2">
+            <BookOpen className="w-8 h-8 text-textMuted mx-auto opacity-40" />
+            <p className="font-semibold text-text">No papers found</p>
+            <p className="text-xs">Try adjusting your search terms, year, or curriculum filter.</p>
           </div>
         ) : (
-          filteredPapers.map((paper) => (
-            <div key={paper.id} className="bg-surface border border-border rounded-3xl p-4 space-y-3 shadow-sm hover:border-primary/40 transition-colors">
-              {/* Top row: Subject, curriculum badge, paper year */}
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-2xl flex items-center justify-center bg-primary/10 border border-primary/20 shrink-0">
-                    <BookOpen className="w-5 h-5 text-primary" />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-text text-base leading-tight">{paper.subject}</h3>
-                    <p className="text-xs text-textMuted mt-0.5">
-                      {paper.curriculum} • {paper.grade_level} • Paper {paper.paper_number}
-                      {paper.variant ? ` (Var ${paper.variant})` : ''}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="text-right shrink-0">
-                  <span className="inline-block px-2.5 py-1 rounded-xl text-xs font-semibold bg-background border border-border text-text">
-                    {paper.year} {paper.session ? `(${paper.session})` : ''}
-                  </span>
-                </div>
-              </div>
-
-              {/* Status / Feature Tags */}
-              <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-                {paper.type === 'ms' ? (
-                  <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-[11px] font-medium bg-success/10 text-success border border-success/20">
-                    Marking Scheme
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-[11px] font-medium bg-primary/10 text-primary border border-primary/20">
-                    Question Paper
-                  </span>
-                )}
-
-                {paper.ingestion_jobs && paper.ingestion_jobs.length > 0 && (
-                  <span className={`inline-flex items-center px-2 py-0.5 rounded-lg text-[11px] font-medium ${
-                    paper.ingestion_jobs[0].status === 'completed' ? 'bg-success/10 text-success border border-success/20' :
-                    paper.ingestion_jobs[0].status === 'failed' ? 'bg-error/10 text-error border border-error/20' :
-                    'bg-warning/10 text-warning border border-warning/20'
-                  }`}>
-                    {paper.ingestion_jobs[0].status.charAt(0).toUpperCase() + paper.ingestion_jobs[0].status.slice(1)}
-                    {paper.question_count > 0 ? ` (${paper.question_count} Qs)` : ''}
-                  </span>
-                )}
-
-                {paper.pdf_url && (
-                  <a
-                    href={paper.pdf_url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-medium text-primary bg-primary/5 border border-primary/20 hover:bg-primary/10 transition-colors"
-                  >
-                    <span>View PDF</span>
-                    <ExternalLink className="w-3 h-3 opacity-70" />
-                  </a>
-                )}
-              </div>
-
-              {/* Action Buttons */}
-              <div className="pt-2 border-t border-border/60 flex flex-col gap-2">
-                {/* Primary Action Button: Mark Paper */}
-                <button
-                  type="button"
-                  onClick={() => setSelectedPaperForMarking(paper)}
-                  className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-2xl text-xs font-bold bg-primary hover:bg-primaryHover text-white transition-all shadow-md shadow-primary/20 cursor-pointer"
-                >
-                  <Sparkles className="w-4 h-4" />
-                  <span>{isStudent ? 'Mark My Paper with AI' : 'Mark Students Papers'}</span>
-                  {paper.marked_count > 0 && (
-                    <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] bg-white/20 text-white font-bold">
-                      {paper.marked_count} marked
+          groupedPapers.map((group) => (
+            <div key={group.title} className="space-y-3">
+              {/* Group Section Header */}
+              {groupBy !== 'none' && (
+                <div className="flex items-center justify-between px-1.5 pt-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-sm sm:text-base text-text flex items-center gap-1.5">
+                      {groupBy === 'year' ? (
+                        <Calendar className="w-4 h-4 text-primary" />
+                      ) : (
+                        <BookOpen className="w-4 h-4 text-primary" />
+                      )}
+                      <span>{group.title}</span>
                     </span>
-                  )}
-                </button>
-
-                {/* Secondary Action Row: Scheme, View Details, Delete */}
-                <div className="flex items-center gap-2">
-                  {paper.solution_count > 0 ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setViewingPaperId(paper.id);
-                        setInitialModalTab('scheme');
-                      }}
-                      className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-semibold bg-success/15 text-success border border-success/30 hover:bg-success/25 transition-all cursor-pointer"
-                    >
-                      <FileCheck className="w-3.5 h-3.5" />
-                      <span>Scheme ({paper.solution_count})</span>
-                    </button>
-                  ) : paper.mark_scheme_url ? (
-                    <a
-                      href={paper.mark_scheme_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-medium bg-background border border-border text-text hover:bg-border/40 transition-colors"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5 text-textMuted" />
-                      <span>Scheme PDF</span>
-                    </a>
-                  ) : null}
-
-                  <button
-                    onClick={() => {
-                      setViewingPaperId(paper.id);
-                      setInitialModalTab('questions');
-                    }}
-                    className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-medium bg-background hover:bg-border/50 text-text border border-border transition-colors cursor-pointer"
-                  >
-                    <Eye className="w-3.5 h-3.5" />
-                    <span>Questions</span>
-                  </button>
-
-                  {!isStudent && (
-                    <button
-                      onClick={() => handleDelete(paper.id)}
-                      className="p-2 text-textMuted hover:text-error hover:bg-error/10 rounded-xl transition-colors cursor-pointer border border-border"
-                      title="Delete Paper"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-primary/10 text-primary border border-primary/20">
+                      {group.count}
+                    </span>
+                  </div>
+                  {group.subtitle && (
+                    <span className="text-[11px] text-textMuted font-medium">{group.subtitle}</span>
                   )}
                 </div>
+              )}
+
+              {/* Papers inside this group */}
+              <div className="space-y-3">
+                {group.items.map((paper) => (
+                  <div key={paper.id} className="bg-surface border border-border rounded-3xl p-3.5 sm:p-4 space-y-3 shadow-sm hover:border-primary/40 transition-colors">
+                    {/* Top row: Subject, curriculum badge, paper year */}
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl flex items-center justify-center bg-primary/10 border border-primary/20 shrink-0">
+                          <BookOpen className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
+                        </div>
+                        <div className="min-w-0">
+                          <h3 className="font-bold text-text text-sm sm:text-base leading-tight truncate">{paper.subject}</h3>
+                          <div className="flex items-center gap-1.5 text-[11px] text-textMuted mt-0.5 flex-wrap">
+                            <span className={`px-1.5 py-0.2 rounded font-semibold ${
+                              paper.curriculum === 'Cambridge' ? 'bg-blue-500/10 text-blue-400' : 'bg-emerald-500/10 text-emerald-400'
+                            }`}>
+                              {paper.curriculum}
+                            </span>
+                            <span>•</span>
+                            <span>{paper.grade_level || 'O-Level'}</span>
+                            <span>•</span>
+                            <span className="font-medium text-text">Paper {paper.paper_number}</span>
+                            {paper.variant && <span className="text-textMuted">(Var {paper.variant})</span>}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="text-right shrink-0">
+                        <span className="inline-block px-2.5 py-1 rounded-xl text-xs font-bold bg-background border border-border text-text shadow-2xs">
+                          {paper.year} {paper.session ? `(${paper.session})` : ''}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Status / Feature Tags */}
+                    <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                      {paper.question_count > 0 ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] font-semibold bg-primary/10 text-primary border border-primary/20">
+                          {paper.question_count} Questions
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] font-semibold bg-amber-500/10 text-amber-500 border border-amber-500/20">
+                          Pending Ingestion
+                        </span>
+                      )}
+
+                      {paper.solution_count > 0 ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] font-semibold bg-success/15 text-success border border-success/30">
+                          Mark Scheme Available ({paper.solution_count})
+                        </span>
+                      ) : paper.mark_scheme_url ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                          Scheme PDF Attached
+                        </span>
+                      ) : null}
+
+                      {paper.pdf_url && (
+                        <a
+                          href={paper.pdf_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-medium text-primary bg-primary/5 border border-primary/20 hover:bg-primary/10 transition-colors ml-auto"
+                        >
+                          <span>PDF</span>
+                          <ExternalLink className="w-2.5 h-2.5 opacity-70" />
+                        </a>
+                      )}
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div className="pt-2 border-t border-border/60 flex flex-col gap-2">
+                      {/* Primary Action Button: Mark Paper */}
+                      <button
+                        type="button"
+                        onClick={() => setSelectedPaperForMarking(paper)}
+                        className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-2xl text-xs font-bold bg-primary hover:bg-primaryHover text-white transition-all shadow-md shadow-primary/20 cursor-pointer"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>{isStudent ? 'Mark My Paper with AI' : 'Mark Students Papers'}</span>
+                        {paper.marked_count > 0 && (
+                          <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] bg-white/20 text-white font-bold">
+                            {paper.marked_count} marked
+                          </span>
+                        )}
+                      </button>
+
+                      {/* Secondary Action Row: Scheme, View Details, Delete */}
+                      <div className="flex items-center gap-2">
+                        {paper.solution_count > 0 ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setViewingPaperId(paper.id);
+                              setInitialModalTab('scheme');
+                            }}
+                            className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-semibold bg-success/15 text-success border border-success/30 hover:bg-success/25 transition-all cursor-pointer"
+                          >
+                            <FileCheck className="w-3.5 h-3.5" />
+                            <span>Scheme ({paper.solution_count})</span>
+                          </button>
+                        ) : paper.mark_scheme_url ? (
+                          <a
+                            href={paper.mark_scheme_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-medium bg-background border border-border text-text hover:bg-border/40 transition-colors"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5 text-textMuted" />
+                            <span>Scheme PDF</span>
+                          </a>
+                        ) : null}
+
+                        <button
+                          onClick={() => {
+                            setViewingPaperId(paper.id);
+                            setInitialModalTab('questions');
+                          }}
+                          className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-medium bg-background hover:bg-border/50 text-text border border-border transition-colors cursor-pointer"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>View Questions</span>
+                        </button>
+
+                        {!isStudent && (
+                          <button
+                            onClick={() => handleDelete(paper.id)}
+                            className="p-2 text-textMuted hover:text-error hover:bg-error/10 rounded-xl transition-colors cursor-pointer border border-border shrink-0"
+                            title="Delete Paper"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           ))

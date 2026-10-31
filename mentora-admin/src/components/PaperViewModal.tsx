@@ -97,34 +97,34 @@ const QuestionCard = ({
   onOpenScheme?: (questionNumber: string) => void;
 }) => {
   return (
-    <div className="bg-surface border border-border rounded-2xl p-6 shadow-sm">
-      <div className="flex items-start justify-between mb-4">
-        <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
-            <span className="font-bold text-primary text-lg">{q.question_number}</span>
+    <div className="bg-surface border border-border rounded-2xl sm:rounded-3xl p-3.5 sm:p-6 shadow-sm">
+      <div className="flex items-start justify-between gap-2 mb-3 sm:mb-4">
+        <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+          <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+            <span className="font-bold text-primary text-base sm:text-lg">{q.question_number}</span>
           </div>
-          <div>
-            <div className="flex items-center space-x-2 text-xs font-medium mb-1">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-1 sm:gap-2 text-xs font-medium">
               {q.section && String(q.section).trim() && (
-                <span className="px-2 py-0.5 bg-primary/10 text-primary rounded-lg flex items-center">
+                <span className="px-2 py-0.5 bg-primary/10 text-primary rounded-lg flex items-center text-[10px] sm:text-xs">
                   <Layers className="w-3 h-3 mr-1" />
-                  Section {q.section}
+                  Sec {q.section}
                 </span>
               )}
               {q.topic && (
-                <span className="px-2 py-0.5 bg-blue-500/10 text-blue-500 rounded-lg flex items-center">
+                <span className="px-2 py-0.5 bg-blue-500/10 text-blue-500 rounded-lg flex items-center text-[10px] sm:text-xs">
                   <Layers className="w-3 h-3 mr-1" />
                   {q.topic}
                 </span>
               )}
               {q.difficulty && (
-                <span className="px-2 py-0.5 bg-purple-500/10 text-purple-500 rounded-lg flex items-center">
+                <span className="px-2 py-0.5 bg-purple-500/10 text-purple-500 rounded-lg flex items-center text-[10px] sm:text-xs">
                   <Target className="w-3 h-3 mr-1" />
                   {q.difficulty}
                 </span>
               )}
               {q.question_parts && q.question_parts.length > 0 && (
-                <span className="px-2 py-0.5 bg-amber-500/10 text-amber-500 rounded-lg flex items-center">
+                <span className="px-2 py-0.5 bg-amber-500/10 text-amber-500 rounded-lg flex items-center text-[10px] sm:text-xs">
                   <ListTree className="w-3 h-3 mr-1" />
                   {(() => {
                     const roots = q.question_parts.filter((p: any) => !p.parent_part_id).length;
@@ -137,27 +137,27 @@ const QuestionCard = ({
           </div>
         </div>
         {q.marks && (
-          <span className="font-medium text-textMuted bg-background px-3 py-1 rounded-xl border border-border">
+          <span className="font-semibold text-textMuted bg-background px-2.5 py-1 rounded-xl border border-border text-xs sm:text-sm shrink-0">
             [{q.marks} marks]
           </span>
         )}
       </div>
 
-      <p className="text-text text-base leading-relaxed mb-6 whitespace-pre-wrap">
+      <p className="text-text text-sm sm:text-base leading-relaxed mb-4 sm:mb-6 whitespace-pre-wrap">
         {q.content_text}
       </p>
 
       {/* Question Assets */}
       {q.question_assets?.filter((a: any) => !a.part_id).map((asset: any) => (
-        <div key={asset.id} className="mb-6 rounded-xl overflow-hidden border border-border bg-background p-2">
-          <span className="text-xs text-textMuted uppercase font-medium ml-2 mb-2 block">{asset.asset_type}</span>
+        <div key={asset.id} className="mb-4 sm:mb-6 rounded-xl overflow-hidden border border-border bg-background p-1.5 sm:p-2">
+          <span className="text-[10px] sm:text-xs text-textMuted uppercase font-medium ml-1.5 mb-1.5 block">{asset.asset_type}</span>
           {asset.storage_path ? (
-            <div className="bg-white rounded-lg p-4 mb-2 flex justify-center">
-              <img src={asset.storage_path} alt={asset.ai_description || 'Question Asset'} className="max-w-full max-h-[450px] object-contain rounded-md shadow-sm" />
+            <div className="bg-white rounded-lg p-2 sm:p-4 mb-2 flex justify-center">
+              <img src={asset.storage_path} alt={asset.ai_description || 'Question Asset'} className="max-w-full max-h-56 sm:max-h-[450px] object-contain rounded-md shadow-xs" />
             </div>
           ) : null}
           {asset.ai_description && (
-            <div className="bg-surface p-3 rounded-lg text-sm text-text italic">
+            <div className="bg-surface p-2.5 sm:p-3 rounded-lg text-xs sm:text-sm text-text italic">
               [Asset Description: {asset.ai_description}]
             </div>
           )}
@@ -165,17 +165,17 @@ const QuestionCard = ({
       ))}
 
       {(!q.question_assets || q.question_assets.length === 0) && q.content_images?.map((imgUrl: string, idx: number) => (
-        <div key={idx} className="mb-6 rounded-xl overflow-hidden border border-border bg-background p-2">
-          <span className="text-xs text-textMuted uppercase font-medium ml-2 mb-2 block">diagram</span>
-          <div className="bg-white rounded-lg p-4 mb-2 flex justify-center">
-            <img src={imgUrl} alt={`Question diagram ${idx + 1}`} className="max-w-full max-h-[450px] object-contain rounded-md shadow-sm" />
+        <div key={idx} className="mb-4 sm:mb-6 rounded-xl overflow-hidden border border-border bg-background p-1.5 sm:p-2">
+          <span className="text-[10px] sm:text-xs text-textMuted uppercase font-medium ml-1.5 mb-1.5 block">diagram</span>
+          <div className="bg-white rounded-lg p-2 sm:p-4 mb-2 flex justify-center">
+            <img src={imgUrl} alt={`Question diagram ${idx + 1}`} className="max-w-full max-h-56 sm:max-h-[450px] object-contain rounded-md shadow-xs" />
           </div>
         </div>
       ))}
 
       {/* Sub parts */}
       {q.question_parts && q.question_parts.length > 0 && (
-        <div className="space-y-4 pl-0 sm:pl-4">
+        <div className="space-y-3 sm:space-y-4 pl-0">
           {sortParts(q.question_parts.filter((p: any) => !p.parent_part_id))
             .map((part: any) => (
             <RecursivePart key={part.id} part={part} allParts={q.question_parts} allAssets={q.question_assets || []} />
@@ -185,16 +185,16 @@ const QuestionCard = ({
 
       {/* Quick Solution Peek button if solution exists */}
       {q.solution && (
-        <div className="mt-5 pt-4 border-t border-border/60 flex items-center justify-between">
+        <div className="mt-4 sm:mt-5 pt-3 sm:pt-4 border-t border-border/60 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <span className="text-xs font-medium text-success flex items-center gap-1.5">
-            <CheckCircle2 className="w-3.5 h-3.5" />
-            Official Marking Scheme & Worked Solution Available
+            <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+            <span>Marking Scheme & Worked Solution Available</span>
           </span>
           {onOpenScheme && (
             <button
               type="button"
               onClick={() => onOpenScheme(String(q.question_number))}
-              className="text-xs font-semibold text-primary hover:underline flex items-center gap-1 cursor-pointer"
+              className="text-xs font-semibold text-primary hover:underline flex items-center gap-1 cursor-pointer self-start sm:self-auto"
             >
               <span>View Marking Scheme</span>
               <ChevronRight className="w-3.5 h-3.5" />
@@ -211,24 +211,24 @@ const RecursivePart = ({ part, allParts, allAssets }: { part: any, allParts: any
 
   return (
     <div className="pt-2">
-      <div className="flex items-start">
-        <span className="font-medium text-text mr-3 mt-0.5 shrink-0">({cleanPartLabel(part.part_label)})</span>
-        <div className="flex-1">
-          <p className="text-text text-sm leading-relaxed whitespace-pre-wrap">{part.content_text}</p>
+      <div className="flex items-start gap-1.5 sm:gap-2.5">
+        <span className="font-bold text-primary text-xs sm:text-sm mt-0.5 shrink-0">({cleanPartLabel(part.part_label)})</span>
+        <div className="flex-1 min-w-0">
+          <p className="text-text text-xs sm:text-sm leading-relaxed whitespace-pre-wrap">{part.content_text}</p>
           
           {/* Part Assets */}
           {allAssets?.filter((a: any) => a.part_id === part.id).map((asset: any) => (
-            <div key={asset.id} className="mt-3 mb-2 rounded-lg overflow-hidden border border-border bg-background p-2">
-              <span className="text-xs text-textMuted uppercase font-medium ml-2 mb-2 block">{asset.asset_type}</span>
+            <div key={asset.id} className="mt-2.5 mb-2 rounded-lg overflow-hidden border border-border bg-background p-1.5 sm:p-2">
+              <span className="text-[10px] sm:text-xs text-textMuted uppercase font-medium ml-1 mb-1 block">{asset.asset_type}</span>
               
               {asset.storage_path ? (
-                <div className="bg-white rounded-lg p-3 mb-2 flex justify-center">
-                  <img src={asset.storage_path} alt={asset.ai_description || 'Question Asset'} className="max-w-full max-h-[380px] object-contain rounded-md shadow-sm" />
+                <div className="bg-white rounded-lg p-2 sm:p-3 mb-1.5 flex justify-center">
+                  <img src={asset.storage_path} alt={asset.ai_description || 'Question Asset'} className="max-w-full max-h-52 sm:max-h-[380px] object-contain rounded-md shadow-xs" />
                 </div>
               ) : null}
 
               {asset.ai_description && (
-                <div className="bg-surface p-3 rounded-lg text-sm text-text italic">
+                <div className="bg-surface p-2 sm:p-2.5 rounded-lg text-xs text-text italic">
                   [Asset Description: {asset.ai_description}]
                 </div>
               )}
@@ -237,7 +237,7 @@ const RecursivePart = ({ part, allParts, allAssets }: { part: any, allParts: any
 
           {/* Recursive Children */}
           {children.length > 0 && (
-            <div className="space-y-4 mt-3 pl-2 sm:pl-4 border-l-2 border-border/50">
+            <div className="space-y-2.5 sm:space-y-3 mt-2 pl-2 sm:pl-3.5 border-l-2 border-primary/25 ml-0.5">
               {children.map(child => (
                 <RecursivePart key={child.id} part={child} allParts={allParts} allAssets={allAssets} />
               ))}
@@ -245,7 +245,7 @@ const RecursivePart = ({ part, allParts, allAssets }: { part: any, allParts: any
           )}
         </div>
         {part.marks && (
-          <span className="text-sm font-medium text-textMuted ml-4 shrink-0">
+          <span className="text-xs sm:text-sm font-semibold text-textMuted ml-1 sm:ml-3 shrink-0">
             [{part.marks}]
           </span>
         )}
@@ -452,49 +452,49 @@ export default function PaperViewModal({ paperId, initialTab = 'questions', onCl
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-background/80 backdrop-blur-sm">
-      <div className="bg-surface w-full max-w-5xl h-[92dvh] max-h-[92dvh] rounded-3xl sm:rounded-[2rem] shadow-2xl border border-border flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+      <div className="bg-surface w-full max-w-5xl h-[95dvh] max-h-[95dvh] rounded-3xl sm:rounded-[2rem] shadow-2xl border border-border flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         
         {/* Header */}
-        <div className="px-4 sm:px-8 py-4 sm:py-5 border-b border-border flex items-center justify-between shrink-0 bg-surface/50">
-          <div>
+        <div className="px-3.5 sm:px-8 py-3 sm:py-5 border-b border-border flex items-center justify-between shrink-0 bg-surface/50">
+          <div className="min-w-0 pr-2">
             <div className="flex items-center gap-2">
-              <h2 className="text-lg sm:text-2xl font-bold text-text">
+              <h2 className="text-base sm:text-2xl font-bold text-text truncate">
                 {activeTab === 'scheme' ? 'Marking Scheme Breakdown' : activeTab === 'combined' ? 'Question Paper & Marking Scheme' : 'Question Paper Breakdown'}
               </h2>
               {paper?.type === 'ms' && (
-                <span className="px-2 py-0.5 rounded-full text-[11px] sm:text-xs font-semibold bg-success/15 text-success border border-success/30">
+                <span className="px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-semibold bg-success/15 text-success border border-success/30 shrink-0">
                   Mark Scheme
                 </span>
               )}
             </div>
-            <p className="text-xs sm:text-sm text-textMuted mt-1 flex items-center gap-2 flex-wrap">
-              <span>{paper ? `${paper.subject} • ${paper.curriculum} • ${paper.year} • P${paper.paper_number} ${paper.variant ? `(Var ${paper.variant})` : ''}` : 'Loading...'}</span>
-              {totalMarks > 0 && <span className="text-[11px] sm:text-xs font-semibold px-2 py-0.5 bg-border/50 rounded-lg">Total: {totalMarks} Marks</span>}
+            <p className="text-xs sm:text-sm text-textMuted mt-0.5 flex items-center gap-1.5 flex-wrap">
+              <span className="font-medium text-text">{paper ? `${paper.subject} • ${paper.curriculum} • ${paper.year} • P${paper.paper_number}${paper.variant ? ` (Var ${paper.variant})` : ''}` : 'Loading...'}</span>
+              {totalMarks > 0 && <span className="text-[10px] sm:text-xs font-semibold px-2 py-0.5 bg-border/50 rounded-lg">Total: {totalMarks} Marks</span>}
             </p>
           </div>
           <button 
             onClick={onClose}
-            className="p-2 sm:p-2.5 hover:bg-border/50 rounded-2xl transition-colors text-textMuted hover:text-text cursor-pointer shrink-0"
+            className="p-1.5 sm:p-2.5 hover:bg-border/50 rounded-2xl transition-colors text-textMuted hover:text-text cursor-pointer shrink-0"
           >
             <X className="w-5 h-5 sm:w-6 sm:h-6" />
           </button>
         </div>
 
         {/* Navigation Tabs Bar */}
-        <div className="px-3 sm:px-8 pt-2 border-b border-border bg-surface flex items-center justify-start gap-1 sm:gap-2 shrink-0 overflow-x-auto no-scrollbar">
-          <div className="flex items-center space-x-1 sm:space-x-2">
+        <div className="px-3 sm:px-8 pt-2 border-b border-border bg-surface flex flex-col sm:flex-row sm:items-center justify-between gap-2 shrink-0">
+          <div className="flex items-center space-x-1 sm:space-x-2 overflow-x-auto no-scrollbar">
             <button
               type="button"
               onClick={() => setActiveTab('questions')}
-              className={`flex items-center gap-2 px-4 py-2.5 border-b-2 font-medium text-sm transition-all cursor-pointer ${
+              className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 sm:py-2.5 border-b-2 font-medium text-xs sm:text-sm transition-all cursor-pointer shrink-0 ${
                 activeTab === 'questions'
-                  ? 'border-primary text-primary font-semibold'
+                  ? 'border-primary text-primary font-bold'
                   : 'border-transparent text-textMuted hover:text-text'
               }`}
             >
-              <BookOpen className="w-4 h-4" />
-              <span>Questions Breakdown</span>
-              <span className="ml-1 px-2 py-0.5 rounded-full text-xs bg-primary/10 text-primary font-bold">
+              <BookOpen className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              <span>Questions</span>
+              <span className="px-1.5 py-0.2 rounded-full text-[10px] sm:text-xs bg-primary/10 text-primary font-bold">
                 {questions.length}
               </span>
             </button>
@@ -502,33 +502,33 @@ export default function PaperViewModal({ paperId, initialTab = 'questions', onCl
             <button
               type="button"
               onClick={() => setActiveTab('scheme')}
-              className={`flex items-center gap-2 px-4 py-2.5 border-b-2 font-medium text-sm transition-all cursor-pointer ${
+              className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 sm:py-2.5 border-b-2 font-medium text-xs sm:text-sm transition-all cursor-pointer shrink-0 ${
                 activeTab === 'scheme'
-                  ? 'border-success text-success font-semibold'
+                  ? 'border-success text-success font-bold'
                   : 'border-transparent text-textMuted hover:text-text'
               }`}
             >
-              <FileCheck className="w-4 h-4" />
-              <span>Marking Scheme Breakdown</span>
-              <span className={`ml-1 px-2 py-0.5 rounded-full text-xs font-bold ${
+              <FileCheck className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              <span>Mark Scheme</span>
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] sm:text-xs font-bold ${
                 solutionsCount > 0
                   ? 'bg-success/15 text-success'
                   : 'bg-amber-500/10 text-amber-500'
               }`}>
-                {solutionsCount} / {questions.length}
+                {solutionsCount}/{questions.length}
               </span>
             </button>
 
             <button
               type="button"
               onClick={() => setActiveTab('combined')}
-              className={`flex items-center gap-2 px-4 py-2.5 border-b-2 font-medium text-sm transition-all cursor-pointer ${
+              className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 sm:py-2.5 border-b-2 font-medium text-xs sm:text-sm transition-all cursor-pointer shrink-0 ${
                 activeTab === 'combined'
-                  ? 'border-purple-500 text-purple-500 font-semibold'
+                  ? 'border-purple-500 text-purple-500 font-bold'
                   : 'border-transparent text-textMuted hover:text-text'
               }`}
             >
-              <Columns className="w-4 h-4" />
+              <Columns className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               <span className="hidden sm:inline">Side-by-Side</span>
               <span className="sm:hidden">Combined</span>
             </button>
@@ -536,15 +536,15 @@ export default function PaperViewModal({ paperId, initialTab = 'questions', onCl
 
           {/* Document links & Bulk Marking quick access */}
           {paper && (
-            <div className="flex items-center gap-2 pb-2">
+            <div className="flex items-center gap-1.5 sm:gap-2 pb-2 sm:pb-0 overflow-x-auto no-scrollbar">
               <button
                 type="button"
                 onClick={() => setShowBulkMarking(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-semibold bg-primary text-white hover:bg-primaryHover transition-all cursor-pointer shadow-sm"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-primary text-white hover:bg-primaryHover transition-all cursor-pointer shadow-sm shadow-primary/20 shrink-0"
                 title={isStudent ? "Mark your handwritten working with AI" : "Mark student papers with AI"}
               >
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>{isStudent ? 'Mark My Paper' : 'Mark Students Papers'}</span>
+                <span>{isStudent ? 'Mark My Paper' : 'Mark Papers'}</span>
                 {markedCount > 0 && (
                   <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-white text-primary font-bold">
                     {markedCount}
@@ -556,7 +556,7 @@ export default function PaperViewModal({ paperId, initialTab = 'questions', onCl
                   href={paper.pdf_url}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-medium text-primary bg-primary/10 hover:bg-primary/20 transition-colors"
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-medium text-primary bg-primary/10 hover:bg-primary/20 transition-colors shrink-0"
                   title="Open Question Paper PDF"
                 >
                   <FileText className="w-3 h-3" />
@@ -569,7 +569,7 @@ export default function PaperViewModal({ paperId, initialTab = 'questions', onCl
                   href={paper.mark_scheme_url}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-medium text-success bg-success/10 hover:bg-success/20 transition-colors"
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-medium text-success bg-success/10 hover:bg-success/20 transition-colors shrink-0"
                   title="Open Marking Scheme PDF"
                 >
                   <FileCheck className="w-3 h-3" />
@@ -580,7 +580,7 @@ export default function PaperViewModal({ paperId, initialTab = 'questions', onCl
                 <button
                   type="button"
                   onClick={() => setShowMsModal(true)}
-                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-medium text-textMuted border border-dashed border-border hover:text-primary hover:border-primary transition-colors cursor-pointer"
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-medium text-textMuted border border-dashed border-border hover:text-primary hover:border-primary transition-colors cursor-pointer shrink-0"
                 >
                   <Plus className="w-3 h-3" />
                   <span>Attach MS</span>
@@ -591,7 +591,7 @@ export default function PaperViewModal({ paperId, initialTab = 'questions', onCl
         </div>
 
         {/* Content Body */}
-        <div className="flex-1 overflow-y-auto p-6 sm:p-8 bg-background space-y-6">
+        <div className="flex-1 overflow-y-auto p-3 sm:p-8 bg-background space-y-4 sm:space-y-6">
           {loading ? (
             <div className="flex items-center justify-center py-24">
               <div className="flex flex-col items-center space-y-4 text-textMuted">
@@ -883,7 +883,43 @@ export default function PaperViewModal({ paperId, initialTab = 'questions', onCl
 
               {/* QUESTIONS BREAKDOWN TAB */}
               {activeTab === 'questions' && (
-                <div className="space-y-6">
+                <div className="space-y-4 sm:space-y-6">
+                  {/* Sticky Question Jump Pill Bar */}
+                  {questions.length > 0 && (
+                    <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-2 px-1 sticky -top-3 sm:-top-8 bg-background/95 backdrop-blur-md z-10 border-b border-border/70 -mx-3 sm:-mx-8 px-3 sm:px-8">
+                      <span className="text-[10px] sm:text-xs font-bold text-textMuted uppercase tracking-wider shrink-0 mr-1 flex items-center gap-1">
+                        <Target className="w-3.5 h-3.5 text-primary" />
+                        Jump:
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedQNumber('all')}
+                        className={`px-3 py-1 rounded-xl text-xs font-semibold transition-all cursor-pointer shrink-0 ${
+                          selectedQNumber === 'all'
+                            ? 'bg-primary text-white shadow-sm shadow-primary/25'
+                            : 'bg-surface text-textMuted border border-border hover:bg-border/50'
+                        }`}
+                      >
+                        All ({questions.length})
+                      </button>
+                      {questions.map((q) => (
+                        <button
+                          key={q.id}
+                          type="button"
+                          onClick={() => setSelectedQNumber(String(q.question_number))}
+                          className={`px-2.5 py-1 rounded-xl text-xs font-semibold transition-all cursor-pointer shrink-0 flex items-center gap-1 ${
+                            selectedQNumber === String(q.question_number)
+                              ? 'bg-primary text-white shadow-sm shadow-primary/25'
+                              : 'bg-surface text-text border border-border hover:bg-border/50'
+                          }`}
+                        >
+                          <span>Q{q.question_number}</span>
+                          {q.marks && <span className="opacity-70 text-[10px]">[{q.marks}]</span>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
                   {questions.length === 0 ? (
                     <div className="text-center py-20 bg-surface rounded-2xl border border-border">
                       <BookOpen className="w-10 h-10 text-textMuted mx-auto mb-3 opacity-40" />
@@ -891,22 +927,64 @@ export default function PaperViewModal({ paperId, initialTab = 'questions', onCl
                     </div>
                   ) : (
                     (() => {
+                      const displayList = selectedQNumber === 'all'
+                        ? questions
+                        : questions.filter((q: any) => String(q.question_number) === selectedQNumber);
+
+                      if (displayList.length === 0) {
+                        return (
+                          <div className="text-center py-12 bg-surface rounded-2xl border border-border space-y-2">
+                            <p className="text-textMuted">Question {selectedQNumber} not found.</p>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedQNumber('all')}
+                              className="px-3 py-1.5 rounded-xl bg-primary text-white text-xs font-semibold cursor-pointer"
+                            >
+                              Show All Questions
+                            </button>
+                          </div>
+                        );
+                      }
+
+                      // If viewing single question, show header with reset button
+                      if (selectedQNumber !== 'all') {
+                        return (
+                          <div className="space-y-3">
+                            <div className="flex items-center justify-between px-1">
+                              <span className="text-xs font-semibold text-textMuted">
+                                Showing Question {selectedQNumber} of {questions.length}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setSelectedQNumber('all')}
+                                className="text-xs font-semibold text-primary hover:underline cursor-pointer"
+                              >
+                                ← View All Questions
+                              </button>
+                            </div>
+                            {displayList.map((q) => (
+                              <QuestionCard key={q.id} q={q} onOpenScheme={(qn) => { setSelectedQNumber(qn); setActiveTab('scheme'); }} />
+                            ))}
+                          </div>
+                        );
+                      }
+
                       // Section-grouped rendering: papers with sections (e.g. History
                       // "Section A: Core Content" / "Section B: Depth Studies") display
                       // their questions grouped under section headers; sectionless papers
-                      // render exactly as before.
+                      // render flat.
                       const sectionedQuestions = questions.filter((q: any) => q.section && String(q.section).trim());
                       const hasSections = sectionedQuestions.length > 0;
 
                       if (!hasSections) {
-                        return questions.map((q) => (
+                        return displayList.map((q) => (
                           <QuestionCard key={q.id} q={q} onOpenScheme={(qn) => { setSelectedQNumber(qn); setActiveTab('scheme'); }} />
                         ));
                       }
 
                       // Group by section preserving first-appearance order
                       const groups: { section: string; items: any[] }[] = [];
-                      questions.forEach((q: any) => {
+                      displayList.forEach((q: any) => {
                         const sec = String(q.section || '').trim();
                         let group = groups.find((g) => g.section === sec);
                         if (!group) {
@@ -915,20 +993,19 @@ export default function PaperViewModal({ paperId, initialTab = 'questions', onCl
                         }
                         group.items.push(q);
                       });
-                      // Sectionless questions (if any mixed in) render last without a header
                       const unsectioned = groups.find((g) => g.section === '');
                       const sectioned = groups.filter((g) => g.section !== '');
 
                       return (
                         <>
                           {sectioned.map((group) => (
-                            <div key={group.section} className="space-y-4">
-                              <div className="flex items-center gap-3 pt-2">
+                            <div key={group.section} className="space-y-3 sm:space-y-4">
+                              <div className="flex items-center gap-2 sm:gap-3 pt-2">
                                 <div className="h-px flex-1 bg-border" />
-                                <span className="px-4 py-1.5 rounded-xl bg-primary/10 text-primary text-sm font-bold tracking-wide uppercase border border-primary/20">
+                                <span className="px-3 sm:px-4 py-1 sm:py-1.5 rounded-xl bg-primary/10 text-primary text-xs sm:text-sm font-bold tracking-wide uppercase border border-primary/20">
                                   Section {group.section}
                                 </span>
-                                <span className="text-xs text-textMuted font-medium">
+                                <span className="text-[11px] sm:text-xs text-textMuted font-medium">
                                   {group.items.length} question{group.items.length === 1 ? '' : 's'}
                                 </span>
                                 <div className="h-px flex-1 bg-border" />
@@ -958,14 +1035,14 @@ export default function PaperViewModal({ paperId, initialTab = 'questions', onCl
                     </div>
                   ) : (
                     filteredQuestions.map((q) => (
-                      <div key={q.id} className="bg-surface border border-border rounded-2xl p-6 shadow-sm space-y-6">
+                      <div key={q.id} className="bg-surface border border-border rounded-2xl sm:rounded-3xl p-3.5 sm:p-6 shadow-sm space-y-4 sm:space-y-6">
                         {/* Header */}
                         <div className="flex items-center justify-between pb-3 border-b border-border">
                           <div className="flex items-center space-x-2">
                             <span className="w-8 h-8 rounded-lg bg-primary/10 text-primary font-bold flex items-center justify-center text-sm">
                               Q{q.question_number}
                             </span>
-                            <span className="font-bold text-text">Question {q.question_number}</span>
+                            <span className="font-bold text-text text-sm sm:text-base">Question {q.question_number}</span>
                             {q.topic && <span className="text-xs text-textMuted">• {q.topic}</span>}
                           </div>
                           {q.marks && (
@@ -976,9 +1053,9 @@ export default function PaperViewModal({ paperId, initialTab = 'questions', onCl
                         </div>
 
                         {/* 2-Column Grid */}
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 items-start">
                           {/* Left: Question Content */}
-                          <div className="space-y-4 p-4 rounded-xl bg-background border border-border">
+                          <div className="space-y-4 p-3 sm:p-4 rounded-xl bg-background border border-border">
                             <h5 className="text-xs font-bold uppercase tracking-wider text-textMuted flex items-center gap-1.5">
                               <BookOpen className="w-3.5 h-3.5 text-primary" />
                               Question Paper Content
