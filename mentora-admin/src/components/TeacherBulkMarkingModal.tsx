@@ -1345,8 +1345,8 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
           </div>
         </div>
 
-        {/* Quick Analytics Bar */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 px-6 py-3.5 bg-surface border-b border-border/80 shrink-0">
+        {/* Quick Analytics Bar (Hidden on mobile to keep interface focused and distraction-free) */}
+        <div className="hidden md:grid grid-cols-2 sm:grid-cols-4 gap-3 px-6 py-3.5 bg-surface border-b border-border/80 shrink-0">
           <div className="bg-background/60 border border-border/60 rounded-2xl p-3 flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-blue-500/10 text-blue-400 flex items-center justify-center shrink-0">
               <Users className="w-4 h-4" />

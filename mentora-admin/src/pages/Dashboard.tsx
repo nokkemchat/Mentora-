@@ -160,23 +160,133 @@ export default function Dashboard() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+      {/* Desktop Stat Cards (Hidden on mobile to keep the interface focused on core features) */}
+      <div className="hidden md:grid md:grid-cols-2 lg:grid-cols-4 gap-6">
         {statCards.map((stat, i) => {
           const Icon = stat.icon;
           return (
-            <div key={i} className="bg-surface border border-border rounded-3xl p-5 sm:p-6 hover:border-border/80 transition-colors shadow-sm">
+            <div key={i} className="bg-surface border border-border rounded-3xl p-6 hover:border-border/80 transition-colors shadow-sm">
               <div className="flex items-start justify-between">
                 <div>
                   <p className="text-xs sm:text-sm font-medium text-textMuted mb-1">{stat.label}</p>
                   <h3 className="text-2xl sm:text-3xl font-bold text-text">{stat.value}</h3>
                 </div>
-                <div className={`p-2.5 sm:p-3 rounded-2xl ${stat.bg}`}>
-                  <Icon className={`w-5 h-5 sm:w-6 sm:h-6 ${stat.color}`} />
+                <div className={`p-3 rounded-2xl ${stat.bg}`}>
+                  <Icon className={`w-6 h-6 ${stat.color}`} />
                 </div>
               </div>
             </div>
           );
         })}
+      </div>
+
+      {/* Mobile Streamlined Feature Actions (Focuses students and teachers directly on core tasks) */}
+      <div className="md:hidden space-y-3">
+        <div className="text-xs font-bold text-textMuted uppercase tracking-wider px-1">
+          {isStudent ? 'Start Learning & Practicing' : 'Core Features'}
+        </div>
+
+        {isStudent ? (
+          <>
+            <Link
+              to="/papers"
+              className="flex items-center gap-3.5 p-4 rounded-3xl bg-surface border border-border hover:border-primary/40 transition-all shadow-sm active:scale-[0.98]"
+            >
+              <div className="w-12 h-12 rounded-2xl bg-primary text-white flex items-center justify-center shrink-0 shadow-md shadow-primary/20">
+                <Sparkles className="w-6 h-6" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="font-bold text-base text-text leading-tight">Mark My Past Paper</h3>
+                <p className="text-xs text-textMuted mt-0.5 truncate">
+                  Upload handwritten answers for instant AI grading
+                </p>
+              </div>
+              <ArrowRight className="w-5 h-5 text-textMuted shrink-0" />
+            </Link>
+
+            <Link
+              to="/papers"
+              className="flex items-center gap-3.5 p-4 rounded-3xl bg-surface border border-border hover:border-primary/40 transition-all shadow-sm active:scale-[0.98]"
+            >
+              <div className="w-12 h-12 rounded-2xl bg-blue-500/10 text-blue-500 flex items-center justify-center shrink-0">
+                <FileText className="w-6 h-6" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="font-bold text-base text-text leading-tight">Past Exam Papers</h3>
+                <p className="text-xs text-textMuted mt-0.5 truncate">
+                  Explore official ZIMSEC & Cambridge question papers
+                </p>
+              </div>
+              <ArrowRight className="w-5 h-5 text-textMuted shrink-0" />
+            </Link>
+
+            <Link
+              to="/papers"
+              className="flex items-center gap-3.5 p-4 rounded-3xl bg-surface border border-border hover:border-primary/40 transition-all shadow-sm active:scale-[0.98]"
+            >
+              <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center shrink-0">
+                <CheckCircle2 className="w-6 h-6" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="font-bold text-base text-text leading-tight">Marking Schemes</h3>
+                <p className="text-xs text-textMuted mt-0.5 truncate">
+                  Step-by-step teacher worked solutions & rubrics
+                </p>
+              </div>
+              <ArrowRight className="w-5 h-5 text-textMuted shrink-0" />
+            </Link>
+          </>
+        ) : (
+          <>
+            <Link
+              to="/papers"
+              className="flex items-center gap-3.5 p-4 rounded-3xl bg-surface border border-border hover:border-primary/40 transition-all shadow-sm active:scale-[0.98]"
+            >
+              <div className="w-12 h-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                <Sparkles className="w-6 h-6" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="font-bold text-base text-text leading-tight">Grade Student Scripts</h3>
+                <p className="text-xs text-textMuted mt-0.5 truncate">
+                  AI Senior Examiner marking with red-ink annotations
+                </p>
+              </div>
+              <ArrowRight className="w-5 h-5 text-textMuted shrink-0" />
+            </Link>
+
+            <Link
+              to="/papers"
+              className="flex items-center gap-3.5 p-4 rounded-3xl bg-surface border border-border hover:border-primary/40 transition-all shadow-sm active:scale-[0.98]"
+            >
+              <div className="w-12 h-12 rounded-2xl bg-purple-500/10 text-purple-500 flex items-center justify-center shrink-0">
+                <FileText className="w-6 h-6" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="font-bold text-base text-text leading-tight">Upload Exam Papers</h3>
+                <p className="text-xs text-textMuted mt-0.5 truncate">
+                  Ingest PDFs with automatic diagram & question extraction
+                </p>
+              </div>
+              <ArrowRight className="w-5 h-5 text-textMuted shrink-0" />
+            </Link>
+
+            <Link
+              to="/courses"
+              className="flex items-center gap-3.5 p-4 rounded-3xl bg-surface border border-border hover:border-primary/40 transition-all shadow-sm active:scale-[0.98]"
+            >
+              <div className="w-12 h-12 rounded-2xl bg-blue-500/10 text-blue-500 flex items-center justify-center shrink-0">
+                <BookOpen className="w-6 h-6" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="font-bold text-base text-text leading-tight">My Courses</h3>
+                <p className="text-xs text-textMuted mt-0.5 truncate">
+                  Manage course syllabus and assignments
+                </p>
+              </div>
+              <ArrowRight className="w-5 h-5 text-textMuted shrink-0" />
+            </Link>
+          </>
+        )}
       </div>
       
       {isAdmin && (
