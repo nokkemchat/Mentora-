@@ -3,11 +3,13 @@ import {X, Sparkles, Plus, UploadCloud, Search, Trash2, Eye, CheckCircle2,
   AlertCircle, ChevronRight, ChevronLeft, Award, FileText, ArrowUp, 
   ArrowDown, RotateCcw, ZoomIn, ZoomOut, Check, HelpCircle, BookOpen, 
   Users, BarChart3, Clock, CheckCheck, RefreshCw, Layers, Maximize2, Minimize2, PanelRight, 
-  PanelRightClose, Play, Pause, SlidersHorizontal, FolderUp, FileCheck, Loader2} from 'lucide-react';
+  PanelRightClose, Play, Pause, SlidersHorizontal, FolderUp, FileCheck, Loader2, Timer} from 'lucide-react';
 import { renderPdfToPageImages } from '../lib/pdf-parser';
 import { supabase } from '../lib/supabase';
 import MarkedPaperOverlay from './MarkedPaperOverlay';
 import { ensureAssessmentAnnotations } from '../lib/annotationUtils';
+import { downloadMarkedPaperPdf } from '../lib/markedPaperPdf';
+import { useAuth } from '../context/AuthContext';
 
 interface TeacherBulkMarkingModalProps {
   paper: any;
@@ -128,7 +130,51 @@ async function fetchCompletePaperQuestionsContext(paperId: string, paperMeta: an
   }
 }
 
+/**
+ * Helper to safely upload a base64 image data string or large image URL to Supabase Storage.
+ * Returns publicUrl or null.
+ */
+async function uploadBase64ToStorage(
+  b64String: string,
+  paperId: string,
+  pageIdx?: number
+): Promise<string | null> {
+  if (!b64String || typeof b64String !== 'string') return null;
+  if (!b64String.startsWith('data:image') && b64String.length <= 500) {
+    return b64String;
+  }
+  try {
+    const b64Data = b64String.includes(',') ? b64String.split(',')[1] : b64String;
+    const byteCharacters = atob(b64Data);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let b = 0; b < byteCharacters.length; b++) {
+      byteNumbers[b] = byteCharacters.charCodeAt(b);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    const blob = new Blob([byteArray], { type: 'image/png' });
+    const suffix = typeof pageIdx === 'number' ? `page_${pageIdx + 1}` : 'primary';
+    const storagePath = `bulk_markings/${paperId}/${Date.now()}_${suffix}_${Math.random().toString(36).substring(7)}.png`;
+    const { error: upErr } = await supabase.storage
+      .from('student_attempts')
+      .upload(storagePath, blob, { contentType: 'image/png', upsert: true });
+    if (!upErr) {
+      const { data: pubData } = supabase.storage.from('student_attempts').getPublicUrl(storagePath);
+      return pubData.publicUrl;
+    }
+    console.warn('uploadBase64ToStorage storage error:', upErr);
+    return null;
+  } catch (err) {
+    console.warn('uploadBase64ToStorage error:', err);
+    return null;
+  }
+}
+
 export default function TeacherBulkMarkingModal({ paper, onClose, onPaperUpdated }: TeacherBulkMarkingModalProps) {
+  const { user, isStudent } = useAuth();
+  const defaultStudentName = user?.user_metadata?.first_name 
+    ? `${user.user_metadata.first_name} ${user.user_metadata.last_name || ''}`.trim()
+    : (user?.email ? user.email.split('@')[0] : '');
+
   const [markedPapers, setMarkedPapers] = useState<MarkedStudentPaper[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -136,7 +182,7 @@ export default function TeacherBulkMarkingModal({ paper, onClose, onPaperUpdated
   const [viewingPaper, setViewingPaper] = useState<MarkedStudentPaper | null>(null);
 
   // Upload Form State
-  const [studentName, setStudentName] = useState('');
+  const [studentName, setStudentName] = useState(defaultStudentName);
   const [studentIdNumber, setStudentIdNumber] = useState('');
   const [studentNotes, setStudentNotes] = useState('');
   const [selectedFiles, setSelectedFiles] = useState<{ file: File; preview: string; name: string }[]>([]);
@@ -145,10 +191,31 @@ export default function TeacherBulkMarkingModal({ paper, onClose, onPaperUpdated
   const queueRef = useRef<MarkingQueueItem[]>([]);
   queueRef.current = queue;
   
-  const [concurrency, setConcurrency] = useState<number>(4);
+  const [concurrency, setConcurrency] = useState<number>(2); // Default to stable 2x concurrency to prevent Edge Function 150s timeouts
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const isPausedRef = useRef(false);
   isPausedRef.current = isPaused;
+
+  // Live Batch Marking Stopwatch & Performance Timer
+  const [batchStartTime, setBatchStartTime] = useState<number | null>(null);
+  const [batchEndTime, setBatchEndTime] = useState<number | null>(null);
+  const [isBatchTiming, setIsBatchTiming] = useState(false);
+  const [elapsedSec, setElapsedSec] = useState(0);
+  const [batchTotalCount, setBatchTotalCount] = useState(0);
+
+  const formatStopwatch = (totalSec: number) => {
+    const mins = Math.floor(totalSec / 60);
+    const secs = totalSec % 60;
+    return `${mins < 10 ? "0" : ""}${mins}:${secs < 10 ? "0" : ""}${secs}`;
+  };
+
+  const formatDurationText = (totalSec: number) => {
+    const mins = Math.floor(totalSec / 60);
+    const secs = totalSec % 60;
+    if (mins === 0) return `${secs}s`;
+    return `${mins}m ${secs < 10 ? "0" : ""}${secs}s`;
+  };
 
   const [activeCount, setActiveCount] = useState(0);
   const activeWorkerIdsRef = useRef<Set<string>>(new Set());
@@ -184,11 +251,17 @@ export default function TeacherBulkMarkingModal({ paper, onClose, onPaperUpdated
     }
     setLoading(true);
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('marked_student_papers')
-        .select('id, paper_id, student_name, student_id_number, total_score, max_score, percentage, page_images, created_at')
-        .eq('paper_id', paper.id)
-        .order('created_at', { ascending: false });
+        .select('id, paper_id, student_name, student_id_number, total_score, max_score, percentage, page_images, created_by, created_at')
+        .eq('paper_id', paper.id);
+
+      // Students must ONLY see their own marked papers!
+      if (isStudent && user) {
+        query = query.or(`created_by.eq.${user.id},student_name.ilike.%${defaultStudentName}%`);
+      }
+
+      const { data, error } = await query.order('created_at', { ascending: false });
 
       if (error) throw error;
       setMarkedPapers(data || []);
@@ -200,6 +273,10 @@ export default function TeacherBulkMarkingModal({ paper, onClose, onPaperUpdated
   };
 
   const handleOpenViewer = async (paperItem: MarkedStudentPaper) => {
+    if (isStudent && user && (paperItem as any).created_by && (paperItem as any).created_by !== user.id) {
+      alert("Access denied: You can only view your own marked papers.");
+      return;
+    }
     if (paperItem.assessment_result) {
       setViewingPaper(paperItem);
       setViewerPageIdx(0);
@@ -209,12 +286,16 @@ export default function TeacherBulkMarkingModal({ paper, onClose, onPaperUpdated
     try {
       const { data, error } = await supabase
         .from('marked_student_papers')
-        .select('id, paper_id, student_name, student_id_number, total_score, max_score, percentage, page_images, marked_image_url, assessment_result, created_at')
+        .select('id, paper_id, student_name, student_id_number, total_score, max_score, percentage, page_images, marked_image_url, assessment_result, created_by, created_at')
         .eq('id', paperItem.id)
         .single();
 
       if (error) throw error;
       if (data) {
+        if (isStudent && user && data.created_by && data.created_by !== user.id) {
+          alert("Access denied: You can only view your own marked papers.");
+          return;
+        }
         setViewingPaper(data);
         setViewerPageIdx(0);
         setMarkedPapers(prev => prev.map(p => p.id === data.id ? { ...p, ...data } : p));
@@ -267,6 +348,11 @@ export default function TeacherBulkMarkingModal({ paper, onClose, onPaperUpdated
         }
       }).then(async ({ data }) => {
         if (data?.image_url) {
+          let cleanUrl = data.image_url;
+          if (cleanUrl.startsWith('data:image') || cleanUrl.length > 500) {
+            const uploaded = await uploadBase64ToStorage(cleanUrl, paper.id, viewerPageIdx);
+            if (uploaded) cleanUrl = uploaded;
+          }
           const updated = { ...viewingPaper };
           if (!updated.assessment_result.pages) {
             updated.assessment_result.pages = [];
@@ -274,9 +360,9 @@ export default function TeacherBulkMarkingModal({ paper, onClose, onPaperUpdated
           if (!updated.assessment_result.pages[viewerPageIdx]) {
             updated.assessment_result.pages[viewerPageIdx] = { original_image_url: origImg };
           }
-          updated.assessment_result.pages[viewerPageIdx].marked_image_url = data.image_url;
+          updated.assessment_result.pages[viewerPageIdx].marked_image_url = cleanUrl;
           if (viewerPageIdx === 0) {
-            updated.marked_image_url = data.image_url;
+            updated.marked_image_url = cleanUrl;
           }
           setViewingPaper(updated);
 
@@ -608,6 +694,14 @@ export default function TeacherBulkMarkingModal({ paper, onClose, onPaperUpdated
       return;
     }
 
+    // Initialize and trigger live batch timer
+    const now = Date.now();
+    setBatchStartTime(now);
+    setBatchEndTime(null);
+    setElapsedSec(0);
+    setBatchTotalCount(selected.length);
+    setIsBatchTiming(true);
+
     const newQueueItems: MarkingQueueItem[] = selected.map((item, idx) => ({
       id: `queue-${Date.now()}-${idx}-${Math.random().toString(36).substring(5)}`,
       studentName: item.studentName.trim() || `Candidate ${idx + 1}`,
@@ -644,7 +738,7 @@ export default function TeacherBulkMarkingModal({ paper, onClose, onPaperUpdated
   const resetUploadForm = () => {
     selectedFiles.forEach(f => URL.revokeObjectURL(f.preview));
     setSelectedFiles([]);
-    setStudentName('');
+    setStudentName(isStudent ? defaultStudentName : '');
     setStudentIdNumber('');
     setStudentNotes('');
     setDragOver(false);
@@ -673,6 +767,11 @@ export default function TeacherBulkMarkingModal({ paper, onClose, onPaperUpdated
       });
 
       if (data?.image_url) {
+        let cleanUrl = data.image_url;
+        if (cleanUrl.startsWith('data:image') || cleanUrl.length > 500) {
+          const uploaded = await uploadBase64ToStorage(cleanUrl, paper.id, pageIdx);
+          if (uploaded) cleanUrl = uploaded;
+        }
         const updated = { ...viewingPaper };
         if (!updated.assessment_result.pages) {
           updated.assessment_result.pages = [];
@@ -680,9 +779,9 @@ export default function TeacherBulkMarkingModal({ paper, onClose, onPaperUpdated
         if (!updated.assessment_result.pages[pageIdx]) {
           updated.assessment_result.pages[pageIdx] = { original_image_url: origImg };
         }
-        updated.assessment_result.pages[pageIdx].marked_image_url = data.image_url;
+        updated.assessment_result.pages[pageIdx].marked_image_url = cleanUrl;
         if (pageIdx === 0) {
-          updated.marked_image_url = data.image_url;
+          updated.marked_image_url = cleanUrl;
         }
         setViewingPaper(updated);
 
@@ -714,13 +813,37 @@ export default function TeacherBulkMarkingModal({ paper, onClose, onPaperUpdated
   };
 
   // Convert File to base64 fallback
-  const fileToBase64 = (file: File): Promise<string> => {
+  const fileToBase64 = (file: File | Blob): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result as string);
       reader.onerror = reject;
       reader.readAsDataURL(file);
     });
+  };
+
+  // Downscale + compress an image file before upload: 2.5MB PNGs of handwritten pages
+  // saturate the upload link — ~400KB JPEGs upload ~6x faster and stay fully legible
+  // for the vision models (max 1600px on the long side, quality 0.82).
+  const compressImageFile = async (file: File, maxDim = 1600, quality = 0.82): Promise<File | Blob> => {
+    if (!file.type.startsWith('image/') || file.size < 800_000) return file;
+    try {
+      const img = await createImageBitmap(file);
+      const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+      const w = Math.round(img.width * scale);
+      const h = Math.round(img.height * scale);
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return file;
+      ctx.drawImage(img, 0, 0, w, h);
+      const blob = await new Promise<Blob | null>(res => canvas.toBlob(res, 'image/jpeg', quality));
+      if (!blob || blob.size >= file.size) return file;
+      return new File([blob], file.name.replace(/\.png$/i, '.jpg'), { type: 'image/jpeg' });
+    } catch {
+      return file;
+    }
   };
 
   const handleQueueStudentPaper = (e: React.FormEvent) => {
@@ -783,16 +906,28 @@ export default function TeacherBulkMarkingModal({ paper, onClose, onPaperUpdated
     try {
       // Step 1: Upload images in parallel to Supabase storage bucket 'student_attempts'
       const uploadPromises = currentItem.files.map(async (fItem, i) => {
-        const ext = fItem.file.name.split('.').pop() || 'jpg';
-        const storagePath = `bulk_markings/${paper.id}/${Date.now()}_${i}_${Math.random().toString(36).substring(7)}.${ext}`;
+        // Compress before upload: large PNGs (~2.5MB each) saturate the upload link;
+        // ~400KB JPEGs upload ~6x faster and remain fully legible for marking.
+        const compressed = await compressImageFile(fItem.file);
+        const ext = (compressed instanceof File && compressed.name.includes('.') ? compressed.name.split('.').pop() : fItem.file.name.split('.').pop()) || 'jpg';
+        let fileHash = '';
+        try {
+          const ab = await (compressed instanceof File ? compressed.arrayBuffer() : (fItem.file as any).arrayBuffer?.());
+          if (ab) {
+            const digest = await crypto.subtle.digest('SHA-256', ab);
+            fileHash = Array.from(new Uint8Array(digest)).slice(0, 8).map(b => b.toString(16).padStart(2, '0')).join('');
+          }
+        } catch (_) {}
+        const pathSuffix = fileHash ? `${fileHash}_p${i}` : `${Date.now()}_${i}_${Math.random().toString(36).substring(7)}`;
+        const storagePath = `bulk_markings/${paper.id}/${pathSuffix}.${ext}`;
         try {
           const { error: uploadErr } = await supabase.storage
             .from('student_attempts')
-            .upload(storagePath, fItem.file, { cacheControl: '3600', upsert: true });
+            .upload(storagePath, compressed, { cacheControl: '3600', upsert: true });
 
           if (uploadErr) {
             console.warn('Storage upload error, using base64 fallback:', uploadErr);
-            return await fileToBase64(fItem.file);
+            return await fileToBase64(compressed);
           } else {
             const { data: pubData } = supabase.storage
               .from('student_attempts')
@@ -881,15 +1016,22 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
           });
 
           if (resp.error) {
+            const status = (resp.error as any)?.context?.status;
             const errStr = resp.error.message || String(resp.error);
-            const isRateLimit = errStr.includes('429') || errStr.toLowerCase().includes('rate limit');
-            const isTimeout = errStr.includes('504') || errStr.toLowerCase().includes('timeout');
+            const isRateLimit = status === 429 || errStr.includes('429') || errStr.toLowerCase().includes('rate limit');
+            const isTimeout = status === 546 || status === 504 || status === 502 || status === 503 ||
+                              errStr.includes('546') || errStr.includes('504') || errStr.includes('502') ||
+                              errStr.toLowerCase().includes('timeout') || errStr.toLowerCase().includes('timed out') ||
+                              errStr.toLowerCase().includes('non-2xx');
             if ((isRateLimit || isTimeout) && attempt < maxRetries) {
-              const backoffSec = Math.round(2 + attempt * 3 + Math.random() * 2);
+              const backoffSec = Math.round(3 + attempt * 4 + Math.random() * 2);
+              const retryMsg = isTimeout
+                ? `Worker timed out (${status || 546}) — cooling down for ${backoffSec}s (retry ${attempt + 1}/${maxRetries})...`
+                : `Rate limit hit — cooling down for ${backoffSec}s (retry ${attempt + 1}/${maxRetries})...`;
               setQueue(prev => prev.map(it => it.id === currentId ? {
                 ...it,
                 retries: attempt + 1,
-                stepDescription: `Rate limit hit — cooling down for ${backoffSec}s (retry ${attempt + 1}/${maxRetries})...`
+                stepDescription: retryMsg
               } : it));
               await new Promise(r => setTimeout(r, backoffSec * 1000));
               continue;
@@ -901,14 +1043,22 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
           error = null;
           break;
         } catch (callErr: any) {
+          const status = callErr?.context?.status;
           const errStr = callErr.message || String(callErr);
-          const isRateLimit = errStr.includes('429') || errStr.toLowerCase().includes('rate limit');
-          if (isRateLimit && attempt < maxRetries) {
-            const backoffSec = Math.round(2 + attempt * 3 + Math.random() * 2);
+          const isRateLimit = status === 429 || errStr.includes('429') || errStr.toLowerCase().includes('rate limit');
+          const isTimeout = status === 546 || status === 504 || status === 502 || status === 503 ||
+                            errStr.includes('546') || errStr.includes('504') || errStr.includes('502') ||
+                            errStr.toLowerCase().includes('timeout') || errStr.toLowerCase().includes('timed out') ||
+                            errStr.toLowerCase().includes('non-2xx');
+          if ((isRateLimit || isTimeout) && attempt < maxRetries) {
+            const backoffSec = Math.round(3 + attempt * 4 + Math.random() * 2);
+            const retryMsg = isTimeout
+              ? `Worker timed out (${status || 546}) — cooling down for ${backoffSec}s (retry ${attempt + 1}/${maxRetries})...`
+              : `Rate limit hit — cooling down for ${backoffSec}s (retry ${attempt + 1}/${maxRetries})...`;
             setQueue(prev => prev.map(it => it.id === currentId ? {
               ...it,
               retries: attempt + 1,
-              stepDescription: `Rate limit hit — cooling down for ${backoffSec}s (retry ${attempt + 1}/${maxRetries})...`
+              stepDescription: retryMsg
             } : it));
             await new Promise(r => setTimeout(r, backoffSec * 1000));
             continue;
@@ -935,55 +1085,32 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
         ? Math.round((totalScore / maxScore) * 100) 
         : Number(assessment.percentage ?? 0);
 
-      // Reconcile primary marked image and ensure it is uploaded to storage if base64
+      // Process and upload each page\'s marked image if returned as base64
       let primaryMarkedUrl = data?.marked_image_url || assessment.pages?.[0]?.marked_image_url || null;
-      if (primaryMarkedUrl && typeof primaryMarkedUrl === 'string' && (primaryMarkedUrl.startsWith('data:image') || primaryMarkedUrl.length > 500)) {
-        try {
-          const b64Data = primaryMarkedUrl.includes(',') ? primaryMarkedUrl.split(',')[1] : primaryMarkedUrl;
-          const byteCharacters = atob(b64Data);
-          const byteNumbers = new Array(byteCharacters.length);
-          for (let b = 0; b < byteCharacters.length; b++) {
-            byteNumbers[b] = byteCharacters.charCodeAt(b);
-          }
-          const byteArray = new Uint8Array(byteNumbers);
-          const blob = new Blob([byteArray], { type: 'image/png' });
-          const storagePath = `bulk_markings/${paper.id}/${Date.now()}_marked_${Math.random().toString(36).substring(7)}.png`;
-          const { error: upErr } = await supabase.storage
-            .from('student_attempts')
-            .upload(storagePath, blob, { contentType: 'image/png', upsert: true });
-          if (!upErr) {
-            const { data: pubData } = supabase.storage.from('student_attempts').getPublicUrl(storagePath);
-            primaryMarkedUrl = pubData.publicUrl;
-            if (assessment.pages?.[0]?.marked_image_url) {
-              assessment.pages[0].marked_image_url = pubData.publicUrl;
+
+      if (Array.isArray(assessment.pages) && assessment.pages.length > 0) {
+        for (let pIdx = 0; pIdx < assessment.pages.length; pIdx++) {
+          const pageObj = assessment.pages[pIdx];
+          const rawMarked = pageObj.marked_image_url || (pIdx === 0 ? primaryMarkedUrl : null);
+          if (rawMarked && typeof rawMarked === 'string') {
+            if (rawMarked.startsWith('data:image') || rawMarked.length > 500) {
+              const uploadedUrl = await uploadBase64ToStorage(rawMarked, paper.id, pIdx);
+              pageObj.marked_image_url = uploadedUrl;
+              if (pIdx === 0 && uploadedUrl) {
+                primaryMarkedUrl = uploadedUrl;
+              }
+            } else {
+              pageObj.marked_image_url = rawMarked;
+              if (pIdx === 0) {
+                primaryMarkedUrl = rawMarked;
+              }
             }
           } else {
-            console.warn('Could not upload marked image to storage:', upErr);
-            primaryMarkedUrl = null;
-            if (assessment.pages?.[0]?.marked_image_url) {
-              assessment.pages[0].marked_image_url = null;
-            }
-          }
-        } catch (e) {
-          console.warn('Could not upload marked image to storage:', e);
-          primaryMarkedUrl = null;
-          if (assessment.pages?.[0]?.marked_image_url) {
-            assessment.pages[0].marked_image_url = null;
+            pageObj.marked_image_url = null;
           }
         }
-      }
-
-      // Sanitize assessment pages so no huge base64 strings get saved into JSON
-      if (Array.isArray(assessment.pages)) {
-        for (const p of assessment.pages) {
-          if (p.marked_image_url && typeof p.marked_image_url === 'string' && (p.marked_image_url.startsWith('data:image') || p.marked_image_url.length > 500)) {
-            if (primaryMarkedUrl && !primaryMarkedUrl.startsWith('data:image')) {
-              p.marked_image_url = primaryMarkedUrl;
-            } else {
-              p.marked_image_url = null;
-            }
-          }
-        }
+      } else if (primaryMarkedUrl && typeof primaryMarkedUrl === 'string' && (primaryMarkedUrl.startsWith('data:image') || primaryMarkedUrl.length > 500)) {
+        primaryMarkedUrl = await uploadBase64ToStorage(primaryMarkedUrl, paper.id, 0);
       }
 
       // Reconcile canonical page images in sorted order
@@ -1004,13 +1131,14 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
         percentage: percentage,
         page_images: sortedPageImages,
         marked_image_url: primaryMarkedUrl,
-        assessment_result: assessment
+        assessment_result: assessment,
+        created_by: user?.id || null
       };
 
       const { data: inserted, error: insertErr } = await supabase
         .from('marked_student_papers')
         .insert(newRecord)
-        .select('id, paper_id, student_name, student_id_number, total_score, max_score, percentage, page_images, created_at')
+        .select('id, paper_id, student_name, student_id_number, total_score, max_score, percentage, page_images, created_by, created_at')
         .single();
 
       if (insertErr) throw insertErr;
@@ -1056,6 +1184,13 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
     if (availableSlots <= 0 || queuedItems.length === 0) return;
 
     const itemsToStart = queuedItems.slice(0, availableSlots);
+    if (itemsToStart.length > 0 && !isBatchTiming && !batchStartTime) {
+      setBatchStartTime(Date.now());
+      setBatchEndTime(null);
+      setElapsedSec(0);
+      setBatchTotalCount(currentQueue.length);
+      setIsBatchTiming(true);
+    }
     for (const item of itemsToStart) {
       activeWorkerIdsRef.current.add(item.id);
       setActiveCount(activeWorkerIdsRef.current.size);
@@ -1070,6 +1205,34 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
       });
     }
   };
+
+  // Live Stopwatch Ticker
+  useEffect(() => {
+    let interval: any = null;
+    if (isBatchTiming && batchStartTime) {
+      interval = setInterval(() => {
+        setElapsedSec(Math.floor((Date.now() - batchStartTime) / 1000));
+      }, 250);
+    }
+    return () => clearInterval(interval);
+  }, [isBatchTiming, batchStartTime]);
+
+  // Auto-stop stopwatch when all in-flight and queued items finish
+  useEffect(() => {
+    if (isBatchTiming && queue.length > 0) {
+      const inFlight = queue.filter(
+        q => q.status === "queued" || q.status === "uploading" || q.status === "marking"
+      );
+      if (inFlight.length === 0) {
+        setIsBatchTiming(false);
+        const end = Date.now();
+        setBatchEndTime(end);
+        if (batchStartTime) {
+          setElapsedSec(Math.max(1, Math.floor((end - batchStartTime) / 1000)));
+        }
+      }
+    }
+  }, [queue, isBatchTiming, batchStartTime]);
 
   useEffect(() => {
     dispatchQueue();
@@ -1127,7 +1290,7 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
             <div>
               <div className="flex items-center gap-2.5 flex-wrap">
                 <h2 className="text-xl font-bold text-text">
-                  Bulk Marking — {paper?.subject} Paper {paper?.paper_number}
+                  {isStudent ? 'AI Exam Paper Marking' : 'Bulk Marking'} — {paper?.subject} Paper {paper?.paper_number}
                 </h2>
                 <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-primary/15 text-primary border border-primary/30">
                   {paper?.curriculum || 'Exam Paper'}
@@ -1137,18 +1300,34 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                 </span>
               </div>
               <p className="text-xs text-textMuted mt-1">
-                Upload student answer sheets to automatically grade with the Mentora AI Senior Examiner against the official mark scheme.
+                {isStudent 
+                  ? 'Upload your handwritten answer sheets (photos or PDF) to automatically grade with the Mentora AI Senior Examiner against the official mark scheme.' 
+                  : 'Upload student answer sheets to automatically grade with the Mentora AI Senior Examiner against the official mark scheme.'}
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-3">
-            {activeCount > 0 && (
+            {isBatchTiming ? (
+              <div className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-bold px-3.5 py-2 rounded-2xl shadow-sm animate-pulse">
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                <span>{activeCount}/{concurrency} Workers</span>
+                <span className="w-1 h-1 rounded-full bg-amber-500/50" />
+                <Timer className="w-3.5 h-3.5 text-amber-500" />
+                <span className="font-mono text-sm tracking-wide">{formatStopwatch(elapsedSec)}</span>
+              </div>
+            ) : batchEndTime && !isBatchTiming ? (
+              <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs font-bold px-3.5 py-2 rounded-2xl shadow-sm">
+                <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                <span>Batch Done: {formatDurationText(elapsedSec)}</span>
+                <span className="hidden sm:inline text-[11px] font-normal opacity-85">({batchTotalCount || queue.length} papers)</span>
+              </div>
+            ) : activeCount > 0 ? (
               <div className="hidden sm:flex items-center gap-2 bg-primary/10 border border-primary/25 text-primary text-xs font-semibold px-3 py-2 rounded-2xl animate-pulse">
                 <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                 <span>Parallel Marking Active ({activeCount}/{concurrency} Workers)</span>
               </div>
-            )}
+            ) : null}
             <button
               onClick={() => {
                 resetUploadForm();
@@ -1157,7 +1336,7 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
               className="flex items-center gap-2 bg-primary hover:bg-primaryHover text-white px-4 py-2.5 rounded-2xl font-semibold text-sm transition-all shadow-lg shadow-primary/20 hover:scale-[1.02] cursor-pointer"
             >
               <Plus className="w-4 h-4" />
-              <span>Mark New Paper</span>
+              <span>{isStudent ? 'Submit My Paper' : 'Mark New Paper'}</span>
             </button>
             <button 
               onClick={onClose}
@@ -1176,8 +1355,12 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
               <Users className="w-4 h-4" />
             </div>
             <div>
-              <span className="text-[11px] text-textMuted font-medium block">Total Marked</span>
-              <span className="text-base font-bold text-text">{totalCount} {totalCount === 1 ? 'Student' : 'Students'}</span>
+              <span className="text-[11px] text-textMuted font-medium block">
+                {isStudent ? 'My Submissions' : 'Total Marked'}
+              </span>
+              <span className="text-base font-bold text-text">
+                {totalCount} {isStudent ? (totalCount === 1 ? 'Attempt' : 'Attempts') : (totalCount === 1 ? 'Student' : 'Students')}
+              </span>
             </div>
           </div>
 
@@ -1186,17 +1369,21 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
               <BarChart3 className="w-4 h-4" />
             </div>
             <div>
-              <span className="text-[11px] text-textMuted font-medium block">Class Average</span>
+              <span className="text-[11px] text-textMuted font-medium block">
+                {isStudent ? 'My Average' : 'Class Average'}
+              </span>
               <span className="text-base font-bold text-text">{avgScore}%</span>
             </div>
           </div>
 
           <div className="bg-background/60 border border-border/60 rounded-2xl p-3 flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-[#10b981]/10 text-[#10b981] flex items-center justify-center shrink-0">
+            <div className="w-9 h-9 rounded-xl bg-success/10 text-success flex items-center justify-center shrink-0">
               <Award className="w-4 h-4" />
             </div>
             <div>
-              <span className="text-[11px] text-textMuted font-medium block">Top Score</span>
+              <span className="text-[11px] text-textMuted font-medium block">
+                {isStudent ? 'My Best Score' : 'Top Score'}
+              </span>
               <span className="text-base font-bold text-text">{highestScore}%</span>
             </div>
           </div>
@@ -1284,7 +1471,7 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                         <SlidersHorizontal className="w-3 h-3" />
                         Workers:
                       </span>
-                      {[2, 4, 6].map((num) => (
+                      {[1, 2, 4, 6, 8, 10].map((num) => (
                         <button
                           key={num}
                           onClick={() => setConcurrency(num)}
@@ -1293,9 +1480,9 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                               ? 'bg-primary text-white shadow-sm'
                               : 'text-textMuted hover:text-text hover:bg-border/40'
                           }`}
-                          title={`Run ${num} student papers concurrently`}
+                          title={`Run ${num} student papers concurrently (Maximum 10x)`}
                         >
-                          {num}x{num === 4 ? ' ★' : ''}
+                          {num}x{num === 10 ? ' Max' : num === 4 ? ' ★' : ''}
                         </button>
                       ))}
                     </div>
@@ -1348,21 +1535,87 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                   </div>
                 </div>
 
-                {/* Batch Progress Bar */}
-                {totalCount > 1 && (
-                  <div className="bg-background/60 border border-border/60 rounded-xl p-2.5 space-y-1.5">
-                    <div className="flex items-center justify-between text-xs text-textMuted">
-                      <span className="font-medium text-text">
-                        Batch Progress: {completedItems.length} of {totalCount} Papers Graded
-                      </span>
-                      <span className="font-mono font-bold text-primary">{progressPct}%</span>
+                {/* Live Stopwatch & Performance Benchmark Banner */}
+                {(isBatchTiming || batchEndTime !== null || totalCount > 0) && (
+                  <div className={`rounded-xl p-3 border transition-all ${
+                    isBatchTiming 
+                      ? "bg-amber-500/10 border-amber-500/30" 
+                      : batchEndTime
+                        ? "bg-emerald-500/10 border-emerald-500/30"
+                        : "bg-background/60 border-border/60"
+                  }`}>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                          isBatchTiming 
+                            ? "bg-amber-500/20 text-amber-500 animate-pulse" 
+                            : batchEndTime 
+                              ? "bg-emerald-500/20 text-emerald-500" 
+                              : "bg-primary/10 text-primary"
+                        }`}>
+                          <Timer className={`w-4 h-4 ${isBatchTiming ? "animate-spin" : ""}`} style={{ animationDuration: "6s" }} />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2.5 flex-wrap">
+                            <span className="text-xs font-bold text-text">
+                              {isBatchTiming ? "Live Batch Benchmark Active" : batchEndTime ? "Batch Grading Complete!" : "Batch Benchmark Ready"}
+                            </span>
+                            <span className={`text-xs font-mono font-extrabold px-2.5 py-0.5 rounded-lg border shadow-sm ${
+                              isBatchTiming 
+                                ? "bg-amber-500/20 text-amber-600 dark:text-amber-400 border-amber-500/40 animate-pulse" 
+                                : batchEndTime 
+                                  ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border-emerald-500/40" 
+                                  : "bg-border text-textMuted border-border"
+                            }`}>
+                              ⏱️ {isBatchTiming ? `Elapsed: ${formatStopwatch(elapsedSec)}` : batchEndTime ? `Total Time: ${formatDurationText(elapsedSec)}` : `00:00`}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-textMuted mt-0.5">
+                            {isBatchTiming ? (
+                              <span>Grading {activeItems.length} students concurrently with {concurrency}x parallel workers. Timer stops automatically when all finish.</span>
+                            ) : batchEndTime ? (
+                              <span>
+                                Finished grading <strong className="text-text font-bold">{completedItems.length} papers</strong> in <strong className="text-emerald-600 dark:text-emerald-400 font-bold">{formatDurationText(elapsedSec)}</strong> (average <strong className="text-primary font-bold">{(elapsedSec / Math.max(1, completedItems.length)).toFixed(1)}s</strong> per paper at {concurrency}x concurrency).
+                              </span>
+                            ) : (
+                              <span>Timer will start as soon as papers are queued and dispatched.</span>
+                            )}
+                          </p>
+                        </div>
+                      </div>
+
+                      {batchEndTime && !isBatchTiming && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setBatchStartTime(null);
+                            setBatchEndTime(null);
+                            setElapsedSec(0);
+                          }}
+                          className="self-start sm:self-center text-[10px] text-textMuted hover:text-text px-2.5 py-1 rounded-lg border border-border/80 hover:bg-border/40 transition-colors cursor-pointer"
+                        >
+                          Reset Timer
+                        </button>
+                      )}
                     </div>
-                    <div className="w-full bg-border/60 rounded-full h-2 overflow-hidden">
-                      <div
-                        className="bg-primary h-full transition-all duration-500 rounded-full"
-                        style={{ width: `${progressPct}%` }}
-                      />
-                    </div>
+
+                    {/* Progress Bar */}
+                    {totalCount > 1 && (
+                      <div className="mt-3 pt-2.5 border-t border-border/40 space-y-1">
+                        <div className="flex items-center justify-between text-[11px] text-textMuted">
+                          <span className="font-medium text-text">Progress: {completedItems.length} of {totalCount} Papers Graded</span>
+                          <span className="font-mono font-bold text-primary">{progressPct}%</span>
+                        </div>
+                        <div className="w-full bg-border/60 rounded-full h-2 overflow-hidden">
+                          <div
+                            className={`h-full transition-all duration-500 rounded-full ${
+                              progressPct === 100 ? "bg-emerald-500" : "bg-primary"
+                            }`}
+                            style={{ width: `${progressPct}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1494,10 +1747,14 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
               <div className="w-16 h-16 rounded-3xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary mx-auto mb-4">
                 <FileText className="w-8 h-8" />
               </div>
-              <h3 className="text-lg font-bold text-text">No Marked Student Papers Yet</h3>
+              <h3 className="text-lg font-bold text-text">
+                {isStudent ? 'No Marked Submissions Yet' : 'No Marked Student Papers Yet'}
+              </h3>
               <p className="text-sm text-textMuted mt-1.5 max-w-md mx-auto">
                 {searchQuery 
-                  ? 'No students found matching your search term.' 
+                  ? 'No records found matching your search term.' 
+                  : isStudent
+                  ? 'You have not submitted any answer sheets for this exam yet. Click below to upload your handwritten pages for instant senior examiner grading and red-ink corrections.'
                   : 'Start grading your class papers. Click the button below to upload handwritten scripts for automatic examiner assessment.'}
               </p>
               {!searchQuery && (
@@ -1509,7 +1766,7 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                   className="mt-5 inline-flex items-center gap-2 bg-primary hover:bg-primaryHover text-white px-5 py-2.5 rounded-2xl font-semibold text-sm transition-all shadow-md cursor-pointer"
                 >
                   <Plus className="w-4 h-4" />
-                  <span>Mark First Student Paper</span>
+                  <span>{isStudent ? 'Mark My Paper' : 'Mark First Student Paper'}</span>
                 </button>
               )}
             </div>
@@ -1531,7 +1788,7 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                   {filteredPapers.map((paperItem) => {
                     const pct = paperItem.percentage || 0;
                     const pctBadgeColor = pct >= 75
-                      ? 'bg-[#10b981]/15 text-[#10b981] border-[#10b981]/30'
+                      ? 'bg-success/15 text-success border-success/30'
                       : pct >= 50
                       ? 'bg-blue-500/15 text-blue-400 border-blue-500/30'
                       : 'bg-error/15 text-error border-error/30';
@@ -1729,7 +1986,7 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                     <div className="flex items-center gap-2 mb-1.5">
                       <span className="text-base">✏️</span>
                       <span className="text-xs font-bold text-text">Vector Annotations</span>
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#10b981]/15 text-[#10b981] border border-[#10b981]/30 ml-auto">
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-success/15 text-success border border-success/30 ml-auto">
                         0 Image Tokens
                       </span>
                     </div>
@@ -1937,7 +2194,7 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-semibold text-textMuted uppercase tracking-wider mb-2">
-                        Student Full Name <span className="text-error">*</span>
+                        {isStudent ? 'Candidate Name (Your Name)' : 'Student Full Name'} <span className="text-error">*</span>
                       </label>
                       <input
                         type="text"
@@ -2155,13 +2412,42 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                     )}
                     <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${
                       viewingPaper.percentage >= 75 
-                        ? 'bg-[#10b981]/15 text-[#10b981] border-[#10b981]/30'
+                        ? 'bg-success/15 text-success border-success/30'
                         : viewingPaper.percentage >= 50
                         ? 'bg-blue-500/15 text-blue-400 border-blue-500/30'
                         : 'bg-error/15 text-error border-error/30'
                     }`}>
                       Score: {viewingPaper.total_score} / {viewingPaper.max_score} ({viewingPaper.percentage}%)
                     </span>
+                    {filteredPapers.length > 1 && (
+                      <div className="flex items-center gap-1 bg-surface border border-border rounded-xl px-1.5 py-0.5 text-xs text-textMuted">
+                        <button
+                          onClick={() => {
+                            const curIdx = filteredPapers.findIndex(p => p.id === viewingPaper.id);
+                            if (curIdx > 0) handleOpenViewer(filteredPapers[curIdx - 1]);
+                          }}
+                          disabled={filteredPapers.findIndex(p => p.id === viewingPaper.id) <= 0}
+                          className="p-1 hover:text-text disabled:opacity-30 cursor-pointer"
+                          title="Previous Student Paper"
+                        >
+                          <ChevronLeft className="w-3.5 h-3.5" />
+                        </button>
+                        <span className="font-semibold px-1 text-[11px] text-text">
+                          Student {filteredPapers.findIndex(p => p.id === viewingPaper.id) + 1} of {filteredPapers.length}
+                        </span>
+                        <button
+                          onClick={() => {
+                            const curIdx = filteredPapers.findIndex(p => p.id === viewingPaper.id);
+                            if (curIdx >= 0 && curIdx < filteredPapers.length - 1) handleOpenViewer(filteredPapers[curIdx + 1]);
+                          }}
+                          disabled={filteredPapers.findIndex(p => p.id === viewingPaper.id) >= filteredPapers.length - 1}
+                          className="p-1 hover:text-text disabled:opacity-30 cursor-pointer"
+                          title="Next Student Paper"
+                        >
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
                   </div>
                   <p className="text-xs text-textMuted mt-0.5">
                     {paper?.subject} Paper {paper?.paper_number} • Marked on {new Date(viewingPaper.created_at).toLocaleString()}
@@ -2219,16 +2505,29 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
 
             {/* Viewer Content Body */}
             {viewerTab === 'script' ? (() => {
-              const pagesList: any[] = (viewingPaper.assessment_result?.pages && viewingPaper.assessment_result.pages.length > 0)
-                ? viewingPaper.assessment_result.pages
-                : (viewingPaper.page_images || []).map((url: string, idx: number) => ({
-                    page_index: idx,
-                    original_image_url: url,
-                    marked_image_url: idx === 0 ? viewingPaper.marked_image_url : undefined
-                  }));
-              const totalPages = Math.max(pagesList.length, 1);
+              const currentPaperIndex = filteredPapers.findIndex(p => p.id === viewingPaper.id);
+              const hasPrevPaper = currentPaperIndex > 0;
+              const hasNextPaper = currentPaperIndex >= 0 && currentPaperIndex < filteredPapers.length - 1;
+
+              const rawPageImages: string[] = Array.isArray(viewingPaper.page_images) ? viewingPaper.page_images : [];
+              const assessmentPages: any[] = Array.isArray(viewingPaper.assessment_result?.pages) ? viewingPaper.assessment_result.pages : [];
+              const maxPageCount = Math.max(rawPageImages.length, assessmentPages.length, 1);
+
+              const pagesList: any[] = Array.from({ length: maxPageCount }).map((_, idx) => {
+                const foundAssPage = assessmentPages.find((ap: any) => ap.page_index === idx) || assessmentPages[idx];
+                const origImg = foundAssPage?.original_image_url || rawPageImages[idx] || '';
+                const markedImg = foundAssPage?.marked_image_url || (idx === 0 ? viewingPaper.marked_image_url : null);
+                return {
+                  page_index: idx,
+                  ...(foundAssPage || {}),
+                  original_image_url: origImg,
+                  marked_image_url: markedImg
+                };
+              });
+
+              const totalPages = pagesList.length;
               const currentPage = pagesList[viewerPageIdx] || pagesList[0];
-              const pageOriginalUrl = currentPage?.original_image_url || viewingPaper.page_images?.[viewerPageIdx] || '';
+              const pageOriginalUrl = currentPage?.original_image_url || rawPageImages[viewerPageIdx] || '';
               const pageMarkedUrl = currentPage?.marked_image_url || (viewerPageIdx === 0 ? viewingPaper.marked_image_url : null);
               const displayUrl = (viewerMode === 'marked' && pageMarkedUrl) ? pageMarkedUrl : pageOriginalUrl;
               const isPageGenerating = generatingPages[viewerPageIdx];
@@ -2240,27 +2539,57 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                   
                   {/* Script Toolbar */}
                   <div className="px-4 py-2.5 bg-surface border-b border-border flex items-center justify-between gap-3 shrink-0 flex-wrap">
-                    {/* Page Switcher */}
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => setViewerPageIdx(prev => Math.max(0, prev - 1))}
-                        disabled={viewerPageIdx === 0}
-                        className="p-1.5 hover:bg-border/60 rounded-lg text-text disabled:opacity-30 cursor-pointer"
-                        title="Previous Page"
-                      >
-                        <ChevronLeft className="w-4 h-4" />
-                      </button>
-                      <span className="text-xs font-semibold text-text">
-                        Page {viewerPageIdx + 1} of {totalPages}
-                      </span>
-                      <button
-                        onClick={() => setViewerPageIdx(prev => Math.min(totalPages - 1, prev + 1))}
-                        disabled={viewerPageIdx === totalPages - 1}
-                        className="p-1.5 hover:bg-border/60 rounded-lg text-text disabled:opacity-30 cursor-pointer"
-                        title="Next Page"
-                      >
-                        <ChevronRight className="w-4 h-4" />
-                      </button>
+                    {/* Page Switcher & Student Paper Switcher */}
+                    <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-1.5 bg-background border border-border rounded-xl px-2 py-1 shadow-xs">
+                        <button
+                          onClick={() => setViewerPageIdx(prev => Math.max(0, prev - 1))}
+                          disabled={viewerPageIdx === 0}
+                          className="p-1 hover:bg-surface rounded-lg text-text disabled:opacity-30 cursor-pointer transition-colors"
+                          title="Previous Page of Booklet"
+                        >
+                          <ChevronLeft className="w-4 h-4" />
+                        </button>
+                        <span className="text-xs font-bold text-text px-1">
+                          Page {viewerPageIdx + 1} of {totalPages}
+                        </span>
+                        <button
+                          onClick={() => setViewerPageIdx(prev => Math.min(totalPages - 1, prev + 1))}
+                          disabled={viewerPageIdx === totalPages - 1}
+                          className="p-1 hover:bg-surface rounded-lg text-text disabled:opacity-30 cursor-pointer transition-colors"
+                          title="Next Page of Booklet"
+                        >
+                          <ChevronRight className="w-4 h-4" />
+                        </button>
+                      </div>
+
+                      {filteredPapers.length > 1 && (
+                        <div className="flex items-center gap-1.5 bg-background border border-border rounded-xl px-2.5 py-1 text-xs shadow-xs">
+                          <button
+                            onClick={() => {
+                              if (hasPrevPaper) handleOpenViewer(filteredPapers[currentPaperIndex - 1]);
+                            }}
+                            disabled={!hasPrevPaper}
+                            className="p-0.5 hover:text-primary disabled:opacity-30 cursor-pointer transition-colors"
+                            title="Previous Student Paper"
+                          >
+                            <ChevronLeft className="w-3.5 h-3.5" />
+                          </button>
+                          <span className="text-textMuted font-medium text-[11px]">
+                            Student <strong className="text-text">{currentPaperIndex + 1}/{filteredPapers.length}</strong>
+                          </span>
+                          <button
+                            onClick={() => {
+                              if (hasNextPaper) handleOpenViewer(filteredPapers[currentPaperIndex + 1]);
+                            }}
+                            disabled={!hasNextPaper}
+                            className="p-0.5 hover:text-primary disabled:opacity-30 cursor-pointer transition-colors"
+                            title="Next Student Paper"
+                          >
+                            <ChevronRight className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )}
                     </div>
 
                     {/* Comments on/off toggle for annotations mode */}
@@ -2323,10 +2652,39 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                     >
                       Open Raw Image ↗
                     </a>
+
+                    {/* Download the fully marked paper as a PDF (with all annotations) */}
+                    <button
+                      onClick={async () => {
+                        if (isDownloadingPdf) return;
+                        setIsDownloadingPdf(true);
+                        try {
+                          await downloadMarkedPaperPdf({
+                            studentName: viewingPaper.student_name || '',
+                            paperLabel: `${paper?.subject || 'Paper'} P${paper?.paper_number ?? ''}`,
+                            pages: pagesList.map(p => ({
+                              original_image_url: p.original_image_url,
+                              marked_image_url: p.marked_image_url,
+                              annotations: ensureAssessmentAnnotations(viewingPaper.assessment_result, p.page_index)
+                            }))
+                          });
+                        } catch (pdfErr: any) {
+                          console.error('Marked paper PDF generation failed:', pdfErr);
+                          alert(pdfErr?.message || 'Failed to generate the marked paper PDF.');
+                        } finally {
+                          setIsDownloadingPdf(false);
+                        }
+                      }}
+                      disabled={isDownloadingPdf}
+                      className="px-2.5 py-1 text-xs font-semibold text-white bg-primary hover:bg-primaryHover rounded-xl transition-all cursor-pointer disabled:opacity-50 shadow-sm"
+                      title="Download the fully marked paper as a PDF (with all teacher annotations)"
+                    >
+                      {isDownloadingPdf ? 'Building PDF…' : '⬇ Download PDF'}
+                    </button>
                   </div>
 
                   {/* Main Image Display - Fully Contained (Whole image 100% visible on screen) */}
-                  <div className="flex-1 min-h-0 p-3 sm:p-5 bg-[#0a0d14] flex items-center justify-center overflow-hidden">
+                  <div className="flex-1 min-h-0 p-3 sm:p-5 bg-background flex items-center justify-center overflow-hidden">
                     <div className="relative w-full h-full flex items-center justify-center">
                       {/* Generation Status Badge */}
                       {viewerMode === 'marked' && isPageGenerating && (
@@ -2352,22 +2710,32 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                             className="max-h-full max-w-full w-auto h-auto object-contain rounded-xl shadow-2xl bg-white select-none border border-gray-300"
                           />
                         ) : (
-                          <div className="flex flex-col items-center justify-center p-6 text-center max-w-md bg-surface/90 border border-border rounded-2xl shadow-xl">
-                            <div className="w-12 h-12 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary mb-3">
-                              <Sparkles className="w-6 h-6" />
+                          <div className="relative w-full h-full flex flex-col items-center justify-center">
+                            {/* Seamless interactive marked annotations overlay fallback */}
+                            <div className="flex-1 w-full h-full flex items-center justify-center">
+                              <MarkedPaperOverlay
+                                imageUrl={pageOriginalUrl}
+                                annotations={ensureAssessmentAnnotations(viewingPaper.assessment_result, viewerPageIdx)}
+                                showAnnotations={true}
+                                showComments={showAnnotationsComments}
+                                altText={`Student submission marked page ${viewerPageIdx + 1}`}
+                              />
                             </div>
-                            <h4 className="text-sm font-bold text-text mb-1">No AI Photo Generated Yet</h4>
-                            <p className="text-xs text-textMuted mb-4 leading-relaxed">
-                              This submission was marked in <span className="text-primary font-semibold">Annotations Mode</span> (saving image tokens). You can render the photorealistic ballpoint pen photo now if needed.
-                            </p>
-                            <button
-                              onClick={() => handleRegeneratePageMarking(viewerPageIdx)}
-                              disabled={isPageGenerating}
-                              className="flex items-center gap-2 bg-primary hover:bg-primaryHover text-white px-4 py-2 rounded-xl text-xs font-semibold transition-all shadow-md cursor-pointer disabled:opacity-50"
-                            >
-                              {isPageGenerating ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-                              <span>{isPageGenerating ? 'Rendering Teacher Ink...' : 'Generate AI Photo (Uses Tokens)'}</span>
-                            </button>
+                            {/* Floating Generate Photorealistic Red Ink Action Bar */}
+                            <div className="absolute bottom-4 z-30 bg-surface/95 backdrop-blur-md border border-border/80 px-4 py-2 rounded-2xl shadow-2xl flex items-center gap-3">
+                              <div className="flex items-center gap-2 text-xs text-textMuted">
+                                <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+                                <span>Showing Marked Vector Annotations</span>
+                              </div>
+                              <button
+                                onClick={() => handleRegeneratePageMarking(viewerPageIdx)}
+                                disabled={isPageGenerating}
+                                className="flex items-center gap-1.5 bg-primary hover:bg-primaryHover text-white px-3 py-1.5 rounded-xl text-xs font-semibold transition-all shadow-md cursor-pointer disabled:opacity-50"
+                              >
+                                {isPageGenerating ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                                <span>{isPageGenerating ? 'Rendering Teacher Ink...' : 'Render AI Red-Ink Photo'}</span>
+                              </button>
+                            </div>
                           </div>
                         )
                       ) : (
@@ -2480,7 +2848,7 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                                 <div className="text-right shrink-0">
                                   <span className={`inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-bold border ${
                                     qPct >= 75
-                                      ? 'bg-[#10b981]/15 text-[#10b981] border-[#10b981]/30'
+                                      ? 'bg-success/15 text-success border-success/30'
                                       : qPct >= 50
                                       ? 'bg-blue-500/15 text-blue-400 border-blue-500/30'
                                       : 'bg-error/15 text-error border-error/30'
@@ -2503,7 +2871,7 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                                       key={spIdx}
                                       className={`rounded-xl p-3 space-y-2 border text-xs transition-colors ${
                                         isFullMarks 
-                                          ? 'bg-[#10b981]/5 border-[#10b981]/20' 
+                                          ? 'bg-success/5 border-success/20' 
                                           : isZeroMarks 
                                           ? 'bg-error/5 border-error/20' 
                                           : 'bg-surface border-border/80'
@@ -2518,7 +2886,7 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                                         </span>
                                         <span className={`px-2 py-0.5 rounded-md font-bold text-[11px] border ${
                                           isFullMarks
-                                            ? 'bg-[#10b981]/20 text-[#10b981] border-[#10b981]/30'
+                                            ? 'bg-success/20 text-success border-success/30'
                                             : isZeroMarks
                                             ? 'bg-error/20 text-error border-error/30'
                                             : 'bg-amber-500/20 text-amber-400 border-amber-500/30'
@@ -2530,8 +2898,8 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                                       {/* Points Awarded (Explanation of Earned Marks) */}
                                       {Array.isArray(sp.marks_awarded) && sp.marks_awarded.length > 0 && (
                                         <div className="space-y-1">
-                                          <span className="text-[10px] font-bold uppercase tracking-wider text-[#10b981] flex items-center gap-1">
-                                            <Check className="w-3 h-3 text-[#10b981]" />
+                                          <span className="text-[10px] font-bold uppercase tracking-wider text-success flex items-center gap-1">
+                                            <Check className="w-3 h-3 text-success" />
                                             <span>Mark Scheme Points Earned:</span>
                                           </span>
                                           <div className="space-y-1 pl-1">
@@ -2657,7 +3025,7 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                               </span>
                               <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${
                                 qPct >= 75 
-                                  ? 'bg-[#10b981]/15 text-[#10b981] border-[#10b981]/30'
+                                  ? 'bg-success/15 text-success border-success/30'
                                   : qPct >= 50
                                   ? 'bg-blue-500/15 text-blue-400 border-blue-500/30'
                                   : 'bg-error/15 text-error border-error/30'
@@ -2684,12 +3052,12 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                                   {/* Marks Awarded Points */}
                                   {Array.isArray(sp.marks_awarded) && sp.marks_awarded.length > 0 && (
                                     <div className="space-y-1">
-                                      <span className="text-[11px] font-semibold text-[#10b981] block">
+                                      <span className="text-[11px] font-semibold text-success block">
                                         Points Earned:
                                       </span>
                                       {sp.marks_awarded.map((m: string, mi: number) => (
                                         <div key={mi} className="flex items-start gap-1.5 text-textMuted">
-                                          <Check className="w-3.5 h-3.5 text-[#10b981] shrink-0 mt-0.5" />
+                                          <Check className="w-3.5 h-3.5 text-success shrink-0 mt-0.5" />
                                           <span>{m}</span>
                                         </div>
                                       ))}

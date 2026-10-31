@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  X, BookOpen, Layers, Target, ChevronRight, FileText, ExternalLink, 
-  Plus, Edit, Trash2, CheckCircle2, Sparkles, AlertCircle, Lightbulb, 
-  FileCheck, Columns, RefreshCw, ChevronDown, ChevronUp, Award
+import {
+  X, BookOpen, Layers, Target, ChevronRight, FileText, ExternalLink,
+  Plus, Edit, Trash2, CheckCircle2, Sparkles, AlertCircle, Lightbulb,
+  FileCheck, Columns, RefreshCw, ChevronDown, ChevronUp, Award, ListTree
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import MarkingSchemeModal from './MarkingSchemeModal';
 import TeacherBulkMarkingModal from './TeacherBulkMarkingModal';
+import { useAuth } from '../context/AuthContext';
 
 interface PaperViewModalProps {
   paperId: string;
@@ -86,9 +87,128 @@ export function sortQuestions<T extends { question_number?: any }>(questions: T[
   });
 }
 
+// Question card for the Questions Breakdown tab — extracted so it can be rendered
+// both flat (sectionless papers) and grouped under Section headers (sectioned papers).
+const QuestionCard = ({
+  q,
+  onOpenScheme
+}: {
+  q: any;
+  onOpenScheme?: (questionNumber: string) => void;
+}) => {
+  return (
+    <div className="bg-surface border border-border rounded-2xl p-6 shadow-sm">
+      <div className="flex items-start justify-between mb-4">
+        <div className="flex items-center space-x-3">
+          <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+            <span className="font-bold text-primary text-lg">{q.question_number}</span>
+          </div>
+          <div>
+            <div className="flex items-center space-x-2 text-xs font-medium mb-1">
+              {q.section && String(q.section).trim() && (
+                <span className="px-2 py-0.5 bg-primary/10 text-primary rounded-lg flex items-center">
+                  <Layers className="w-3 h-3 mr-1" />
+                  Section {q.section}
+                </span>
+              )}
+              {q.topic && (
+                <span className="px-2 py-0.5 bg-blue-500/10 text-blue-500 rounded-lg flex items-center">
+                  <Layers className="w-3 h-3 mr-1" />
+                  {q.topic}
+                </span>
+              )}
+              {q.difficulty && (
+                <span className="px-2 py-0.5 bg-purple-500/10 text-purple-500 rounded-lg flex items-center">
+                  <Target className="w-3 h-3 mr-1" />
+                  {q.difficulty}
+                </span>
+              )}
+              {q.question_parts && q.question_parts.length > 0 && (
+                <span className="px-2 py-0.5 bg-amber-500/10 text-amber-500 rounded-lg flex items-center">
+                  <ListTree className="w-3 h-3 mr-1" />
+                  {(() => {
+                    const roots = q.question_parts.filter((p: any) => !p.parent_part_id).length;
+                    const total = q.question_parts.length;
+                    return roots === total ? `${total} part${total === 1 ? '' : 's'}` : `${roots} parts · ${total} total`;
+                  })()}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+        {q.marks && (
+          <span className="font-medium text-textMuted bg-background px-3 py-1 rounded-xl border border-border">
+            [{q.marks} marks]
+          </span>
+        )}
+      </div>
+
+      <p className="text-text text-base leading-relaxed mb-6 whitespace-pre-wrap">
+        {q.content_text}
+      </p>
+
+      {/* Question Assets */}
+      {q.question_assets?.filter((a: any) => !a.part_id).map((asset: any) => (
+        <div key={asset.id} className="mb-6 rounded-xl overflow-hidden border border-border bg-background p-2">
+          <span className="text-xs text-textMuted uppercase font-medium ml-2 mb-2 block">{asset.asset_type}</span>
+          {asset.storage_path ? (
+            <div className="bg-white rounded-lg p-4 mb-2 flex justify-center">
+              <img src={asset.storage_path} alt={asset.ai_description || 'Question Asset'} className="max-w-full max-h-[450px] object-contain rounded-md shadow-sm" />
+            </div>
+          ) : null}
+          {asset.ai_description && (
+            <div className="bg-surface p-3 rounded-lg text-sm text-text italic">
+              [Asset Description: {asset.ai_description}]
+            </div>
+          )}
+        </div>
+      ))}
+
+      {(!q.question_assets || q.question_assets.length === 0) && q.content_images?.map((imgUrl: string, idx: number) => (
+        <div key={idx} className="mb-6 rounded-xl overflow-hidden border border-border bg-background p-2">
+          <span className="text-xs text-textMuted uppercase font-medium ml-2 mb-2 block">diagram</span>
+          <div className="bg-white rounded-lg p-4 mb-2 flex justify-center">
+            <img src={imgUrl} alt={`Question diagram ${idx + 1}`} className="max-w-full max-h-[450px] object-contain rounded-md shadow-sm" />
+          </div>
+        </div>
+      ))}
+
+      {/* Sub parts */}
+      {q.question_parts && q.question_parts.length > 0 && (
+        <div className="space-y-4 pl-0 sm:pl-4">
+          {sortParts(q.question_parts.filter((p: any) => !p.parent_part_id))
+            .map((part: any) => (
+            <RecursivePart key={part.id} part={part} allParts={q.question_parts} allAssets={q.question_assets || []} />
+          ))}
+        </div>
+      )}
+
+      {/* Quick Solution Peek button if solution exists */}
+      {q.solution && (
+        <div className="mt-5 pt-4 border-t border-border/60 flex items-center justify-between">
+          <span className="text-xs font-medium text-success flex items-center gap-1.5">
+            <CheckCircle2 className="w-3.5 h-3.5" />
+            Official Marking Scheme & Worked Solution Available
+          </span>
+          {onOpenScheme && (
+            <button
+              type="button"
+              onClick={() => onOpenScheme(String(q.question_number))}
+              className="text-xs font-semibold text-primary hover:underline flex items-center gap-1 cursor-pointer"
+            >
+              <span>View Marking Scheme</span>
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const RecursivePart = ({ part, allParts, allAssets }: { part: any, allParts: any[], allAssets: any[] }) => {
   const children = sortParts(allParts.filter(p => p.parent_part_id === part.id));
-    
+
   return (
     <div className="pt-2">
       <div className="flex items-start">
@@ -185,6 +305,7 @@ const CombinedRecursivePart = ({
 };
 
 export default function PaperViewModal({ paperId, initialTab = 'questions', onClose }: PaperViewModalProps) {
+  const { user, isStudent } = useAuth();
   const [loading, setLoading] = useState(true);
   const [paper, setPaper] = useState<any>(null);
   const [questions, setQuestions] = useState<any[]>([]);
@@ -219,10 +340,17 @@ export default function PaperViewModal({ paperId, initialTab = 'questions', onCl
     }
 
     try {
-      const { count } = await supabase
+      let countQuery = supabase
         .from('marked_student_papers')
         .select('*', { count: 'exact', head: true })
         .eq('paper_id', paperId);
+
+      if (isStudent && user) {
+        const studentName = user.user_metadata?.first_name || user.email?.split('@')[0] || '';
+        countQuery = countQuery.or(`created_by.eq.${user.id},student_name.ilike.%${studentName}%`);
+      }
+
+      const { count } = await countQuery;
       setMarkedCount(count || 0);
     } catch (e) {}
 
@@ -334,7 +462,7 @@ export default function PaperViewModal({ paperId, initialTab = 'questions', onCl
                 {activeTab === 'scheme' ? 'Marking Scheme Breakdown' : activeTab === 'combined' ? 'Question Paper & Marking Scheme' : 'Question Paper Breakdown'}
               </h2>
               {paper?.type === 'ms' && (
-                <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#10b981]/15 text-[#10b981] border border-[#10b981]/30">
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-success/15 text-success border border-success/30">
                   Mark Scheme
                 </span>
               )}
@@ -376,7 +504,7 @@ export default function PaperViewModal({ paperId, initialTab = 'questions', onCl
               onClick={() => setActiveTab('scheme')}
               className={`flex items-center gap-2 px-4 py-2.5 border-b-2 font-medium text-sm transition-all cursor-pointer ${
                 activeTab === 'scheme'
-                  ? 'border-[#10b981] text-[#10b981] font-semibold'
+                  ? 'border-success text-success font-semibold'
                   : 'border-transparent text-textMuted hover:text-text'
               }`}
             >
@@ -384,7 +512,7 @@ export default function PaperViewModal({ paperId, initialTab = 'questions', onCl
               <span>Marking Scheme Breakdown</span>
               <span className={`ml-1 px-2 py-0.5 rounded-full text-xs font-bold ${
                 solutionsCount > 0
-                  ? 'bg-[#10b981]/15 text-[#10b981]'
+                  ? 'bg-success/15 text-success'
                   : 'bg-amber-500/10 text-amber-500'
               }`}>
                 {solutionsCount} / {questions.length}
@@ -413,10 +541,10 @@ export default function PaperViewModal({ paperId, initialTab = 'questions', onCl
                 type="button"
                 onClick={() => setShowBulkMarking(true)}
                 className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-semibold bg-primary text-white hover:bg-primaryHover transition-all cursor-pointer shadow-sm"
-                title="Mark student papers with AI"
+                title={isStudent ? "Mark your handwritten working with AI" : "Mark student papers with AI"}
               >
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>Mark Students Papers</span>
+                <span>{isStudent ? 'Mark My Paper' : 'Mark Students Papers'}</span>
                 {markedCount > 0 && (
                   <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-white text-primary font-bold">
                     {markedCount}
@@ -441,7 +569,7 @@ export default function PaperViewModal({ paperId, initialTab = 'questions', onCl
                   href={paper.mark_scheme_url}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-medium text-[#10b981] bg-[#10b981]/10 hover:bg-[#10b981]/20 transition-colors"
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-medium text-success bg-success/10 hover:bg-success/20 transition-colors"
                   title="Open Marking Scheme PDF"
                 >
                   <FileCheck className="w-3 h-3" />
@@ -481,7 +609,7 @@ export default function PaperViewModal({ paperId, initialTab = 'questions', onCl
                     <div className="flex flex-wrap items-center justify-between gap-4">
                       <div className="flex items-start gap-3.5">
                         <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${
-                          solutionsCount > 0 ? 'bg-[#10b981]/15 text-[#10b981]' : 'bg-amber-500/15 text-amber-500'
+                          solutionsCount > 0 ? 'bg-success/15 text-success' : 'bg-amber-500/15 text-amber-500'
                         }`}>
                           <Award className="w-6 h-6" />
                         </div>
@@ -492,7 +620,7 @@ export default function PaperViewModal({ paperId, initialTab = 'questions', onCl
                             </h3>
                             <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${
                               solutionsCount === questions.length && questions.length > 0
-                                ? 'bg-[#10b981]/15 text-[#10b981] border border-[#10b981]/30'
+                                ? 'bg-success/15 text-success border border-success/30'
                                 : solutionsCount > 0
                                 ? 'bg-blue-500/15 text-blue-500 border border-blue-500/30'
                                 : 'bg-amber-500/15 text-amber-500 border border-amber-500/30'
@@ -516,7 +644,7 @@ export default function PaperViewModal({ paperId, initialTab = 'questions', onCl
                             type="button"
                             onClick={handleProcessMarkScheme}
                             disabled={isProcessingMs}
-                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-[#10b981] text-white hover:bg-[#10b981]/90 shadow-sm transition-all disabled:opacity-50 cursor-pointer"
+                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-success text-white hover:bg-success/90 shadow-sm transition-all disabled:opacity-50 cursor-pointer"
                           >
                             <RefreshCw className={`w-3.5 h-3.5 ${isProcessingMs ? 'animate-spin' : ''}`} />
                             <span>{isProcessingMs ? 'Processing Scheme...' : solutionsCount > 0 ? 'Re-extract Scheme' : 'Extract Scheme Now'}</span>
@@ -545,7 +673,7 @@ export default function PaperViewModal({ paperId, initialTab = 'questions', onCl
                       </div>
                       <div className="bg-background/60 p-3 rounded-xl border border-border/50">
                         <span className="text-xs text-textMuted uppercase font-medium block">Questions Covered</span>
-                        <span className="text-sm font-bold text-[#10b981] mt-0.5 block">{solutionsCount} of {questions.length}</span>
+                        <span className="text-sm font-bold text-success mt-0.5 block">{solutionsCount} of {questions.length}</span>
                       </div>
                       <div className="bg-background/60 p-3 rounded-xl border border-border/50">
                         <span className="text-xs text-textMuted uppercase font-medium block">Coverage</span>
@@ -578,9 +706,9 @@ export default function PaperViewModal({ paperId, initialTab = 'questions', onCl
                           onClick={() => setSelectedQNumber(String(q.question_number))}
                           className={`px-3 py-1 rounded-xl text-xs font-medium transition-all cursor-pointer shrink-0 flex items-center gap-1.5 ${
                             selectedQNumber === String(q.question_number)
-                              ? 'bg-[#10b981] text-white font-semibold shadow-sm'
+                              ? 'bg-success text-white font-semibold shadow-sm'
                               : q.solution
-                              ? 'bg-[#10b981]/10 text-[#10b981] border border-[#10b981]/20 hover:bg-[#10b981]/20'
+                              ? 'bg-success/10 text-success border border-success/20 hover:bg-success/20'
                               : 'bg-surface text-textMuted border border-border hover:bg-border/50'
                           }`}
                         >
@@ -604,14 +732,14 @@ export default function PaperViewModal({ paperId, initialTab = 'questions', onCl
                           {/* Question header info */}
                           <div className="flex items-start justify-between gap-4 pb-4 border-b border-border">
                             <div className="flex items-center space-x-3">
-                              <div className="w-11 h-11 rounded-xl bg-[#10b981]/10 text-[#10b981] border border-[#10b981]/20 flex items-center justify-center shrink-0 font-bold text-lg">
+                              <div className="w-11 h-11 rounded-xl bg-success/10 text-success border border-success/20 flex items-center justify-center shrink-0 font-bold text-lg">
                                 {q.question_number}
                               </div>
                               <div>
                                 <div className="flex items-center gap-2">
                                   <h4 className="font-bold text-text text-base">Question {q.question_number} Marking Breakdown</h4>
                                   {q.solution ? (
-                                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#10b981] bg-[#10b981]/10 px-2 py-0.5 rounded-md border border-[#10b981]/20">
+                                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-success bg-success/10 px-2 py-0.5 rounded-md border border-success/20">
                                       <CheckCircle2 className="w-3 h-3" /> Rubric Extracted
                                     </span>
                                   ) : (
@@ -677,12 +805,12 @@ export default function PaperViewModal({ paperId, initialTab = 'questions', onCl
                             <div className="space-y-4 pt-1">
                               {/* Rubric Breakdown */}
                               {q.solution.official_mark_scheme && (
-                                <div className="rounded-xl border border-[#10b981]/25 bg-[#10b981]/5 p-4">
-                                  <h5 className="font-bold text-xs uppercase tracking-wider text-[#10b981] mb-2 flex items-center gap-1.5">
-                                    <FileCheck className="w-4 h-4 text-[#10b981]" />
+                                <div className="rounded-xl border border-success/25 bg-success/5 p-4">
+                                  <h5 className="font-bold text-xs uppercase tracking-wider text-success mb-2 flex items-center gap-1.5">
+                                    <FileCheck className="w-4 h-4 text-success" />
                                     Official Marking Criteria & Rubric Breakdown
                                   </h5>
-                                  <div className="p-3.5 bg-surface rounded-xl border border-[#10b981]/20 text-text font-mono text-xs leading-relaxed whitespace-pre-wrap">
+                                  <div className="p-3.5 bg-surface rounded-xl border border-success/20 text-text font-mono text-xs leading-relaxed whitespace-pre-wrap">
                                     {q.solution.official_mark_scheme}
                                   </div>
                                 </div>
@@ -738,7 +866,7 @@ export default function PaperViewModal({ paperId, initialTab = 'questions', onCl
                                   type="button"
                                   onClick={handleProcessMarkScheme}
                                   disabled={isProcessingMs}
-                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#10b981]/10 text-[#10b981] border border-[#10b981]/20 hover:bg-[#10b981]/20 transition-colors cursor-pointer"
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-success/10 text-success border border-success/20 hover:bg-success/20 transition-colors cursor-pointer"
                                 >
                                   <Sparkles className="w-3.5 h-3.5" />
                                   <span>Extract Scheme Rubrics</span>
@@ -762,99 +890,60 @@ export default function PaperViewModal({ paperId, initialTab = 'questions', onCl
                       <p className="text-textMuted">No questions have been extracted for this paper yet.</p>
                     </div>
                   ) : (
-                    questions.map((q) => (
-                      <div key={q.id} className="bg-surface border border-border rounded-2xl p-6 shadow-sm">
-                        <div className="flex items-start justify-between mb-4">
-                          <div className="flex items-center space-x-3">
-                            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
-                              <span className="font-bold text-primary text-lg">{q.question_number}</span>
-                            </div>
-                            <div>
-                              <div className="flex items-center space-x-2 text-xs font-medium mb-1">
-                                {q.topic && (
-                                  <span className="px-2 py-0.5 bg-blue-500/10 text-blue-500 rounded-lg flex items-center">
-                                    <Layers className="w-3 h-3 mr-1" />
-                                    {q.topic}
-                                  </span>
-                                )}
-                                {q.difficulty && (
-                                  <span className="px-2 py-0.5 bg-purple-500/10 text-purple-500 rounded-lg flex items-center">
-                                    <Target className="w-3 h-3 mr-1" />
-                                    {q.difficulty}
-                                  </span>
-                                )}
+                    (() => {
+                      // Section-grouped rendering: papers with sections (e.g. History
+                      // "Section A: Core Content" / "Section B: Depth Studies") display
+                      // their questions grouped under section headers; sectionless papers
+                      // render exactly as before.
+                      const sectionedQuestions = questions.filter((q: any) => q.section && String(q.section).trim());
+                      const hasSections = sectionedQuestions.length > 0;
+
+                      if (!hasSections) {
+                        return questions.map((q) => (
+                          <QuestionCard key={q.id} q={q} onOpenScheme={(qn) => { setSelectedQNumber(qn); setActiveTab('scheme'); }} />
+                        ));
+                      }
+
+                      // Group by section preserving first-appearance order
+                      const groups: { section: string; items: any[] }[] = [];
+                      questions.forEach((q: any) => {
+                        const sec = String(q.section || '').trim();
+                        let group = groups.find((g) => g.section === sec);
+                        if (!group) {
+                          group = { section: sec, items: [] };
+                          groups.push(group);
+                        }
+                        group.items.push(q);
+                      });
+                      // Sectionless questions (if any mixed in) render last without a header
+                      const unsectioned = groups.find((g) => g.section === '');
+                      const sectioned = groups.filter((g) => g.section !== '');
+
+                      return (
+                        <>
+                          {sectioned.map((group) => (
+                            <div key={group.section} className="space-y-4">
+                              <div className="flex items-center gap-3 pt-2">
+                                <div className="h-px flex-1 bg-border" />
+                                <span className="px-4 py-1.5 rounded-xl bg-primary/10 text-primary text-sm font-bold tracking-wide uppercase border border-primary/20">
+                                  Section {group.section}
+                                </span>
+                                <span className="text-xs text-textMuted font-medium">
+                                  {group.items.length} question{group.items.length === 1 ? '' : 's'}
+                                </span>
+                                <div className="h-px flex-1 bg-border" />
                               </div>
+                              {group.items.map((q) => (
+                                <QuestionCard key={q.id} q={q} onOpenScheme={(qn) => { setSelectedQNumber(qn); setActiveTab('scheme'); }} />
+                              ))}
                             </div>
-                          </div>
-                          {q.marks && (
-                            <span className="font-medium text-textMuted bg-background px-3 py-1 rounded-xl border border-border">
-                              [{q.marks} marks]
-                            </span>
-                          )}
-                        </div>
-
-                        <p className="text-text text-base leading-relaxed mb-6 whitespace-pre-wrap">
-                          {q.content_text}
-                        </p>
-
-                        {/* Question Assets */}
-                        {q.question_assets?.filter((a: any) => !a.part_id).map((asset: any) => (
-                          <div key={asset.id} className="mb-6 rounded-xl overflow-hidden border border-border bg-background p-2">
-                            <span className="text-xs text-textMuted uppercase font-medium ml-2 mb-2 block">{asset.asset_type}</span>
-                            {asset.storage_path ? (
-                              <div className="bg-white rounded-lg p-4 mb-2 flex justify-center">
-                                <img src={asset.storage_path} alt={asset.ai_description || 'Question Asset'} className="max-w-full max-h-[450px] object-contain rounded-md shadow-sm" />
-                              </div>
-                            ) : null}
-                            {asset.ai_description && (
-                              <div className="bg-surface p-3 rounded-lg text-sm text-text italic">
-                                [Asset Description: {asset.ai_description}]
-                              </div>
-                            )}
-                          </div>
-                        ))}
-
-                        {(!q.question_assets || q.question_assets.length === 0) && q.content_images?.map((imgUrl: string, idx: number) => (
-                          <div key={idx} className="mb-6 rounded-xl overflow-hidden border border-border bg-background p-2">
-                            <span className="text-xs text-textMuted uppercase font-medium ml-2 mb-2 block">diagram</span>
-                            <div className="bg-white rounded-lg p-4 mb-2 flex justify-center">
-                              <img src={imgUrl} alt={`Question diagram ${idx + 1}`} className="max-w-full max-h-[450px] object-contain rounded-md shadow-sm" />
-                            </div>
-                          </div>
-                        ))}
-
-                        {/* Sub parts */}
-                        {q.question_parts && q.question_parts.length > 0 && (
-                          <div className="space-y-4 pl-0 sm:pl-4">
-                            {sortParts(q.question_parts.filter((p: any) => !p.parent_part_id))
-                              .map((part: any) => (
-                              <RecursivePart key={part.id} part={part} allParts={q.question_parts} allAssets={q.question_assets || []} />
-                            ))}
-                          </div>
-                        )}
-
-                        {/* Quick Solution Peek button if solution exists */}
-                        {q.solution && (
-                          <div className="mt-5 pt-4 border-t border-border/60 flex items-center justify-between">
-                            <span className="text-xs font-medium text-[#10b981] flex items-center gap-1.5">
-                              <CheckCircle2 className="w-3.5 h-3.5" />
-                              Official Marking Scheme & Worked Solution Available
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setSelectedQNumber(String(q.question_number));
-                                setActiveTab('scheme');
-                              }}
-                              className="text-xs font-semibold text-primary hover:underline flex items-center gap-1 cursor-pointer"
-                            >
-                              <span>View Marking Scheme</span>
-                              <ChevronRight className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    ))
+                          ))}
+                          {unsectioned && unsectioned.items.map((q) => (
+                            <QuestionCard key={q.id} q={q} onOpenScheme={(qn) => { setSelectedQNumber(qn); setActiveTab('scheme'); }} />
+                          ))}
+                        </>
+                      );
+                    })()
                   )}
                 </div>
               )}
@@ -930,9 +1019,9 @@ export default function PaperViewModal({ paperId, initialTab = 'questions', onCl
                           </div>
 
                           {/* Right: Marking Scheme & Solution */}
-                          <div className="space-y-4 p-4 rounded-xl bg-[#10b981]/5 border border-[#10b981]/20">
-                            <h5 className="text-xs font-bold uppercase tracking-wider text-[#10b981] flex items-center gap-1.5">
-                              <FileCheck className="w-3.5 h-3.5 text-[#10b981]" />
+                          <div className="space-y-4 p-4 rounded-xl bg-success/5 border border-success/20">
+                            <h5 className="text-xs font-bold uppercase tracking-wider text-success flex items-center gap-1.5">
+                              <FileCheck className="w-3.5 h-3.5 text-success" />
                               Marking Scheme & Rubric
                             </h5>
 
@@ -941,7 +1030,7 @@ export default function PaperViewModal({ paperId, initialTab = 'questions', onCl
                                 {q.solution.official_mark_scheme && (
                                   <div>
                                     <span className="text-[11px] font-semibold text-textMuted uppercase block mb-1">Rubric Criteria:</span>
-                                    <div className="p-2.5 bg-surface rounded-lg border border-[#10b981]/20 font-mono text-xs whitespace-pre-wrap">
+                                    <div className="p-2.5 bg-surface rounded-lg border border-success/20 font-mono text-xs whitespace-pre-wrap">
                                       {q.solution.official_mark_scheme}
                                     </div>
                                   </div>

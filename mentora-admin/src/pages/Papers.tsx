@@ -142,7 +142,14 @@ export default function Papers() {
         const [qRes, sRes, mRes] = await Promise.all([
           supabase.from('past_paper_questions').select('id, paper_id').in('paper_id', paperIds),
           supabase.from('past_paper_solutions').select('question_id'),
-          supabase.from('marked_student_papers').select('paper_id').in('paper_id', paperIds)
+          (() => {
+            let mq = supabase.from('marked_student_papers').select('paper_id').in('paper_id', paperIds);
+            if (isStudent && user) {
+              const name = user.user_metadata?.first_name || user.email?.split('@')[0] || '';
+              mq = mq.or(`created_by.eq.${user.id},student_name.ilike.%${name}%`);
+            }
+            return mq;
+          })()
         ]);
         qData = qRes.data || [];
         sData = sRes.data || [];
