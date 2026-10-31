@@ -1,17 +1,19 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { Users, BookOpen, Clock, TrendingUp } from 'lucide-react';
+import { Users, BookOpen, Clock, TrendingUp, GraduationCap, FileText, CheckCircle2, ArrowRight, Sparkles } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import PendingApproval from '../components/PendingApproval';
 import { useAuth } from '../context/AuthContext';
 
 export default function Dashboard() {
-  const { user, isAdmin } = useAuth();
+  const { user, isAdmin, isTeacher, isStudent } = useAuth();
   const [stats, setStats] = useState({
     totalStudents: 0,
     totalTeachers: 0,
     pendingTeachers: 0,
     totalCourses: 0,
     totalPapers: 0,
+    papersWithScheme: 0,
   });
   const [loading, setLoading] = useState(true);
   const [extractedQuestions, setExtractedQuestions] = useState<any[]>([]);
@@ -21,7 +23,7 @@ export default function Dashboard() {
     if (isAdmin) {
       fetchExtractedQuestions();
     }
-  }, [isAdmin, user]);
+  }, [isAdmin, isStudent, isTeacher, user]);
 
   const fetchExtractedQuestions = async () => {
     const { data, error } = await supabase
@@ -40,11 +42,12 @@ export default function Dashboard() {
     try {
       if (isAdmin) {
         // Global admin stats
-        const [{ count: studentsCount }, { count: teachersCount }, { count: pendingCount }, { count: coursesCount }] = await Promise.all([
+        const [{ count: studentsCount }, { count: teachersCount }, { count: pendingCount }, { count: coursesCount }, { count: papersCount }] = await Promise.all([
           supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'student'),
           supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'teacher'),
           supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'teacher').eq('is_approved', false),
           supabase.from('courses').select('*', { count: 'exact', head: true }),
+          supabase.from('papers').select('*', { count: 'exact', head: true }),
         ]);
 
         setStats({
@@ -52,7 +55,24 @@ export default function Dashboard() {
           totalTeachers: teachersCount || 0,
           pendingTeachers: pendingCount || 0,
           totalCourses: coursesCount || 0,
-          totalPapers: 0,
+          totalPapers: papersCount || 0,
+          papersWithScheme: 0,
+        });
+      } else if (isStudent) {
+        // Student stats: Public papers and marking schemes
+        const [{ count: papersCount }, { count: schemesCount }, { count: coursesCount }] = await Promise.all([
+          supabase.from('papers').select('*', { count: 'exact', head: true }),
+          supabase.from('papers').select('*', { count: 'exact', head: true }).not('mark_scheme_url', 'is', null),
+          supabase.from('courses').select('*', { count: 'exact', head: true }),
+        ]);
+
+        setStats({
+          totalStudents: 0,
+          totalTeachers: 0,
+          pendingTeachers: 0,
+          totalCourses: coursesCount || 0,
+          totalPapers: papersCount || 0,
+          papersWithScheme: schemesCount || 0,
         });
       } else {
         // Teacher specific stats
@@ -77,6 +97,7 @@ export default function Dashboard() {
           pendingTeachers: 0,
           totalCourses: myCoursesCount,
           totalPapers: myPapersCount,
+          papersWithScheme: 0,
         });
       }
     } catch (e) {
@@ -90,6 +111,10 @@ export default function Dashboard() {
     { label: 'Total Teachers', value: stats.totalTeachers, icon: BookOpen, color: 'text-purple-500', bg: 'bg-purple-500/10' },
     { label: 'Pending Approvals', value: stats.pendingTeachers, icon: Clock, color: 'text-amber-500', bg: 'bg-amber-500/10' },
     { label: 'Active Courses', value: stats.totalCourses, icon: TrendingUp, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
+  ] : isStudent ? [
+    { label: 'Past Exam Papers', value: stats.totalPapers, icon: FileText, color: 'text-blue-500', bg: 'bg-blue-500/10' },
+    { label: 'Marking Schemes', value: stats.papersWithScheme, icon: CheckCircle2, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
+    { label: 'Available Courses', value: stats.totalCourses, icon: BookOpen, color: 'text-purple-500', bg: 'bg-purple-500/10' },
   ] : [
     { label: 'My Courses', value: stats.totalCourses, icon: BookOpen, color: 'text-blue-500', bg: 'bg-blue-500/10' },
     { label: 'My Papers', value: stats.totalPapers, icon: TrendingUp, color: 'text-purple-500', bg: 'bg-purple-500/10' },
@@ -98,17 +123,48 @@ export default function Dashboard() {
   if (loading) return <div>Loading dashboard...</div>;
 
   return (
-    <div className="max-w-6xl mx-auto">
-      <div className="mb-8">
+    <div className="max-w-6xl mx-auto space-y-8">
+      <div>
         <h1 className="text-3xl font-bold text-text">Overview</h1>
-        <p className="text-textMuted mt-2">Welcome back to your {isAdmin ? 'Admin' : 'Teacher'} Console.</p>
+        <p className="text-textMuted mt-1">
+          {isAdmin 
+            ? 'Welcome to the Mentora Admin Console.' 
+            : isStudent 
+            ? 'Welcome to your Mentora Learning & Exam Practice Hub.' 
+            : 'Welcome to your Educator Dashboard.'}
+        </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      {/* Student Highlight Banner */}
+      {isStudent && (
+        <div className="p-6 rounded-3xl bg-gradient-to-r from-primary/15 via-primary/5 to-transparent border border-primary/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-primary text-white flex items-center justify-center shadow-lg shadow-primary/30 shrink-0">
+              <GraduationCap className="w-6 h-6" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-text">Practice Past Papers & Mark with AI</h2>
+              <p className="text-sm text-textMuted">
+                Review questions, upload your handwritten working, and get graded instantly by the AI Senior Examiner with red-ink marks.
+              </p>
+            </div>
+          </div>
+          <Link
+            to="/papers"
+            className="flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-primary hover:bg-primaryHover text-white text-sm font-semibold transition-colors shadow-md shadow-primary/20 shrink-0"
+          >
+            <Sparkles className="w-4 h-4" />
+            <span>Mark My Past Papers</span>
+            <ArrowRight className="w-4 h-4" />
+          </Link>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {statCards.map((stat, i) => {
           const Icon = stat.icon;
           return (
-            <div key={i} className="bg-surface border border-border rounded-3xl p-6  hover:border-border/80 transition-colors">
+            <div key={i} className="bg-surface border border-border rounded-3xl p-6 hover:border-border/80 transition-colors">
               <div className="flex items-start justify-between">
                 <div>
                   <p className="text-sm font-medium text-textMuted mb-1">{stat.label}</p>
@@ -123,7 +179,6 @@ export default function Dashboard() {
         })}
       </div>
       
-      {/* Additional dashboard widgets can go here */}
       {isAdmin && (
         <div className="grid grid-cols-1 gap-6">
           <div className="h-[500px]">

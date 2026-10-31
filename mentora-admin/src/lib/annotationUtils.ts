@@ -248,6 +248,52 @@ export function ensureAssessmentAnnotations(assessment: AssessmentResult, pageIn
     }
   }
 
+  // === Booklet-total relocation (legacy markings) ===
+  // Older markings stored the "Booklet Total" stamp on the LAST page (bottom-right).
+  // It belongs at the TOP-LEFT of the FIRST page: strip it from wherever it was
+  // stored and inject it repositioned when rendering page 0.
+  const legacyBooklet: any = (assessment.pages || [])
+    .flatMap((p: any) => p?.annotations || [])
+    .find((a: any) => (a.text || '').startsWith('Booklet Total'));
+
+  finalResult = finalResult.filter((a: any) => !(a.text || '').startsWith('Booklet Total'));
+
+  if (targetPageIndex === 0 && legacyBooklet) {
+    finalResult.push({
+      ...legacyBooklet,
+      box_2d: [12, 20, 52, 420],
+      bbox: undefined
+    });
+  }
+
+  // === Per-question totals at the BOTTOM-RIGHT of each page ===
+  // Synthesized from question_summaries at render time, so legacy markings get them too.
+  // Stacked upward so multiple questions on one page never overlap.
+  const hasStoredQuestionStamps = finalResult.some((a: any) => /^Q\d+\s*:/.test(a.text || ''));
+  if (!hasStoredQuestionStamps) {
+    const questionsForPage = ((assessment as any).question_summaries || []).filter((qs: any) =>
+      !qs.unattempted &&
+      qs.unmatched !== true &&
+      (Number(qs.max_score) || 0) > 0 &&
+      (qs.spanned_pages || []).includes(targetPageIndex)
+    );
+    questionsForPage.forEach((qs: any, qIdx: number) => {
+      const bottomOffset = 2.5 + qIdx * 3.5; // % of page height, stacked upward
+      finalResult.push({
+        type: 'total_header',
+        text: `Q${qs.question_number}: ${qs.score}/${qs.max_score}`,
+        comment: `Question ${qs.question_number} Total: ${qs.score}/${qs.max_score} marks (${qs.percentage}%)`,
+        box_2d: [
+          1000 - Math.round((bottomOffset + 3.5) * 10),
+          700,
+          1000 - Math.round(bottomOffset * 10),
+          960
+        ],
+        page_index: targetPageIndex
+      });
+    });
+  }
+
   return finalResult;
 }
 

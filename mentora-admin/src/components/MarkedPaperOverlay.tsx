@@ -19,6 +19,18 @@ export default function MarkedPaperOverlay({
   const [activeTooltip, setActiveTooltip] = useState<string | null>(null);
   const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(null);
 
+  // Legacy declutter: hide per-question "Q Total" / "Cont." page stamps — only the
+  // booklet total (top-left of the first page) renders as a page-level stamp.
+  const renderableAnnotations = useMemo(
+    () =>
+      annotations.filter(ann => {
+        if (ann.type !== 'total_header') return true;
+        const t = ann.text || '';
+        return !/^Q\d+\s*Total/i.test(t) && !/Cont\. from/i.test(t);
+      }),
+    [annotations]
+  );
+
   // Dynamically detect coordinate scale (raw image pixel dimensions vs normalized 0-1000)
   const { scaleX, scaleY } = useMemo(() => {
     let maxY = 0;
@@ -66,9 +78,9 @@ export default function MarkedPaperOverlay({
       />
 
       {/* Vector Red Ink Teacher Annotation Layer */}
-      {showAnnotations && annotations.length > 0 && (
+      {showAnnotations && renderableAnnotations.length > 0 && (
         <div className="absolute inset-0 overflow-hidden pointer-events-none rounded-xl">
-          {annotations.map((ann, idx) => {
+          {renderableAnnotations.map((ann, idx) => {
             const [ymin, xmin, ymax, xmax] = ann.box_2d || [0, 0, 0, 0];
             const yMid = (ymin + ymax) / 2;
             const topPct = ann.bbox ? (ann.bbox.y * 100) : ((yMid / scaleY) * 100);
@@ -102,9 +114,9 @@ export default function MarkedPaperOverlay({
                 >
                   {/* Authentic Red Ballpoint Pen Margin Score */}
                   <div
-                    className="font-serif font-bold text-sm sm:text-base text-[#dc2626] select-none flex items-center gap-0.5 tracking-tight transition-transform group-hover:scale-105 drop-shadow-[0_1px_1px_rgba(255,255,255,0.85)]"
+                    className="font-serif font-bold text-xs sm:text-sm text-[#dc2626] select-none flex items-center gap-0.5 tracking-tight transition-transform group-hover:scale-105 drop-shadow-[0_1px_1px_rgba(255,255,255,0.85)]"
                   >
-                    <span className="text-sm font-black">{isZero ? '✗' : '✓'}</span>
+                    <span className="text-xs font-black">{isZero ? '✗' : '✓'}</span>
                     <span>({textClean})</span>
                   </div>
 
@@ -129,20 +141,31 @@ export default function MarkedPaperOverlay({
               );
             }
 
-            // 2. Total Senior Examiner Header Stamp (Top or Bottom)
+            // 2. Total Senior Examiner Header Stamp — placement is BOX-DRIVEN:
+            //    a top-left box renders top-left; a low box renders bottom-right
+            //    (stacked by its box offset); otherwise the legacy top-right spot applies.
             if (ann.type === 'total_header') {
-              const isBottom = topPct >= 60 || (ann.text && ann.text.toLowerCase().includes('total'));
               const stampText = ann.text || 'Total: 7/9';
               const fullStamp = stampText.includes('|')
                 ? stampText
                 : (stampText.toLowerCase().includes('booklet')
                     ? stampText
-                    : `${stampText} | Booklet Total: ${stampText.replace(/.*?Total:\s*/i, '')}`);
+                    : /total\s*:/i.test(stampText)
+                      ? `${stampText} | Booklet Total: ${stampText.replace(/.*?Total:\s*/i, '')}`
+                      : stampText);
+              const leftPct = (xmin / scaleX) * 100;
+              const boxTopPct = ann.bbox ? ann.bbox.y * 100 : topPct;
+              const isTopLeft = leftPct < 40 && boxTopPct < 30;
+              const isBottom = !isTopLeft && boxTopPct >= 60;
 
               return (
                 <div
                   key={annId}
-                  style={isBottom ? { bottom: '2%', right: '2%' } : { top: '1.5%', right: '1.5%' }}
+                  style={isTopLeft
+                    ? { top: `${Math.max(boxTopPct, 1.5)}%`, left: `${Math.max(leftPct, 2)}%` }
+                    : isBottom
+                      ? { top: `${topPct}%`, right: '2%', transform: 'translateY(-50%)' }
+                      : { top: '1.5%', right: '1.5%' }}
                   className="absolute pointer-events-auto z-30 select-none"
                 >
                   <div className="font-serif font-bold text-xs sm:text-sm text-[#dc2626] flex items-center gap-1.5 drop-shadow-[0_1px_1px_rgba(255,255,255,0.85)]">
@@ -173,7 +196,7 @@ export default function MarkedPaperOverlay({
                     onMouseEnter={() => setActiveTooltip(annId)}
                     onMouseLeave={() => setActiveTooltip(null)}
                   >
-                    <svg viewBox="0 0 24 24" className="w-4 h-4 text-[#dc2626] stroke-[3.5] filter drop-shadow-[0_1px_1px_rgba(255,255,255,0.9)]">
+                    <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 text-[#dc2626] stroke-[3.5] filter drop-shadow-[0_1px_1px_rgba(255,255,255,0.9)]">
                       <path d="M6 6 L18 18 M18 6 L6 18" stroke="currentColor" strokeLinecap="round" />
                     </svg>
                   </div>
@@ -188,8 +211,8 @@ export default function MarkedPaperOverlay({
                       }}
                       className="absolute pointer-events-auto z-20 flex items-start gap-1 select-none pointer-events-none sm:pointer-events-auto"
                     >
-                      <span className="font-bold text-xs sm:text-sm text-[#dc2626] leading-none shrink-0 select-none">^</span>
-                      <span className="font-serif italic font-medium text-[11px] sm:text-[12px] text-[#dc2626] leading-tight drop-shadow-[0_1px_1px_rgba(255,255,255,0.95)]">
+                      <span className="font-bold text-[10px] sm:text-[11px] text-[#dc2626] leading-none shrink-0 select-none">^</span>
+                      <span className="font-serif italic font-medium text-[10px] sm:text-[11px] text-[#dc2626] leading-tight drop-shadow-[0_1px_1px_rgba(255,255,255,0.95)]">
                         {ann.teacher_correction || ann.comment}
                       </span>
                     </div>
@@ -231,7 +254,7 @@ export default function MarkedPaperOverlay({
                   {/* SVG Authentic Teacher Checkmark */}
                   <svg
                     viewBox="0 0 32 32"
-                    className="w-5 h-5 sm:w-6 sm:h-6 text-[#dc2626] filter drop-shadow-[0_1px_1px_rgba(255,255,255,0.9)] transition-transform group-hover:scale-110 shrink-0"
+                    className="w-4 h-4 sm:w-5 sm:h-5 text-[#dc2626] filter drop-shadow-[0_1px_1px_rgba(255,255,255,0.9)] transition-transform group-hover:scale-110 shrink-0"
                   >
                     <path
                       d="M5 16.5 L12 23.5 L27 8.5"
