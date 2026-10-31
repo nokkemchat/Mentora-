@@ -1,0 +1,7 @@
+node_modules
+.git
+.DS_Store
+dist
+mentora/node_modules
+mentora-admin/node_modules
+mentora-ingestion-agent/node_modules
