@@ -241,14 +241,14 @@ export default function Papers() {
   const uniqueYears = Array.from(new Set(papers.map(p => p.year))).filter(Boolean).sort((a: any, b: any) => b - a);
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6">
+    <div className="max-w-7xl mx-auto space-y-5 sm:space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-text">
+          <h1 className="text-2xl sm:text-3xl font-bold text-text tracking-tight">
             {isStudent ? 'Past Papers & Marking Schemes' : 'Past Papers'}
           </h1>
-          <p className="text-textMuted mt-1">
+          <p className="text-xs sm:text-sm text-textMuted mt-1">
             {isStudent
               ? 'Explore official question papers and verified teacher marking schemes.'
               : 'Manage and curate the AI Exam Intelligence database.'}
@@ -256,24 +256,24 @@ export default function Papers() {
         </div>
 
         {isStudent ? (
-          <div className="flex items-center gap-2 px-4 py-2 rounded-2xl bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-semibold">
+          <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-2xl bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-semibold self-start sm:self-auto">
             <GraduationCap className="w-4 h-4" />
-            <span>Student Mode (Read & Study Only)</span>
+            <span>Student Practice Mode</span>
           </div>
         ) : (
-          <div className="flex items-center space-x-3">
+          <div className="flex items-center gap-2.5 w-full sm:w-auto">
             <button 
               onClick={() => setShowBulkModal(true)}
-              className="flex items-center space-x-2 bg-surface hover:bg-border/50 text-text border border-border px-4 py-2 rounded-2xl font-medium transition-colors cursor-pointer"
+              className="flex-1 sm:flex-none flex items-center justify-center space-x-2 bg-surface hover:bg-border/50 text-text border border-border px-3.5 py-2.5 rounded-2xl text-xs sm:text-sm font-medium transition-colors cursor-pointer"
             >
-              <UploadCloud className="w-5 h-5" />
+              <UploadCloud className="w-4 h-4" />
               <span>Bulk Upload</span>
             </button>
             <button 
               onClick={() => setShowFormModal(true)}
-              className="flex items-center space-x-2 bg-primary hover:bg-primaryHover text-white px-4 py-2 rounded-2xl font-medium transition-colors cursor-pointer"
+              className="flex-1 sm:flex-none flex items-center justify-center space-x-2 bg-primary hover:bg-primaryHover text-white px-3.5 py-2.5 rounded-2xl text-xs sm:text-sm font-medium transition-colors cursor-pointer shadow-md shadow-primary/20"
             >
-              <Plus className="w-5 h-5" />
+              <Plus className="w-4 h-4" />
               <span>Add Single Paper</span>
             </button>
           </div>
@@ -283,34 +283,34 @@ export default function Papers() {
       {/* Student Banner */}
       {isStudent && (
         <div className="p-4 rounded-2xl bg-blue-500/10 border border-blue-500/20 text-text flex items-start gap-3">
-          <div className="p-2 rounded-xl bg-blue-500/20 text-blue-400 mt-0.5">
+          <div className="p-2 rounded-xl bg-blue-500/20 text-blue-400 mt-0.5 shrink-0">
             <GraduationCap className="w-5 h-5" />
           </div>
           <div>
-            <h4 className="font-semibold text-sm text-blue-400">Exam Practice & AI Senior Examiner Marking</h4>
-            <p className="text-textMuted text-xs mt-1 leading-relaxed">
-              Explore past papers, review questions against official marking schemes, and click <strong className="text-text font-bold">"Mark My Paper"</strong> on any exam to upload your handwritten working for instant AI grading and red-ink corrections.
+            <h4 className="font-semibold text-xs sm:text-sm text-blue-400">Exam Practice & AI Senior Examiner Marking</h4>
+            <p className="text-textMuted text-[11px] sm:text-xs mt-1 leading-relaxed">
+              Explore past papers, review questions against official marking schemes, and tap <strong className="text-text font-bold">"Mark My Paper"</strong> on any exam to upload handwritten working for instant AI grading and red-ink marks.
             </p>
           </div>
         </div>
       )}
 
       {/* Toolbar */}
-      <div className="bg-surface border border-border rounded-3xl p-4 flex flex-wrap gap-4 items-center justify-between">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-textMuted" />
+      <div className="bg-surface border border-border rounded-3xl p-3 sm:p-4 flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
+        <div className="relative w-full md:flex-1 md:min-w-[200px]">
+          <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-textMuted" />
           <input
             type="text"
-            placeholder="Search Papers..."
+            placeholder="Search papers by subject, year..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-background border border-border rounded-2xl text-text focus:outline-none focus:border-primary transition-colors"
+            className="w-full pl-9 pr-4 py-2 bg-background border border-border rounded-2xl text-xs sm:text-sm text-text focus:outline-none focus:border-primary transition-colors"
           />
         </div>
         
-        <div className="flex gap-4 overflow-x-auto pb-2 sm:pb-0">
+        <div className="grid grid-cols-3 gap-2 w-full md:w-auto">
           <select 
-            className="bg-background border border-border text-text rounded-2xl px-4 py-2 focus:outline-none focus:border-primary cursor-pointer"
+            className="bg-background border border-border text-text rounded-2xl px-2.5 sm:px-4 py-2 text-xs sm:text-sm focus:outline-none focus:border-primary cursor-pointer truncate"
             value={curriculumFilter}
             onChange={(e) => setCurriculumFilter(e.target.value)}
           >
@@ -319,7 +319,7 @@ export default function Papers() {
             <option value="Cambridge">Cambridge</option>
           </select>
           <select 
-            className="bg-background border border-border text-text rounded-2xl px-4 py-2 focus:outline-none focus:border-primary cursor-pointer"
+            className="bg-background border border-border text-text rounded-2xl px-2.5 sm:px-4 py-2 text-xs sm:text-sm focus:outline-none focus:border-primary cursor-pointer truncate"
             value={subjectFilter}
             onChange={(e) => setSubjectFilter(e.target.value)}
           >
@@ -329,7 +329,7 @@ export default function Papers() {
             ))}
           </select>
           <select 
-            className="bg-background border border-border text-text rounded-2xl px-4 py-2 focus:outline-none focus:border-primary cursor-pointer"
+            className="bg-background border border-border text-text rounded-2xl px-2.5 sm:px-4 py-2 text-xs sm:text-sm focus:outline-none focus:border-primary cursor-pointer truncate"
             value={yearFilter}
             onChange={(e) => setYearFilter(e.target.value)}
           >
@@ -341,8 +341,149 @@ export default function Papers() {
         </div>
       </div>
 
-      {/* Papers Table */}
-      <div className="bg-surface border border-border rounded-3xl overflow-hidden">
+      {/* Mobile Card List (Visible on mobile/tablet < lg) */}
+      <div className="block lg:hidden space-y-3">
+        {loading ? (
+          <div className="bg-surface border border-border rounded-3xl p-8 text-center text-textMuted text-sm">
+            Loading papers...
+          </div>
+        ) : filteredPapers.length === 0 ? (
+          <div className="bg-surface border border-border rounded-3xl p-8 text-center text-textMuted text-sm">
+            No papers found matching your criteria.
+          </div>
+        ) : (
+          filteredPapers.map((paper) => (
+            <div key={paper.id} className="bg-surface border border-border rounded-3xl p-4 space-y-3 shadow-sm hover:border-primary/40 transition-colors">
+              {/* Top row: Subject, curriculum badge, paper year */}
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl flex items-center justify-center bg-primary/10 border border-primary/20 shrink-0">
+                    <BookOpen className="w-5 h-5 text-primary" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-text text-base leading-tight">{paper.subject}</h3>
+                    <p className="text-xs text-textMuted mt-0.5">
+                      {paper.curriculum} • {paper.grade_level} • Paper {paper.paper_number}
+                      {paper.variant ? ` (Var ${paper.variant})` : ''}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="text-right shrink-0">
+                  <span className="inline-block px-2.5 py-1 rounded-xl text-xs font-semibold bg-background border border-border text-text">
+                    {paper.year} {paper.session ? `(${paper.session})` : ''}
+                  </span>
+                </div>
+              </div>
+
+              {/* Status / Feature Tags */}
+              <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                {paper.type === 'ms' ? (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-[11px] font-medium bg-success/10 text-success border border-success/20">
+                    Marking Scheme
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-[11px] font-medium bg-primary/10 text-primary border border-primary/20">
+                    Question Paper
+                  </span>
+                )}
+
+                {paper.ingestion_jobs && paper.ingestion_jobs.length > 0 && (
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-lg text-[11px] font-medium ${
+                    paper.ingestion_jobs[0].status === 'completed' ? 'bg-success/10 text-success border border-success/20' :
+                    paper.ingestion_jobs[0].status === 'failed' ? 'bg-error/10 text-error border border-error/20' :
+                    'bg-warning/10 text-warning border border-warning/20'
+                  }`}>
+                    {paper.ingestion_jobs[0].status.charAt(0).toUpperCase() + paper.ingestion_jobs[0].status.slice(1)}
+                    {paper.question_count > 0 ? ` (${paper.question_count} Qs)` : ''}
+                  </span>
+                )}
+
+                {paper.pdf_url && (
+                  <a
+                    href={paper.pdf_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-medium text-primary bg-primary/5 border border-primary/20 hover:bg-primary/10 transition-colors"
+                  >
+                    <span>View PDF</span>
+                    <ExternalLink className="w-3 h-3 opacity-70" />
+                  </a>
+                )}
+              </div>
+
+              {/* Action Buttons */}
+              <div className="pt-2 border-t border-border/60 flex flex-col gap-2">
+                {/* Primary Action Button: Mark Paper */}
+                <button
+                  type="button"
+                  onClick={() => setSelectedPaperForMarking(paper)}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-2xl text-xs font-bold bg-primary hover:bg-primaryHover text-white transition-all shadow-md shadow-primary/20 cursor-pointer"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  <span>{isStudent ? 'Mark My Paper with AI' : 'Mark Students Papers'}</span>
+                  {paper.marked_count > 0 && (
+                    <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] bg-white/20 text-white font-bold">
+                      {paper.marked_count} marked
+                    </span>
+                  )}
+                </button>
+
+                {/* Secondary Action Row: Scheme, View Details, Delete */}
+                <div className="flex items-center gap-2">
+                  {paper.solution_count > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setViewingPaperId(paper.id);
+                        setInitialModalTab('scheme');
+                      }}
+                      className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-semibold bg-success/15 text-success border border-success/30 hover:bg-success/25 transition-all cursor-pointer"
+                    >
+                      <FileCheck className="w-3.5 h-3.5" />
+                      <span>Scheme ({paper.solution_count})</span>
+                    </button>
+                  ) : paper.mark_scheme_url ? (
+                    <a
+                      href={paper.mark_scheme_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-medium bg-background border border-border text-text hover:bg-border/40 transition-colors"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5 text-textMuted" />
+                      <span>Scheme PDF</span>
+                    </a>
+                  ) : null}
+
+                  <button
+                    onClick={() => {
+                      setViewingPaperId(paper.id);
+                      setInitialModalTab('questions');
+                    }}
+                    className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-medium bg-background hover:bg-border/50 text-text border border-border transition-colors cursor-pointer"
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                    <span>Questions</span>
+                  </button>
+
+                  {!isStudent && (
+                    <button
+                      onClick={() => handleDelete(paper.id)}
+                      className="p-2 text-textMuted hover:text-error hover:bg-error/10 rounded-xl transition-colors cursor-pointer border border-border"
+                      title="Delete Paper"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Desktop Papers Table (Visible on lg+) */}
+      <div className="hidden lg:block bg-surface border border-border rounded-3xl overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>

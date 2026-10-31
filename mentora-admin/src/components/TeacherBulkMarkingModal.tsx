@@ -1279,72 +1279,69 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 overflow-hidden">
-      <div className="bg-surface border border-border rounded-3xl w-full max-w-6xl max-h-[94vh] flex flex-col shadow-2xl overflow-hidden">
+      <div className="bg-surface border border-border rounded-3xl w-full max-w-6xl h-[94dvh] max-h-[94dvh] flex flex-col shadow-2xl overflow-hidden">
         
         {/* Header */}
-        <div className="px-6 py-5 border-b border-border bg-background/50 flex items-center justify-between gap-4 shrink-0">
-          <div className="flex items-center gap-3.5">
-            <div className="w-12 h-12 rounded-2xl bg-primary/10 border border-primary/25 flex items-center justify-center text-primary shrink-0 shadow-inner">
-              <Sparkles className="w-6 h-6" />
+        <div className="px-4 sm:px-6 py-3.5 sm:py-5 border-b border-border bg-background/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-primary/10 border border-primary/25 flex items-center justify-center text-primary shrink-0 shadow-inner">
+              <Sparkles className="w-5 h-5 sm:w-6 sm:h-6" />
             </div>
             <div>
-              <div className="flex items-center gap-2.5 flex-wrap">
-                <h2 className="text-xl font-bold text-text">
-                  {isStudent ? 'AI Exam Paper Marking' : 'Bulk Marking'} — {paper?.subject} Paper {paper?.paper_number}
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-base sm:text-xl font-bold text-text">
+                  {isStudent ? 'AI Exam Paper Marking' : 'Bulk Marking'} — {paper?.subject} P{paper?.paper_number}
                 </h2>
-                <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-primary/15 text-primary border border-primary/30">
+                <span className="px-2 py-0.5 rounded-full text-[11px] sm:text-xs font-semibold bg-primary/15 text-primary border border-primary/30">
                   {paper?.curriculum || 'Exam Paper'}
                 </span>
-                <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-border text-textMuted">
+                <span className="px-2 py-0.5 rounded-full text-[11px] sm:text-xs font-semibold bg-border text-textMuted">
                   {paper?.year} {paper?.session ? `(${paper.session})` : ''}
                 </span>
               </div>
-              <p className="text-xs text-textMuted mt-1">
+              <p className="text-[11px] sm:text-xs text-textMuted mt-0.5">
                 {isStudent 
-                  ? 'Upload your handwritten answer sheets (photos or PDF) to automatically grade with the Mentora AI Senior Examiner against the official mark scheme.' 
-                  : 'Upload student answer sheets to automatically grade with the Mentora AI Senior Examiner against the official mark scheme.'}
+                  ? 'Upload handwritten answer sheets (photos or PDF) to grade with AI Senior Examiner.' 
+                  : 'Upload student answer sheets to automatically grade with AI Senior Examiner.'}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center justify-between sm:justify-end gap-2 shrink-0">
             {isBatchTiming ? (
-              <div className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-bold px-3.5 py-2 rounded-2xl shadow-sm animate-pulse">
+              <div className="flex items-center gap-1.5 sm:gap-2 bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-bold px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-2xl shadow-sm animate-pulse">
                 <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                <span>{activeCount}/{concurrency} Workers</span>
+                <span>{activeCount}/{concurrency}</span>
                 <span className="w-1 h-1 rounded-full bg-amber-500/50" />
                 <Timer className="w-3.5 h-3.5 text-amber-500" />
-                <span className="font-mono text-sm tracking-wide">{formatStopwatch(elapsedSec)}</span>
+                <span className="font-mono text-xs sm:text-sm tracking-wide">{formatStopwatch(elapsedSec)}</span>
               </div>
             ) : batchEndTime && !isBatchTiming ? (
-              <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs font-bold px-3.5 py-2 rounded-2xl shadow-sm">
-                <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                <span>Batch Done: {formatDurationText(elapsedSec)}</span>
-                <span className="hidden sm:inline text-[11px] font-normal opacity-85">({batchTotalCount || queue.length} papers)</span>
-              </div>
-            ) : activeCount > 0 ? (
-              <div className="hidden sm:flex items-center gap-2 bg-primary/10 border border-primary/25 text-primary text-xs font-semibold px-3 py-2 rounded-2xl animate-pulse">
-                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                <span>Parallel Marking Active ({activeCount}/{concurrency} Workers)</span>
+              <div className="flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs font-bold px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-2xl shadow-sm">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                <span>Done: {formatDurationText(elapsedSec)}</span>
               </div>
             ) : null}
-            <button
-              onClick={() => {
-                resetUploadForm();
-                setShowUploadModal(true);
-              }}
-              className="flex items-center gap-2 bg-primary hover:bg-primaryHover text-white px-4 py-2.5 rounded-2xl font-semibold text-sm transition-all shadow-lg shadow-primary/20 hover:scale-[1.02] cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-              <span>{isStudent ? 'Submit My Paper' : 'Mark New Paper'}</span>
-            </button>
-            <button 
-              onClick={onClose}
-              className="p-2 hover:bg-border/50 rounded-2xl transition-colors text-textMuted hover:text-text cursor-pointer"
-              title="Close"
-            >
-              <X className="w-5 h-5" />
-            </button>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  resetUploadForm();
+                  setShowUploadModal(true);
+                }}
+                className="flex items-center gap-1.5 bg-primary hover:bg-primaryHover text-white px-3 sm:px-4 py-2 sm:py-2.5 rounded-2xl font-semibold text-xs sm:text-sm transition-all shadow-lg shadow-primary/20 cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>{isStudent ? 'Submit My Paper' : 'Mark Paper'}</span>
+              </button>
+              <button 
+                onClick={onClose}
+                className="p-1.5 sm:p-2 hover:bg-border/50 rounded-2xl transition-colors text-textMuted hover:text-text cursor-pointer"
+                title="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
           </div>
         </div>
 

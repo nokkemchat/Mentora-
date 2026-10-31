@@ -69,38 +69,38 @@ export default function Courses() {
   });
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6">
+    <div className="max-w-7xl mx-auto space-y-5 sm:space-y-6">
       {/* Header */}
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-text">Course Manager</h1>
-          <p className="text-textMuted mt-2">Manage all courses and assignments</p>
+          <h1 className="text-2xl sm:text-3xl font-bold text-text tracking-tight">Course Manager</h1>
+          <p className="text-xs sm:text-sm text-textMuted mt-1">Manage all courses and assignments</p>
         </div>
         <button 
           onClick={() => setShowWizard(true)}
-          className="flex items-center space-x-2 bg-primary hover:bg-primary-hover text-white px-4 py-2 rounded-2xl font-medium transition-colors"
+          className="w-full sm:w-auto flex items-center justify-center space-x-2 bg-primary hover:bg-primary-hover text-white px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-medium transition-colors shadow-md shadow-primary/20 cursor-pointer"
         >
-          <Plus className="w-5 h-5" />
+          <Plus className="w-4 h-4" />
           <span>Create New Course</span>
         </button>
       </div>
 
       {/* Toolbar */}
-      <div className="bg-surface border border-border rounded-3xl p-4 flex flex-wrap gap-4 items-center justify-between">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-textMuted" />
+      <div className="bg-surface border border-border rounded-3xl p-3 sm:p-4 flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
+        <div className="relative w-full md:flex-1 md:min-w-[200px]">
+          <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-textMuted" />
           <input
             type="text"
-            placeholder="Search Courses..."
+            placeholder="Search courses..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-background border border-border rounded-2xl text-text focus:outline-none focus:border-primary transition-colors"
+            className="w-full pl-9 pr-4 py-2 bg-background border border-border rounded-2xl text-xs sm:text-sm text-text focus:outline-none focus:border-primary transition-colors"
           />
         </div>
         
-        <div className="flex gap-4 overflow-x-auto pb-2 sm:pb-0">
+        <div className="grid grid-cols-3 gap-2 w-full md:w-auto">
           <select 
-            className="bg-background border border-border text-text rounded-2xl px-4 py-2 focus:outline-none focus:border-primary cursor-pointer"
+            className="bg-background border border-border text-text rounded-2xl px-2.5 sm:px-4 py-2 text-xs sm:text-sm focus:outline-none focus:border-primary cursor-pointer truncate"
             value={boardFilter}
             onChange={(e) => setBoardFilter(e.target.value)}
           >
@@ -109,7 +109,7 @@ export default function Courses() {
             <option value="Cambridge">Cambridge</option>
           </select>
           <select 
-            className="bg-background border border-border text-text rounded-2xl px-4 py-2 focus:outline-none focus:border-primary cursor-pointer"
+            className="bg-background border border-border text-text rounded-2xl px-2.5 sm:px-4 py-2 text-xs sm:text-sm focus:outline-none focus:border-primary cursor-pointer truncate"
             value={categoryFilter}
             onChange={(e) => setCategoryFilter(e.target.value)}
           >

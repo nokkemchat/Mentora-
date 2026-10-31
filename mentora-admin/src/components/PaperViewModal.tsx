@@ -451,37 +451,37 @@ export default function PaperViewModal({ paperId, initialTab = 'questions', onCl
     : questions.filter(q => String(q.question_number) === selectedQNumber);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm">
-      <div className="bg-surface w-full max-w-5xl h-[90vh] rounded-[2rem] shadow-2xl border border-border flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-background/80 backdrop-blur-sm">
+      <div className="bg-surface w-full max-w-5xl h-[92dvh] max-h-[92dvh] rounded-3xl sm:rounded-[2rem] shadow-2xl border border-border flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         
         {/* Header */}
-        <div className="px-8 py-5 border-b border-border flex items-center justify-between shrink-0 bg-surface/50">
+        <div className="px-4 sm:px-8 py-4 sm:py-5 border-b border-border flex items-center justify-between shrink-0 bg-surface/50">
           <div>
-            <div className="flex items-center gap-2.5">
-              <h2 className="text-2xl font-bold text-text">
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg sm:text-2xl font-bold text-text">
                 {activeTab === 'scheme' ? 'Marking Scheme Breakdown' : activeTab === 'combined' ? 'Question Paper & Marking Scheme' : 'Question Paper Breakdown'}
               </h2>
               {paper?.type === 'ms' && (
-                <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-success/15 text-success border border-success/30">
+                <span className="px-2 py-0.5 rounded-full text-[11px] sm:text-xs font-semibold bg-success/15 text-success border border-success/30">
                   Mark Scheme
                 </span>
               )}
             </div>
-            <p className="text-sm text-textMuted mt-1 flex items-center gap-2">
-              <span>{paper ? `${paper.subject} • ${paper.curriculum} • ${paper.year} • Paper ${paper.paper_number} ${paper.variant ? `(Variant ${paper.variant})` : ''}` : 'Loading...'}</span>
-              {totalMarks > 0 && <span className="text-xs font-semibold px-2 py-0.5 bg-border/50 rounded-lg">Total: {totalMarks} Marks</span>}
+            <p className="text-xs sm:text-sm text-textMuted mt-1 flex items-center gap-2 flex-wrap">
+              <span>{paper ? `${paper.subject} • ${paper.curriculum} • ${paper.year} • P${paper.paper_number} ${paper.variant ? `(Var ${paper.variant})` : ''}` : 'Loading...'}</span>
+              {totalMarks > 0 && <span className="text-[11px] sm:text-xs font-semibold px-2 py-0.5 bg-border/50 rounded-lg">Total: {totalMarks} Marks</span>}
             </p>
           </div>
           <button 
             onClick={onClose}
-            className="p-2.5 hover:bg-border/50 rounded-2xl transition-colors text-textMuted hover:text-text cursor-pointer"
+            className="p-2 sm:p-2.5 hover:bg-border/50 rounded-2xl transition-colors text-textMuted hover:text-text cursor-pointer shrink-0"
           >
-            <X className="w-6 h-6" />
+            <X className="w-5 h-5 sm:w-6 sm:h-6" />
           </button>
         </div>
 
         {/* Navigation Tabs Bar */}
-        <div className="px-8 pt-3 border-b border-border bg-surface flex flex-wrap items-center justify-between gap-3 shrink-0">
+        <div className="px-3 sm:px-8 pt-2 border-b border-border bg-surface flex items-center justify-start gap-1 sm:gap-2 shrink-0 overflow-x-auto no-scrollbar">
           <div className="flex items-center space-x-1 sm:space-x-2">
             <button
               type="button"

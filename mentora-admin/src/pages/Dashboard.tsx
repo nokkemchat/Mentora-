@@ -123,10 +123,10 @@ export default function Dashboard() {
   if (loading) return <div>Loading dashboard...</div>;
 
   return (
-    <div className="max-w-6xl mx-auto space-y-8">
+    <div className="max-w-6xl mx-auto space-y-6 sm:space-y-8">
       <div>
-        <h1 className="text-3xl font-bold text-text">Overview</h1>
-        <p className="text-textMuted mt-1">
+        <h1 className="text-2xl sm:text-3xl font-bold text-text tracking-tight">Overview</h1>
+        <p className="text-sm sm:text-base text-textMuted mt-1">
           {isAdmin 
             ? 'Welcome to the Mentora Admin Console.' 
             : isStudent 
@@ -137,21 +137,21 @@ export default function Dashboard() {
 
       {/* Student Highlight Banner */}
       {isStudent && (
-        <div className="p-6 rounded-3xl bg-gradient-to-r from-primary/15 via-primary/5 to-transparent border border-primary/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-2xl bg-primary text-white flex items-center justify-center shadow-lg shadow-primary/30 shrink-0">
-              <GraduationCap className="w-6 h-6" />
+        <div className="p-4 sm:p-6 rounded-3xl bg-gradient-to-r from-primary/15 via-primary/5 to-transparent border border-primary/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3.5 sm:gap-4">
+            <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl bg-primary text-white flex items-center justify-center shadow-lg shadow-primary/30 shrink-0">
+              <GraduationCap className="w-5 h-5 sm:w-6 sm:h-6" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-text">Practice Past Papers & Mark with AI</h2>
-              <p className="text-sm text-textMuted">
+              <h2 className="text-base sm:text-lg font-bold text-text">Practice Past Papers & Mark with AI</h2>
+              <p className="text-xs sm:text-sm text-textMuted mt-0.5">
                 Review questions, upload your handwritten working, and get graded instantly by the AI Senior Examiner with red-ink marks.
               </p>
             </div>
           </div>
           <Link
             to="/papers"
-            className="flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-primary hover:bg-primaryHover text-white text-sm font-semibold transition-colors shadow-md shadow-primary/20 shrink-0"
+            className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-2.5 rounded-2xl bg-primary hover:bg-primaryHover text-white text-sm font-semibold transition-colors shadow-md shadow-primary/20 shrink-0"
           >
             <Sparkles className="w-4 h-4" />
             <span>Mark My Past Papers</span>
@@ -160,18 +160,18 @@ export default function Dashboard() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
         {statCards.map((stat, i) => {
           const Icon = stat.icon;
           return (
-            <div key={i} className="bg-surface border border-border rounded-3xl p-6 hover:border-border/80 transition-colors">
+            <div key={i} className="bg-surface border border-border rounded-3xl p-5 sm:p-6 hover:border-border/80 transition-colors shadow-sm">
               <div className="flex items-start justify-between">
                 <div>
-                  <p className="text-sm font-medium text-textMuted mb-1">{stat.label}</p>
-                  <h3 className="text-3xl font-bold text-text">{stat.value}</h3>
+                  <p className="text-xs sm:text-sm font-medium text-textMuted mb-1">{stat.label}</p>
+                  <h3 className="text-2xl sm:text-3xl font-bold text-text">{stat.value}</h3>
                 </div>
-                <div className={`p-3 rounded-2xl ${stat.bg}`}>
-                  <Icon className={`w-6 h-6 ${stat.color}`} />
+                <div className={`p-2.5 sm:p-3 rounded-2xl ${stat.bg}`}>
+                  <Icon className={`w-5 h-5 sm:w-6 sm:h-6 ${stat.color}`} />
                 </div>
               </div>
             </div>
