@@ -1,253 +1,13 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
+import { parseRubric, computeSubpartScore } from "./rubricEngine.ts";
+import { buildCriterionEvaluationPrompt, SubpartPerceptionDetails } from "./criterionEvaluation.ts";
+import { buildPerceptionPrompt, QuestionPerceptionResult, ObservedSubpartWork } from "./perceptionAgent.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
-
-// Authoritative Syllabus Knowledge & Mark Schemes for Cambridge IGCSE 0620 Chemistry Paper 4
-const BUILTIN_CHEM_PAPER: Record<string, { marks: number; topic: string; content_text: string; mark_scheme: string }> = {
-  "1": {
-    marks: 7,
-    topic: "States of matter / Separation techniques",
-    content_text: "Name the process that is used to:\n(a) Convert sulfur dioxide into sulfur trioxide in the manufacture of sulfuric acid [1]\n(b) Obtain water from aqueous sodium chloride [1]\n(c) Extract aluminium from purified bauxite [1]\n(d) Separate petroleum into useful substances [1]\n(e) Produce ethanol from aqueous glucose [1]\n(f) Manufacture alkenes and hydrogen from large alkane molecules [1]\n(g) Separate a mixture of soluble coloured substances [1]",
-    mark_scheme: "(a) Contact process (1 mark)\n(b) Simple distillation / distillation (1 mark)\n(c) Electrolysis / Hall-Héroult process (1 mark)\n(d) Fractional distillation (1 mark)\n(e) Fermentation (1 mark)\n(f) Cracking / thermal cracking / catalytic cracking (1 mark)\n(g) Chromatography / paper chromatography (1 mark)"
-  },
-  "2": {
-    marks: 5,
-    topic: "Atoms, elements and compounds",
-    content_text: "Complete Table 2.1 to show the number of subatomic particles in the given species:\n• 37_17Cl (Chlorine-37 isotope): Protons = 17, Electrons = ?, Neutrons = ?\n• 63_29Cu+ (Copper(I) ion): Protons = 29, Electrons = ?, Neutrons = 34\n• 33_16S2- (Sulfide ion): Protons = 16, Electrons = 18, Neutrons = 17\nState the missing values for protons, neutrons, and electrons.",
-    mark_scheme: "• 37_17Cl: 17 protons, 17 electrons, 20 neutrons (1 mark)\n• 63_29Cu+: 29 protons, 28 electrons (1 mark), 34 neutrons (1 mark)\n• 33_16S2-: 16 protons, 18 electrons (1 mark), 17 neutrons (1 mark)"
-  },
-  "3": {
-    marks: 14,
-    topic: "Atoms, elements and compounds / Stoichiometry / Electricity and chemistry",
-    content_text: "This question is about the elements sodium and fluorine and the compound sodium fluoride.\n(a) Sodium reacts with fluorine to form sodium fluoride. Write a symbol equation for this reaction. [2]\n(b) Some properties of sodium, fluorine and sodium fluoride are shown in Table 3.1:\n• Sodium: Melting pt 98 °C, Boiling pt 883 °C, Good conductor (solid)\n• Fluorine: Melting pt -220 °C, Boiling pt -188 °C, Poor conductor\n• Sodium fluoride: Melting pt 993 °C, Boiling pt 1695 °C, Poor conductor (solid), Good conductor (aqueous)\n(i) Explain why sodium conducts electricity when it is a solid. [1]\n(ii) Complete the dot-and-cross diagram of a molecule of fluorine (F2). Show outer shell electrons only. [2]\n(iii) Deduce the physical state of fluorine at -200 °C. Use the data in Table 3.1 to explain your answer. [2]\n(iv) Explain in terms of structure and bonding why sodium fluoride has a much higher melting point than fluorine. [3]\n(c) Dilute aqueous sodium fluoride undergoes electrolysis. Hydrogen is produced at the cathode.\n(i) State what is meant by the term electrolysis. [2]\n(ii) Write an ionic half-equation for the production of hydrogen at the cathode. [2]",
-    mark_scheme: "(a) 2Na + F2 → 2NaF (2 marks: 1 for correct formulas, 1 for balancing)\n(b)(i) Sodium has delocalised / mobile electrons that can move through the lattice to carry electrical charge (1 mark).\n(b)(ii) 1 shared pair of electrons between both F atoms; 6 non-bonding electrons (3 lone pairs) on each F atom (2 marks).\n(b)(iii) Physical state: Liquid (1 mark). Explanation: -200 °C is above melting point (-220 °C) and below boiling point (-188 °C) (1 mark). (NOTE: Claiming fluorine is gas at -200 °C or that -200 > -188 is scientifically wrong and gets 0 marks).\n(b)(iv) Sodium fluoride has a giant ionic lattice with strong electrostatic forces of attraction between oppositely charged ions (Na+ and F-), requiring large amounts of energy to overcome (2 marks). Fluorine has a simple molecular structure with weak intermolecular forces between molecules, requiring very little energy to break (1 mark).\n(c)(i) Breakdown / decomposition of an ionic compound / electrolyte, molten or in aqueous solution, by the passage of electricity (2 marks).\n(c)(ii) 2H+ + 2e- → H2 (or 2H2O + 2e- → H2 + 2OH-) (2 marks)."
-  },
-  "4": {
-    marks: 10,
-    topic: "Chemical reactions / Equilibrium & Catalysts",
-    content_text: "Hydrogen iodide thermally decomposes into iodine and hydrogen. The reaction is reversible:\n2HI(g) ⇌ I2(g) + H2(g)\n(a) State what is meant by the term equilibrium. [2]\n(b) The pressure of the mixture is increased. All other conditions stay the same. The position of equilibrium does not change. The colour of the gaseous mixture turns darker purple.\n(i) Explain why the position of equilibrium does not change. [1]\n(ii) Suggest why the colour of the mixture of gases turns darker purple. [1]\n(c) The temperature of the mixture of gases is decreased. All other conditions stay the same. The mixture of gases turns lighter purple. State what can be deduced about the forward reaction from this information. [1]\n(d) Deduce the oxidation number of iodine in HI [1] and I2 [1].\n(e) Methanol is manufactured by reacting carbon monoxide with hydrogen: CO(g) + 2H2(g) ⇌ CH3OH(g). The rate increases when a catalyst is used.\n(i) Choose from the list the element most likely to be used as catalyst: [calcium, carbon, copper, sodium, sulfur] [1]\n(ii) State the effect on equilibrium position when catalyst is used. [1]\n(iii) State the effect catalyst has on activation energy. [1]",
-    mark_scheme: "(a) Rate of forward reaction equals rate of reverse reaction (1 mark). Concentrations of reactants and products remain constant in a closed system (1 mark).\n(b)(i) Equal numbers of moles of gas (2 moles on left, 2 moles on right) on both sides of equation (1 mark).\n(b)(ii) Increasing pressure decreases volume of the syringe, increasing concentration of purple I2 molecules per unit volume (1 mark).\n(c) Forward reaction is endothermic (1 mark) because lowering temperature favours exothermic reverse reaction, reducing purple I2.\n(d) In HI: -1 (1 mark); In I2: 0 (1 mark).\n(e)(i) Copper (transition metal element) (1 mark)\n(e)(ii) No effect / position of equilibrium remains unchanged (1 mark)\n(e)(iii) Lowers / decreases activation energy by providing alternative reaction pathway (1 mark)."
-  },
-  "5": {
-    marks: 17,
-    topic: "Acids, bases and salts",
-    content_text: "(a) Lead(II) bromide, PbBr2, is an insoluble salt made by precipitation.\n(i) Name two aqueous solutions that produce a precipitate of lead(II) bromide. [2]\n(ii) Describe how to produce a pure sample of lead(II) bromide from the reaction mixture. [2]\n(iii) Write an ionic equation for the precipitation reaction including state symbols. [3]\n(b) Thermal decomposition of iron(II) sulfate crystals. [2]\n(c) Complete equation for thermal decomposition of hydrated iron(II) sulfate. [2]\n(d) Hydrated cobalt(II) sulfate CoSO4•xH2O:\n(i) Describe what else the student should do to ensure all water is removed. [2]\n(ii) Heating 1.405 g of CoSO4•xH2O leaves 0.775 g of anhydrous CoSO4. Calculate x. [4]",
-    mark_scheme: "(a)(i) Aqueous lead(II) nitrate AND aqueous sodium bromide (or potassium bromide) (2 marks).\n(a)(ii) Filter to collect precipitate, wash residue with distilled water, dry between filter papers or in warm oven (2 marks).\n(a)(iii) Pb2+(aq) + 2Br-(aq) → PbBr2(s) (3 marks: 1 for Pb2+ and 2Br-, 1 for PbBr2, 1 for correct state symbols aq and s).\n(b) Fe2+ loses electrons / oxidised; S6+ in SO42- reduced (2 marks).\n(c) 2FeSO4•7H2O → Fe2O3 + SO2 + SO3 + 14H2O (2 marks).\n(d)(i) Heat again, cool, reweigh until mass is constant / constant mass reached (2 marks).\n(d)(ii) Mass of anhydrous CoSO4 = 0.775 g; Mr = 155; moles CoSO4 = 0.005 mol (1 mark). Mass of water = 1.405 - 0.775 = 0.630 g; moles H2O = 0.630 / 18 = 0.035 mol (1 mark). Mole ratio H2O : CoSO4 = 7 (1 mark). x = 7 (1 mark)."
-  },
-  "6": {
-    marks: 14,
-    topic: "Metals / Extraction of iron & zinc",
-    content_text: "(a) Blast furnace used to extract iron from haematite.\n(i) Coke and iron ore added at top. Name two other substances added. [2]\n(ii) Name substance that leaves at A. [1]\n(iii) Impurity in iron ore and how slag is formed. [2]\n(iv) Reactions in blast furnace. [2]\n(v) Two waste gases leaving blast furnace. [2]\n(b) Zinc extracted from zinc oxide in a furnace.\n(i) Why zinc produced is gas. [1]\n(ii) Physical change when gaseous zinc cooled. [1]\n(c) Galvanising and sacrificial protection of iron by zinc. [3]\n(d) Amphoteric nature of zinc oxide. [2]",
-    mark_scheme: "(a)(i) Limestone / calcium carbonate AND air / oxygen (2 marks).\n(a)(ii) Molten iron (or slag) (1 mark).\n(a)(iii) Sand / silica / silicon dioxide (1 mark). Reacts with CaO to form calcium silicate / slag (1 mark).\n(a)(iv) C + O2 → CO2 (1 mark); Fe2O3 + 3CO → 2Fe + 3CO2 (1 mark).\n(a)(v) Carbon dioxide, carbon monoxide, nitrogen (any two, 2 marks).\n(b)(i) Temperature in furnace is above zinc's boiling point (907 °C) (1 mark).\n(b)(ii) Condensation / condensing (1 mark).\n(c)(i) Galvanising (1 mark).\n(c)(ii) Zinc is more reactive than iron, so zinc loses electrons / corrodes sacrificially instead of iron (2 marks).\n(d)(i) Amphoteric (1 mark).\n(d)(ii) Sodium zincate / Na2Zn(OH)4 (1 mark)."
-  },
-  "7": {
-    marks: 13,
-    topic: "Organic chemistry / Polymers, cracking and esters",
-    content_text: "(a) Organic compound A: C 82.76%, H 17.24%.\n(i) Calculate empirical formula. [3]\n(ii) Deduce molecular formula if Mr = 58. [1]\n(b) Polymer Q section shown.\n(i) Name monomer. [1]\n(ii) Draw displayed formula of monomer. [2]\n(c) Catalytic cracking of C11H24 to produce propene C3H6 and alkane. [2]\n(d) Carboxylic acids and esters:\n(i) Ester X and carboxylic acid Y with 3 carbons. Name carboxylic acid Y and draw displayed formula. [2]\n(ii) Name ester X. [1]\n(iii) Conditions for esterification reaction. [1]",
-    mark_scheme: "(a)(i) Moles C = 82.76/12 = 6.90; Moles H = 17.24/1 = 17.24. Ratio = 1 : 2.5 = 2 : 5. Empirical formula = C2H5 (3 marks).\n(a)(ii) Empirical mass = 29; 58/29 = 2. Molecular formula = C4H10 (1 mark).\n(b)(i) Propene (1 mark).\n(b)(ii) CH2=CH-CH3 displayed formula with C=C double bond (2 marks).\n(c) C11H24 → C3H6 + C8H18 (2 marks).\n(d)(i) Propanoic acid; displayed formula CH3CH2COOH (2 marks).\n(d)(ii) Methyl ethanoate (or ethyl methanoate) (1 mark).\n(d)(iii) Concentrated sulfuric acid catalyst and heat / reflux (1 mark)."
-  }
-};
-
-// Authoritative Syllabus Knowledge & Mark Schemes for Cambridge IGCSE 0625 Physics Paper 41 (May/June 2024)
-const BUILTIN_PHYSICS_PAPER: Record<string, { marks: number; topic: string; content_text: string; mark_scheme: string }> = {
-  "1": {
-    "marks": 10,
-    "topic": "Motion, Forces and Energy",
-    "content_text": "A long tube contains oil. A small ball is held at rest at the surface of the oil. At time   t   = 0, the ball is released and begins to fall vertically through the oil.  Fig. 1.1 shows the ball falling through the oil. ball oil  Fig. 1.1  As the ball begins to fall through the oil, it accelerates.  (a)   Define acceleration. ....... .......   [1]  (b)   The mass of the ball is 0.0075 kg.  Calculate the resultant force acting on the ball when it is accelerating downwards at 2.8 m / s 2  . resultant force = .......   [2]\n\n  (c)   As the ball falls, its speed   v   is recorded. Fig. 1.2 is the speed–time graph for the falling ball. 0  0   0.01   0.02   0.03   0.04  t   / s 0.02 0.04  v  m / s 0.06  Fig. 1.2 (i)   Describe what happens to the acceleration between   t   = 0 and   t   = 0.040 s.  Explain why this happens. ....... ....... ....... .......   [4]  (ii)   By drawing a tangent on Fig. 1.2, determine a value for the acceleration of the ball at   t   = 0.010 s. acceleration = .......   [3] [Total: 10]",
-    "mark_scheme": "1(a) B1: acceleration is rate of change in velocity OR change in velocity per unit time OR (a =) ∆v / ∆t (1 mark); 1(b) A2: 0.021 N; C1: F = ma OR (F =) ma OR 0.0075 × 2.8 (2 marks); 1(c)(i) B4: any four from: (acceleration) decreases; (acceleration decreases) to zero (at approximately 0.03 s); resistive force increases / resistance increases (as speed / velocity increases); resultant force (downwards) decreases; (until) terminal velocity / constant speed (is reached); (when) resistive force = weight OR resultant force is zero OR forces are balanced (4 marks); 1(c)(ii) M1: tangent drawn at t = 0.010 s; A2: 1.2 m / s² ⩽ acceleration ⩽ 1.8 m / s²; C1: (a =) gradient of tangent OR (a =) {Δy / Δx} (3 marks)"
-  },
-  "2": {
-    "marks": 8,
-    "topic": "Momentum and Energy Conservation",
-    "content_text": "Fig. 2.1 shows two identical trolleys, P and Q, held at rest on a frictionless horizontal surface. A load is fixed to trolley P. 1.5 kg load trolley P   trolley Q compressed spring  Fig. 2.1  There is a compressed spring between trolley P and trolley Q.  The trolleys are released. As the spring expands, it pushes the trolleys apart.  Trolley Q moves to the right at a constant speed of 0.36 m / s.  The mass of each trolley is 1.2 kg. The mass of the load on trolley P is 1.5 kg.  The spring has negligible mass.  (a)   Calculate:  (i)   the speed at which trolley P moves to the left speed of P = .......   [3]  (ii)   the kinetic energy of trolley Q when it moves at 0.36 m / s. kinetic energy of Q = .......   [3]  (b)   State the energy transfer that takes place as the spring expands. ....... ....... .......   [2] [Total: 8]\n\n  BLANK PAGE",
-    "mark_scheme": "2(a)(i) A3: 0.16 m / s; C1: conservation of momentum OR mP vP = mQvQ OR 2.7 × vP = 1.2 × 0.36 OR (mQvQ =) 0.432 seen; C1: (vP =) mQvQ / mP OR 1.2 × 0.36 / 2.7 (3 marks); 2(a)(ii) A3: 0.078 J; C1: (k.e. =) ½mv² OR (k.e. =) ½ × 1.2 × 0.36²; C1: (k.e. =) ½ × 1.2 × 0.36² (3 marks); 2(b) B1: (from) elastic (energy store in the compressed spring); B1: to kinetic (as final energy store of trolleys) (2 marks)"
-  },
-  "3": {
-    "marks": 9,
-    "topic": "Thermal Physics and State Changes",
-    "content_text": "Fig. 3.1 shows a small block of ice floating in a beaker of warm water. block of ice warm water  Fig. 3.1 (a)   State   one   way in which the motion of the particles in ice differs from the motion of the particles in water. ....... .......   [1]  (b)   Energy is transferred from the water to the block of ice.  (i)   State the name of the thermal process that transfers energy from the water to the ice. .......   [1]  (ii)   Initially, there is 0.34 kg of water in the beaker. The specific heat capacity of water is 4200 J / (kg °C).  Calculate the energy transferred from this water as its temperature decreases from 28 °C to 10 °C. energy transferred = .......   [2]  (iii)   The temperature of the water near the ice decreases first.  Explain how convection causes the temperature of all the water in the beaker to decrease. ....... ....... ....... .......   [3]\n\n  (iv)   State what happens to the internal energy of the water as the temperature of the water decreases.  Describe the change in terms of the energy of the particles. ....... ....... .......   [2] [Total: 9]",
-    "mark_scheme": "3(a) B1: (they / particles in ice) vibrate (about a fixed position) OR particles in water move throughout the liquid (1 mark); 3(b)(i) B1: conduction (1 mark); 3(b)(ii) A2: 2.6 × 10⁴ J; C1: c = (ΔE / mΔθ) OR (ΔE =) mcΔθ OR 0.34 × 4200 × 18; C1: (ΔE =) mcΔθ (2 marks); 3(b)(iii) B1: density (of water next to the ice) increases; B1: cold(er) water sinks; B1: warm(er) water replaces cold water OR warm(er) water rises OR making a convection current (3 marks); 3(b)(iv) A2: internal energy decreases AND (average) kinetic energy (of particles) decreases; C1: kinetic energy decreases (2 marks)"
-  },
-  "4": {
-    "marks": 10,
-    "topic": "Waves and Light (Optics)",
-    "content_text": "The lens in a magnifying glass is a converging lens.  (a)   Fig. 4.1 shows the lens of the magnifying glass, its two focal points, F 1  and F 2  , and its principal axis. principal axis   F 1   F 2 lens  Fig. 4.1 (i)   State what is meant by ‘focal point’. ....... ....... .......   [2]  (ii)   A student using the magnifying glass sees a magnified image of an object.  On Fig. 4.1, mark: •   a point X on the principal axis for a possible position of the object •   a point E for a possible position of the student’s eye. [1]  (iii)   Underline   two   words in the list that describe the image produced in   (a)(ii) .  inverted   real   upright   virtual  [1]  (b)   The refractive index of the glass used to make the lens is 1.5.  (i)   The speed of light in air is 3.0   ×   10 8  m / s.  Calculate the speed of light in the glass. speed in glass = .......   [2]\n\n  (ii)   State what happens to the wavelength of light as it passes into the lens. ....... .......   [1]  (c)   Converging lenses are used in spectacles (glasses) to correct one problem with vision.  State the name of the problem and explain how a converging lens is used to correct it. You may draw a diagram. name of problem: ....... ....... ....... ....... ....... [3] [Total: 10]",
-    "mark_scheme": "4(a)(i) B1: (point on principal axis) where rays of light parallel (to the principal axis, incident on converging lens); B1: (rays) meet / converge after passing through lens / refraction (2 marks); 4(a)(ii) B1: X marked between one of the focal points and the lens AND E marked on other side of lens (1 mark); 4(a)(iii) B1: virtual AND upright (1 mark); 4(b)(i) A2: 2.0 × 10⁸ m / s; C1: n = c / vg OR (vg =) c / n OR (vg =) 3(.0) × 10⁸ / 1.5 (2 marks); 4(b)(ii) B1: (wavelength) decreases (1 mark); 4(c) B1: long-sightedness; B1: it moves the image towards the lens / back of the eye / retina OR reduces / shortens focal length of (combined lens); B1: (converging lens) focuses image on back of eye / retina (3 marks)"
-  },
-  "5": {
-    "marks": 8,
-    "topic": "Seismic and Mechanical Waves",
-    "content_text": "(a)   Describe how a longitudinal wave differs from a transverse wave. ....... ....... .......   [2]  (b)   Fig. 5.1 represents a seismic wave produced by an earthquake. J   K  Fig. 5.1 (i)   State whether this seismic wave is a P-wave (primary) or an S-wave (secondary). Justify your choice. ....... .......   [1]  (ii)   The wave represented in Fig. 5.1 has a wavelength of 1.2   ×   10 4  m.  Calculate the actual distance between point J and point K. distance = .......   [2]  (iii)   The wave in   (ii)   travels through the ground at a speed of 4600 m / s.  As the wave passes a certain point, the ground completes 5 oscillations.  Calculate the time that it takes for the wave to pass. Show your working. time = .......   [3] [Total: 8]",
-    "mark_scheme": "5(a) B2: any two from: (longitudinal) vibration / oscillation in wave parallel to propagation direction / direction of travel, transverse wave vibrates / oscillates perpendicular to propagation direction / direction of travel, (longitudinal) consists of compressions and rarefactions, transverse wave consists of crests / peaks and troughs, (longitudinal) needs a medium (to travel) (2 marks); 5(b)(i) B1: P-wave AND it is longitudinal (1 mark); 5(b)(ii) A2: 1.8 × 10⁴ m OR 18 km; C1: 1.5λ OR 1.5 × 1.2 × 10⁴ OR 1.8 × 10N (2 marks); 5(b)(iii) M1: v = fλ OR v = λ / t OR (t =) λ / v OR f = 4600 / (1.2 × 10⁴); A2: 13 s; C1: t = 1 / f OR (time for one wave = ) 2.6 (s) (3 marks)"
-  },
-  "6": {
-    "marks": 9,
-    "topic": "Electricity and Static Electric Fields",
-    "content_text": "Fig. 6.1 shows an isolated metal sphere suspended by an insulating thread from the ceiling. metal sphere insulating thread  Fig. 6.1  The sphere is negatively charged.  (a)   The charge on the sphere produces an electric field in the surroundings.  (i)   State what is meant by ‘electric field’. ....... .......   [1]  (ii)   Draw on Fig. 6.1 to show the pattern and direction of the electric field produced by the charge on the sphere. Draw at least   four   lines.   [3]  (b)   The magnitude of the charge on the sphere is 3.5   ×   10 –10  C.  An   earthed   metal   wire   is   touched   against   the   surface   of   the   sphere   and   the   sphere is discharged.  (i)   State what happens in the wire as the sphere is discharged. ....... ....... .......   [2]  (ii)   It takes a time of 0.14 ns for the sphere to discharge completely.  Calculate the average current in the earthed wire as the sphere discharges. average current = .......   [3] [Total: 9]",
-    "mark_scheme": "6(a)(i) B1: (region) where (an electric) charge experiences a force OR (region) where a force acts on a (an electric) charge (1 mark); 6(a)(ii) B1: at least four straight radial lines AND evenly spaced (by eye) surrounding sphere; B1: four lines touching sphere AND no lines inside sphere; B1: at least one arrowhead towards sphere AND no incorrect arrowheads (3 marks); 6(b)(i) A2: electrons move (through the wire) from the sphere OR electrons move (through the wire) to(wards) the Earth; C1: electrons move (in the wire) (2 marks); 6(b)(ii) A3: 2.5 A; C1: I = Q / t OR (I =) Q / t OR 3.5 × 10–10 / 1.4 × 10–10; C1: 2.5 × 10N (3 marks)"
-  },
-  "7": {
-    "marks": 9,
-    "topic": "Electric Circuits and Resistance",
-    "content_text": "The electromotive force (e.m.f.) of a battery is 7.5 V.  (a)   Define the term electromotive force. ....... ....... .......   [2]  (b)   The battery is connected in series with a variable resistor and a 30   Ω   resistor. The battery is made using 1.5 V cells.  (i)   Draw a circuit diagram that shows all the 1.5 V cells connected to produce an e.m.f. of 7.5 V, the variable resistor and the 30   Ω   resistor. [3]  (ii)   The resistance of the variable resistor can be varied from 0   Ω   to a maximum resistance of 150   Ω .  Using the axes in Fig. 7.1, draw a graph to show how the current in the circuit varies with the resistance of the variable resistor as it increases from 0   Ω   to 150   Ω .  Determine and label the value of the maximum current on the   y -axis. resistance of variable resistor /   Ω  current / A 0  0   75   150  Fig. 7.1  [4] [Total: 9]",
-    "mark_scheme": "7(a) A2: (electrical) work done moving a unit charge around a (complete) circuit; C1: work done AND moving a charge (in a circuit) (2 marks); 7(b)(i) B1: correct symbols for five cells in series; B1: correct symbols for variable resistor AND fixed resistor; B1: cells, variable resistor and fixed resistor connected in series (3 marks); 7(b)(ii) A2: curve with negative gradient of decreasing magnitude from 0 Ω to 150 Ω AND does not reach the x-axis; C1: curve / line with negative gradient from 0 Ω to 150 Ω; A2: y-axis labelled 0.25 where candidate’s line meets the y-axis OR the mark on the y-axis labelled 0.25; C1: R = V / I OR (Imax =) V / R OR 7.5 / 30 (4 marks)"
-  },
-  "8": {
-    "marks": 8,
-    "topic": "Nuclear Physics and Radioactive Decay",
-    "content_text": "The isotope thallium-208 ( 208 81 T l   ) is radioactive. It decays by   β -decay.  (a)   Thallium-208 decays to an isotope of lead (Pb).  (i)   Complete the equation for this decay. 208 81 T l   ....... ....... Pb +   ....... ....... β  [3]  (ii)   The   β -emission of thallium-208 is accompanied by   γ -emission from the nucleus.  Explain why this   γ -emission does   not   affect the numbers in the equation in   (a)(i) . ....... .......   [1]  (iii)   Suggest   one   reason why a nucleus of thallium-208 is unstable. ....... .......   [1]  (b)   A sample of thallium-208 is placed in a thick lead container. Fig. 8.1 shows a narrow beam of  β -particles and   γ -radiation emerging from a small hole in one side of the container. magnetic field into page beam of  β -particles and  γ -radiation sample of thallium-208  Fig. 8.1  The narrow beam enters a region where there is a magnetic field that is directed into the page.  On Fig. 8.1: •   draw a line   labelled   β β   to indicate the path of the   β -particles in the magnetic field •   draw a line   labelled   γ γ   to indicate the path of the   γ -radiation in the magnetic field. [3] [Total: 8]",
-    "mark_scheme": "8(a)(i) B1: β–1; B1: Pb…; B1: Pb82 (3 marks); 8(a)(ii) B1: γ-emission / it consists of waves / rays OR γ-emission has no mass / charge (1 mark); 8(a)(iii) B1: (it contains) too many / excess of neutrons OR (nucleus is) too heavy (1 mark); 8(b) B1: smooth curve (through magnetic field) AND labelled β; B1: path towards bottom of page AND no upward component AND labelled β; B1: (continuation of beam along) horizontal line through magnetic field AND labelled γ (3 marks)"
-  },
-  "9": {
-    "marks": 9,
-    "topic": "Space Physics and Stars",
-    "content_text": "The Sun is one of many billions of stars in the Milky Way. The Sun emits a very large quantity of energy as electromagnetic radiation.  (a)   State   the   three   regions   of   the   electromagnetic   spectrum   in   which   the   Sun   emits   the most energy. 1 ....... 2 ....... 3 ....... [2]  (b)   Electromagnetic radiation from the Sun travels at a speed of 3.0   ×   10 8  m / s. The radiation takes 500 s to reach the Earth.  Calculate the distance from the Sun to the Earth. distance = .......   [2]  (c)   Approximately 4.6 billion years ago, the Sun formed from an interstellar cloud of gas and became a stable star.  (i)   Describe and explain what happens as an interstellar cloud of gas forms a protostar. ....... ....... .......   [2]  (ii)   Describe and explain what happens as a protostar becomes a stable star. ....... ....... ....... .......   [3] [Total: 9]",
-    "mark_scheme": "9(a) A2: ultraviolet AND visible light AND infrared only; C1: any two from: ultraviolet; visible light; infrared and no more than one incorrect addition (2 marks); 9(b) A2: 1.5 × 10¹¹ m; C1: v = s / t OR (s =) vt OR 3.0 × 10⁸ × 500 (2 marks); 9(c)(i) B2: any two from: cloud / nebula / it collapses, due to (internal) gravitational attraction, (internal) temperature increases (2 marks); 9(c)(ii) B3: any three from: (nuclear) fusion / nuclear reactions (in the star), forces are balanced, gravitational force is inwards, outwards force is due to high temperature (3 marks)"
-  }
-};
-
-// Define Question Paper Tutor Tools for the Orchestrator
-const tools = [
-  {
-    type: "function",
-    function: {
-      name: "get_paper_context",
-      description: "Retrieve metadata for the current question paper (board, subject, year, level)",
-      parameters: {
-        type: "object",
-        properties: {
-          paper_id: { type: "string" }
-        },
-        required: ["paper_id"]
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "get_question",
-      description: "Retrieve a specific past paper question from database by paper ID and question number",
-      parameters: {
-        type: "object",
-        properties: {
-          paper_id: { type: "string" },
-          question_number: { type: "string" },
-          question_part: { type: "string" }
-        },
-        required: ["paper_id", "question_number"]
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "get_question_assets",
-      description: "Retrieve visual assets (diagrams, graphs, tables) for a question",
-      parameters: {
-        type: "object",
-        properties: {
-          question_id: { type: "string" }
-        },
-        required: ["question_id"]
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "get_mark_scheme",
-      description: "Retrieve the official marking criteria and examiner tips for a question",
-      parameters: {
-        type: "object",
-        properties: {
-          question_id: { type: "string" }
-        },
-        required: ["question_id"]
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "find_similar_questions",
-      description: "Find similar practice questions covering the same syllabus concept",
-      parameters: {
-        type: "object",
-        properties: {
-          question_id: { type: "string" },
-          topic: { type: "string" },
-          subtopic: { type: "string" }
-        },
-        required: ["question_id", "topic"]
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "get_topic_resources",
-      description: "Retrieve concise syllabus notes and key equations for a topic",
-      parameters: {
-        type: "object",
-        properties: {
-          topic: { type: "string" }
-        },
-        required: ["topic"]
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "save_student_progress",
-      description: "Update student learning profile with topic mastery and performance metrics",
-      parameters: {
-        type: "object",
-        properties: {
-          student_id: { type: "string" },
-          topic: { type: "string" },
-          score: { type: "number" },
-          max_score: { type: "number" }
-        },
-        required: ["student_id", "topic", "score", "max_score"]
-      }
-    }
-  }
-];
-
-// Helper: Convert base64 data URI or fetch remote URL to image Blob
-async function getImageBlob(imageUrlOrBase64: string): Promise<{ blob: Blob; fileName: string } | null> {
-  try {
-    if (imageUrlOrBase64.startsWith("data:")) {
-      const match = imageUrlOrBase64.match(/^data:([^;]+);base64,(.+)$/);
-      if (match) {
-        const mimeType = match[1] || "image/jpeg";
-        const base64Data = match[2];
-        const binaryString = atob(base64Data);
-        const len = binaryString.length;
-        const bytes = new Uint8Array(len);
-        for (let i = 0; i < len; i++) {
-          bytes[i] = binaryString.charCodeAt(i);
-        }
-        const ext = mimeType.includes("png") ? "png" : "jpg";
-        return { blob: new Blob([bytes], { type: mimeType }), fileName: `student_sheet.${ext}` };
-      }
-    } else if (imageUrlOrBase64.startsWith("http://") || imageUrlOrBase64.startsWith("https://")) {
-      const res = await fetch(imageUrlOrBase64);
-      if (res.ok) {
-        const blob = await res.blob();
-        return { blob, fileName: "student_sheet.jpg" };
-      }
-    }
-  } catch (e) {
-    console.warn("Error converting image for edit:", e);
-  }
-  return null;
-}
 
 // Build precise image editing prompt instructing GPT-Image-2.5-Sunburst to overlay teacher ink
 function buildSunburstEditPrompt(
@@ -593,13 +353,111 @@ async function editImageWithSunburst(
 }
 
 // Resilient OpenAI Chat Completion caller with model fallback chain (e.g. gpt-6-luna -> gpt-4o-mini / gpt-4o)
+// === TEMPORARY PROVIDER OVERRIDE (Caimex gateway) ===
+// When the CAIMEX_API_KEY secret is set, all OpenAI-compatible chat calls route through
+// the Caimex gateway with CAIMEX_MODEL — the existing OPENAI_API_KEY secret is untouched,
+// and removing the CAIMEX_* secrets restores the original OpenAI behavior exactly.
+function providerConfig(): { baseUrl: string; apiKey: string; model?: string } {
+  const caimexKey = Deno.env.get("CAIMEX_API_KEY");
+  if (caimexKey) {
+    return {
+      baseUrl: Deno.env.get("CAIMEX_BASE_URL") || "https://caimex.econetai.co.zw:2052/v1",
+      apiKey: caimexKey,
+      model: Deno.env.get("CAIMEX_MODEL") || undefined,
+    };
+  }
+  return { baseUrl: "https://api.openai.com/v1", apiKey: "" };
+}
+
+function remapModelForProvider(m: string): string {
+  const cfg = providerConfig();
+  if (cfg.model) return cfg.model; // single-model gateway override
+  return m;
+}
+
+// Extract the rubric rows belonging to ONE subpart from the stored mark scheme —
+// used by the per-subpart focused grading agent. Lines are "(label) [MARKCODE] criteria"
+// or "(label) [LEVEL] ..." — we match the subpart label prefix.
+function extractSubpartRubricRows(officialMarkScheme: string | null, subpartLabel: string): string[] {
+  if (!officialMarkScheme) return [];
+  const clean = String(subpartLabel).toLowerCase().replace(/[^a-z0-9]/g, '');
+  const rows: string[] = [];
+  for (const line of officialMarkScheme.split('\n')) {
+    const t = line.trim();
+    if (!t) continue;
+    const m = t.match(/^\(?([a-z](?:\(\s*[ivx0-9]+\s*\))?)\)?\s+(.+)/i);
+    if (!m) continue;
+    const lineLabel = m[1].toLowerCase().replace(/[^a-z0-9]/g, '');
+    // Exact match, or the line is a nested subpart of this label (e.g. 'a.i' under 'a')
+    if (lineLabel === clean || lineLabel.startsWith(clean)) {
+      rows.push(t);
+    }
+  }
+  return rows;
+}
+
+// Compute a subpart's printed marks-available from the rubric: the maximum bracketed
+// number in its rows (e.g. "(a) [4]" → 4; level-table ranges "4–5" → 5), or null.
+function subpartMarksFromRubric(officialMarkScheme: string | null, subpartLabel: string): number | null {
+  const rows = extractSubpartRubricRows(officialMarkScheme, subpartLabel);
+  let best: number | null = null;
+  for (const row of rows) {
+    const m = row.match(/(\d{1,2})\s*(?:marks?|\])?\s*$/i);
+    if (m) {
+      const v = parseInt(m[1], 10);
+      if (Number.isFinite(v) && v > 0 && (best === null || v > best)) best = v;
+    }
+  }
+  return best;
+}
+
+// Build the focused grading prompt for ONE subpart (the per-subpart marking agent).
+function buildSubpartGradingPrompt(
+  qNum: string,
+  subpartLabel: string,
+  rows: string[],
+  marksAvailable: number | null
+): string {
+  return `You are the Mentora Senior Chief Examiner marking ONE SUBPART of Question ${qNum} of the target paper.
+
+TARGET SUBPART: (${subpartLabel}) — marks available: ${marksAvailable ?? 'as printed in the scheme'}.
+OFFICIAL RUBRIC ROWS FOR THIS SUBPART (the menu of awardable points / level descriptors):
+${rows.join('\n')}
+
+YOUR ONLY JOB:
+1. Read the student's handwritten answer to THIS subpart (${subpartLabel}) on the provided page image(s).
+2. Award ONE MARK PER DISTINCT VALID POINT the student wrote that matches any rubric row (or a permitted alternative the scheme allows). The rows are a MENU — EACH row the student satisfies earns its mark.
+3. SCAN THE ENTIRE ANSWER for this subpart — never stop after the first matching point. A student who wrote 3 valid points for a 4-mark part scores 3.
+4. LEVEL TABLES: if the rows are level descriptors (Level 1–5 with mark ranges), find the highest level the student's explanation genuinely reaches and award within that level's range.
+5. max_score MUST be the printed marks available (${marksAvailable ?? 'per the scheme'}) — NEVER 1 unless the scheme genuinely prints 1.
+6. Relevance still applies: only credit points that genuinely answer THIS subpart of Question ${qNum}.
+
+Return ONLY raw JSON:
+{
+  "part_label": "(${subpartLabel})",
+  "score": number,
+  "max_score": ${marksAvailable ?? 'number'},
+  "student_answer_detected": "string — brief summary of what the student wrote",
+  "marking_points": [
+    { "point_number": 1, "criterion": "the rubric row / level awarded", "is_earned": boolean, "mark_code": "string", "student_phrase": "the student's exact words that earned this mark", "flawed_phrase": "" }
+  ],
+  "teacher_correction_note": "string (empty if full marks)",
+  "overall_feedback": "string"
+}`;
+}
+
 async function executeChatCompletion(
   apiKey: string,
   modelCandidates: string[],
   bodyPayload: any
 ): Promise<{ ok: boolean; data: any; modelUsed: string; error?: string }> {
+  const provider = providerConfig();
+  // When the Caimex override is active, use the gateway's key/model; otherwise the
+  // passed-in OpenAI key and the original model candidates apply.
+  const effectiveApiKey = provider.model ? provider.apiKey : apiKey;
   let lastErr = "";
-  for (const m of modelCandidates) {
+  for (const candidate of modelCandidates) {
+    const m = remapModelForProvider(candidate);
     try {
       const requestPayload: any = {
         ...bodyPayload,
@@ -620,10 +478,10 @@ async function executeChatCompletion(
       }
 
       console.log(`executeChatCompletion: attempting with model candidate ${m}...`);
-      const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+      const resp = await fetch(`${provider.baseUrl}/chat/completions`, {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${apiKey}`,
+          "Authorization": `Bearer ${effectiveApiKey}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify(requestPayload),
@@ -646,7 +504,7 @@ async function executeChatCompletion(
   return { ok: false, data: null, modelUsed: modelCandidates[modelCandidates.length - 1], error: lastErr };
 }
 
-// Tool function: Retrieve official question mark scheme from database or built-in past paper
+// Tool function: Retrieve official question mark scheme strictly for the target paper
 async function getQuestionMarkScheme(
   supabaseClient: any,
   paperId: string | null,
@@ -663,58 +521,78 @@ async function getQuestionMarkScheme(
 }> {
   const cleanQNum = String(qNum || '1').replace(/^Q(?:uestion)?\s*/i, '').trim();
 
-  // 1. Check database if paperId provided
+  // 1. Check database if paperId provided - strictly bound to the target paperId
   if (paperId && supabaseClient) {
     try {
-      const { data: qData } = await supabaseClient
+      const { data: qData, error: qErr } = await supabaseClient
         .from("past_paper_questions")
         .select("id, question_number, marks, content_text, topic")
         .eq("paper_id", paperId)
         .eq("question_number", cleanQNum)
         .maybeSingle();
 
-      if (qData) {
-        const { data: solData } = await supabaseClient
+      // NEVER swallow DB errors: a failed lookup must be loud, otherwise the grader
+      // silently loses the official mark scheme and invents its own rubric/marks.
+      if (qErr) {
+        console.error(`getQuestionMarkScheme: DB error fetching question ${cleanQNum} for paper ${paperId}:`, qErr);
+      }
+
+      if (!qErr && qData) {
+        const { data: solData, error: solErr } = await supabaseClient
           .from("past_paper_solutions")
           .select("official_mark_scheme, examiner_tips, ai_worked_solution")
           .eq("question_id", qData.id)
           .maybeSingle();
 
-        if (solData?.official_mark_scheme) {
+        if (solErr) {
+          console.error(`getQuestionMarkScheme: DB error fetching solution for question ${cleanQNum}:`, solErr);
+        }
+
+        const officialScheme = solData?.official_mark_scheme || null;
+
+        if (officialScheme) {
           return {
             found: true,
             question_number: cleanQNum,
             topic: qData.topic || context?.topic || "Science Examination",
             marks: qData.marks || 9,
             content_text: qData.content_text || "",
-            official_mark_scheme: solData.official_mark_scheme,
+            official_mark_scheme: officialScheme,
           };
         }
+
+        // Question exists in the target paper but has no stored official mark scheme.
+        // Return the target paper's own question content so grading stays bound to THIS paper
+        // (never falls back to question text printed on the student's uploaded sheet,
+        // which may belong to a completely different paper).
+        return {
+          found: true,
+          question_number: cleanQNum,
+          topic: qData.topic || context?.topic || "Science Examination",
+          marks: qData.marks || 9,
+          content_text: qData.content_text || context?.questionText || "",
+          official_mark_scheme: null,
+        };
+      } else if (!qErr) {
+        // Question cleanQNum does NOT exist in the paper being marked!
+        // Return found: false with NO official mark scheme so it is never marked against another paper.
+        return {
+          found: false,
+          question_number: cleanQNum,
+          topic: context?.topic || "Exam Question",
+          marks: context?.maxMarks || 9,
+          content_text: "",
+          official_mark_scheme: null,
+        };
       }
+      // On qErr: fall through to the fallbacks below rather than pretending the question exists.
     } catch (e) {
-      console.warn("getQuestionMarkScheme DB error:", e);
+      console.error("getQuestionMarkScheme DB error:", e);
     }
   }
 
-  // 2. Check BUILTIN papers (Physics & Chemistry)
-  const isPhysics = (paperId === "9085edb4-cda3-4c1e-a5fb-cec588b2f28a") || (context?.subject && /physics/i.test(context.subject));
-  const isChemistry = (paperId === "21f06556-c22c-4890-bec6-6e7119ffb86e") || (context?.subject && /chem/i.test(context.subject));
-  const builtinPaper = isPhysics ? BUILTIN_PHYSICS_PAPER : (isChemistry ? BUILTIN_CHEM_PAPER : null);
-
-  if (builtinPaper && builtinPaper[cleanQNum]) {
-    const bq = builtinPaper[cleanQNum];
-    return {
-      found: true,
-      question_number: cleanQNum,
-      topic: bq.topic,
-      marks: bq.marks,
-      content_text: bq.content_text,
-      official_mark_scheme: bq.mark_scheme,
-    };
-  }
-
-  // 3. Fallback to passed-in mark_scheme if provided
-  if (fallbackScheme && fallbackScheme.trim().length > 10) {
+  // 2. Fallback to passed-in mark_scheme ONLY if no paperId was provided (standalone mode)
+  if (!paperId && fallbackScheme && fallbackScheme.trim().length > 10) {
     return {
       found: true,
       question_number: cleanQNum,
@@ -845,21 +723,6 @@ function getSubpartSortWeight(keyOrLabel: string): number {
   return weight;
 }
 
-interface PageLayoutMap {
-  identified_question_number?: string;
-  diagram_regions: Array<{
-    label: string;
-    box_2d: [number, number, number, number];
-  }>;
-  subpart_regions: Array<{
-    part_label: string;
-    label_box?: [number, number, number, number];
-    handwriting_box?: [number, number, number, number];
-    answer_baseline_y: number; // 0-1000
-    has_student_writing?: boolean;
-  }>;
-}
-
 interface VisualGroundingResult {
   diagram_regions: Array<{
     label: string;
@@ -884,7 +747,7 @@ interface VisualGroundingResult {
   }>;
 }
 
-function formatLayoutRegions(layoutMap: PageLayoutMap | VisualGroundingResult): any[] {
+function formatLayoutRegions(layoutMap: VisualGroundingResult): any[] {
   const regions: any[] = [];
   (layoutMap.diagram_regions || []).forEach((d: any, idx: number) => {
     if (Array.isArray(d.box_2d) && d.box_2d.length === 4) {
@@ -1308,16 +1171,6 @@ function applyVisualGroundingToAssessment(
   assessment.annotations = synthesized;
 }
 
-// Fallback surveyor for backwards-compatibility
-async function surveyPageLayout(
-  apiKey: string,
-  modelCandidates: string[],
-  imageUrl: string,
-  questionHint?: string
-): Promise<PageLayoutMap | null> {
-  return null;
-}
-
 // Prompt builder: targeted per-question grading with explicit mark-scheme injection and anti-hallucination rules
 function buildTargetedQuestionGradingPrompt(
   qNum: string,
@@ -1331,7 +1184,7 @@ function buildTargetedQuestionGradingPrompt(
   studentTranscription?: string,
   spannedPages?: number[],
   targetPageIndex?: number,
-  layoutMap?: PageLayoutMap | null
+  paperQuestionsContext?: string
 ): string {
   const isPageSpecific = typeof targetPageIndex === 'number';
   const pagesText = isPageSpecific
@@ -1349,14 +1202,14 @@ ${expectedSubparts.map(sp => `• Part ${sp.label} [${sp.marks} mark(s)]`).join(
 CRITICAL MANDATORY INSTRUCTION — GRADE EVERY VISIBLE WRITTEN ANSWER ON THIS PAGE:
 1. Scan the student page completely from TOP TO BOTTOM.
 2. Identify and evaluate EVERY single written answer, formula, calculation, unit, or response visible on this sheet (e.g. (a), (b)(i), (b)(ii), (b)(iii), (c)(i), (c)(ii), etc.).
-3. ABSOLUTE ZERO-OMISSION GUARANTEE:
-   - YOU MUST NOT SKIP ANY ANSWER WRITTEN ON THIS PAGE!
-   - If a student wrote working or a formula (e.g. Q = mcΔT = 0.34 × 4200 × ...), you MUST grade it and award the marks!
-   - Never omit an answer or calculation because you think it belongs to another page or section!
+3. STRICT RELEVANCE & ANTI-WRONG-QUESTION REQUIREMENT:
+   - Marks are ONLY awarded for answers, formulas, or calculations that are directly and unambiguously attempting QUESTION ${qNum} of this target paper!
+   - If a student's handwritten response answers a DIFFERENT question, addresses an UNRELATED topic, or belongs to a DIFFERENT examination paper, you MUST award ZERO (0) MARKS for that part.
+   - Never award marks for formulas or calculations that belong to a different question or paper!
 4. In your "subparts" array, output an evaluation entry for EACH subpart present on this sheet.
    Set "page_index": ${isPageSpecific ? targetPageIndex : (spannedPages?.[0] ?? 0)}.
 ======================================================================`
-    : `CRITICAL MANDATORY INSTRUCTION: Scan the student page from TOP TO BOTTOM. Grade EVERY subpart present on this sheet. Do NOT omit any subparts! Set "page_index": ${isPageSpecific ? targetPageIndex : (spannedPages?.[0] ?? 0)}.`;
+    : `CRITICAL MANDATORY INSTRUCTION: Scan the student page from TOP TO BOTTOM. Grade EVERY subpart present on this sheet. Marks are ONLY awarded for answers directly attempting Question ${qNum} of this target paper. If answers are for a different question or paper, award 0 marks. Set "page_index": ${isPageSpecific ? targetPageIndex : (spannedPages?.[0] ?? 0)}.`;
 
   const markSchemeSection = schemeData.found && schemeData.official_mark_scheme
     ? `======================================================================
@@ -1365,93 +1218,66 @@ ${schemeData.official_mark_scheme}
 ======================================================================
 
 CRITICAL MARK SCHEME SUPREMACY, UNIVERSAL STANDARDISATION & ANTI-HALLUCINATION RULES:
+0. RUBRIC ROWS = OFFICIAL MARKING POINTS: Each line of the official rubric above in the form "(subpart) [MARKCODE] criteria" (e.g. "(b)(i) [C1] line with negative gradient") is ONE official marking point worth that mark code's value (B1/C1/A1/M1 = 1 mark each). The student earns that mark EXACTLY when their answer satisfies that line's criteria. Grade point-by-point against these rows — they are the authoritative decomposition of this question's marks, pre-collected from the official mark scheme. Do NOT invent your own marking points when rows exist for the subpart.
+0b. NUMERIC TOLERANCE (BENEFIT OF THE DOUBT): If the student's numeric answer differs from the scheme's target ONLY by rounding or sig-fig convention (e.g. student writes 12.5° where the scheme row says 12°, or 6.2° where the scheme says 6°) AND their working is mathematically sound and consistent, AWARD the mark. NEVER withhold a mark over a rounding difference when the student's derivation is correct.
+0c. IMPLIED LOGIC CREDIT (BENEFIT OF THE DOUBT): A marking point is EARNED when the student's reasoning logically entails it, even if the step is not written explicitly. Example: if the scheme row is "total resistance (of circuit) decreases" and the student writes "the supply E is constant, so the total current in the circuit increases", that chain entails total resistance decreased (I = E/R) — AWARD the mark. This also applies to MULTI-STEP DERIVATIONS: if the student's correct FINAL result could only be reached by correctly handling an intermediate scheme row, that row is EARNED. Example: the scheme rows are "[C1] SI base units of D: kg m s–2" and "[A1] base units of η: kg m–1 s–1"; the student writes "D = 6πηrv; η = D/(6πrv); base units of η = kg m–1 s–1" without stating D's units — the correct final η units entail D's units (kg m s–2) were handled correctly, so BOTH rows are earned. Do not withhold a marking point merely because an intermediate step was implied rather than written, provided the physics is sound and consistent with the student's own working. Apply the same implied-logic standard identically on every run and every paper.
+0d. ANSWER MARKS — POSITIVE MARKING POLICY (CONSISTENT ON EVERY RUN AND EVERY PAPER):
+(a) WORKING + STATED ANSWER: If the student's working produces a different value but their stated/final answer matches the scheme's answer, AWARD the mark for the correct answer. Write the working discrepancy as teacher_correction_note (e.g. "your working used 400 m s–1; should be 320 m s–1, giving 3200 m") — the note NEVER withholds the answer mark. Example: the student calculates ½ × 20 × 400 = 4000 m, then states "the answer is 3.2 km" because the question says "show that... 3.2 km" → AWARD the A mark, and the correction note explains the graph misread.
+(b) TWO OFFERED ANSWERS: If the student explicitly offers two answers to the same question, mark the FINAL offered one (their last decision). An explicit self-correction (crossing out the wrong one, or writing "no, actually 3.2 km") counts as the final answer.
+(c) AMBIGUOUS SIMULTANEOUS ANSWERS: If two contradictory answers are both left standing with no order or correction (or more options are selected than the question requires), award NO mark for that subpart and write a teacher note: "two answers offered — the intended answer is unclear."
+Apply (a)–(c) identically to every subpart on every run and every paper.
+0e. MULTI-POINT ESSAY / "ONE MARK PER POINT" SCHEMES (HISTORY, GEOGRAPHY, ENGLISH & SIMILAR — CRITICAL):
+Some schemes award ONE MARK PER RELEVANT POINT, up to the part's printed total. These schemes list SEVERAL possible valid points for one subpart (e.g. "(a) [B1] Decrees announcing the right to work / [B1] Creation of National Workshops / [B1] Abolition of the death penalty / [B1] Some taxes..." where part (a) is worth 4 marks), or use phrases like "One mark for each relevant point", "responses may include the following", or LEVEL TABLES for essay parts.
+- MARKS-AVAILABLE = the part's PRINTED TOTAL (e.g. 4, 6 or 10) — read it from the official rubric above or the question's mark allocation. NEVER set max_score to 1 for such a part.
+- SCAN THE STUDENT'S ENTIRE ANSWER for that subpart, and award ONE MARK FOR EACH DISTINCT valid point they wrote that matches any listed point (or any other relevant correct point the scheme permits, e.g. "or" alternatives). A student who wrote 3 valid points for a 4-mark part scores 3 — not 1.
+- The listed points are a MENU of possibilities, not a single required answer: EACH listed row the student satisfies earns its mark.
+- For LEVEL-TABLE essay parts ((b)/(c) style: Level 2 "Explains one reason... 4–5"): mark against the LEVEL DESCRIPTORS — find the highest level the student's explanation genuinely reaches and award within that level's mark range. Do not reduce a level-marked essay to 1.
+- ESSAY ANSWERS ARE SCANNED IN FULL: never award only the first matching point you find and stop — read the whole answer and credit EVERY distinct valid point, up to the part's total.
 1. BINDING GROUND TRUTH: The official mark scheme above is the SUPREME BINDING CRITERIA. You MUST NOT invent outside rules, unmentioned jargon, or deductions not present in this official scheme.
 
-2. UNIVERSAL EXAMINER CODE OF PRACTICE & BENEFIT OF THE DOUBT (BOD) (APPLIES TO ALL PAPERS):
-   - Under standard Cambridge / Edexcel / ZIMSEC / IB exam marking principles, apply the Benefit of the Doubt (BOD) rule:
-   - When a student's answer, formula, calculation, or diagram shows genuine scientific knowledge that satisfies the marking point, AWARD THE MARK.
-   - Do NOT penalize or withhold marks for:
-     * Unlabelled reference letters on diagrams (e.g. if an object X is placed close to the lens in the focal region, award the mark even if the student did not write the letter 'F', provided it is visibly on the correct side and closer than infinity).
-     * Stray marks, faint pencil lines, erased attempts, or unintentional ink smudges near printed text.
-     * Minor phonetic spelling or handwriting slips where the meaning is unambiguous (e.g. 'alchol', 'convection', 'amphoteric', 'calcium carbonate').
+2. UNIVERSAL EXAMINER CODE OF PRACTICE & MANDATORY RELEVANCE REQUIREMENT (CAMBRIDGE / EDEXCEL / ZIMSEC / IB):
+   - Under standard examination board regulations, RELEVANCE IS MANDATORY FOR ANY MARK:
+     * Marks can ONLY be awarded if the student's answer is an attempt at the specific question asked (Question ${qNum}).
+     * If the student's handwritten response answers a different question, addresses an unrelated topic, or comes from a different examination paper:
+       - YOU MUST AWARD STRICTLY ZERO (0) MARKS for this question and for all its subparts.
+       - ABSOLUTE ZERO-TOLERANCE BAN ON COINCIDENTAL MATCHES: Never award marks for isolated keywords (e.g. 'increase', 'decrease', 'electrons', 'filter', 'copper'), common units (e.g. 'm/s', 'J', 'N', '°C'), standard equations, or isolated numbers that happen to match a marking point when the student is writing about an unrelated question or different paper!
+       - In real examinations, an answer to an unasked question receives STRICTLY 0 MARKS.
+   - BENEFIT OF THE DOUBT (BOD) STRICT LIMITATION:
+     * Benefit of the Doubt (BOD) applies ONLY when an answer is genuinely attempting Question ${qNum} and demonstrates authentic scientific knowledge of this specific scenario.
+     * BOD NEVER applies across different questions, different topics, or different exam papers!
+   - When an attempt is genuine and addresses Question ${qNum}:
+     * Do NOT penalize or withhold marks for:
+       - Unlabelled reference letters or points on diagrams when the placement itself unambiguously satisfies the marking point.
+       - Stray marks, faint pencil lines, erased attempts, or unintentional ink smudges near printed text.
+       - Minor phonetic spelling or handwriting slips where the meaning is unambiguous.
    - DETERMINISTIC CONSISTENCY GUARANTEE:
      * Identical student answers MUST receive identical scores every single time without variance.
      * Never apply subjective harshness on one run and leniency on another.
 
-3. QUESTION 3 (THERMAL PHYSICS / PARTICLES / CONVECTION) MANDATORY GRADING RULES:
-   - Part (a) Particle Motion: Award the 1 mark if student states that particles in ice vibrate (about fixed positions) OR that particles in water move / slide past each other. This is the exact mark scheme criterion (B1: vibrate about fixed position OR particles in water move throughout liquid). DO NOT dock marks claiming "need to state motion not just fixed positions"!
-   - Part (b)(ii) Specific Heat Capacity (Q = mcΔT):
-     Formula: Q = mcΔT (1 mark). Substitution: 0.34 × 4200 × (change in temp) (1 mark).
-     Whether ΔT is calculated as (20 - 10 = 10) or (10 - 20 = -10), if student writes energy transferred = 14 280 J (or 1.4 × 10⁴ J, or for 28°C to 10°C, 25 704 J / 2.6 × 10⁴ J), AWARD FULL 2/2 MARKS!
-     NEVER dock marks or mark incorrect for an intermediate minus sign when energy transferred is stated as a positive magnitude on the answer line!
-     NEVER cross out Q = mcΔT and tell the student to use Q = mcΔT!
-   - Part (b)(i) / (c)(i) Heat Transfer between water and ice:
-     Direct contact transfer between liquid water and ice is conduction (1 mark).
-   - Part (b)(iii) / (c)(iii) Convection:
-     Requires density changes: cold/colder water near ice becomes denser and sinks; warmer water rises to replace it, forming a convection current. (3 marks).
-   - Part (b)(iv) / (c)(iv) Internal Energy:
-     Internal energy decreases (1 mark) AND kinetic energy of particles decreases / particles move slower (1 mark). Total 2 marks. DO NOT demand potential energy changes!
-
-3. QUESTION 4 (OPTICS, LENSES, MAGNIFYING GLASS, REFRACTION) MANDATORY GRADING RULES:
-   - Part (a)(i) Focal Point Definition:
-     * Mark 1: Rays meet / are focused after passing through a converging lens.
-     * Mark 2: Incident rays must be parallel to the principal axis.
-     * If the student wrote "A focal point is the point where light rays are focused after passing through a lens", award 1/2 marks.
-     * Teacher correction note: "Add that the incident rays must be parallel to the principal axis."
-   - Part (a)(ii) Magnifying Glass Object Position:
-     * Position of object: between optical centre / lens and principal focus / focal point.
-     * If student marks E between lens and focal point or writes "between the lens and a focal point", AWARD FULL 1/1 MARK!
-   - Part (a)(iii) Two words to describe the image formed by a magnifying glass:
-     * Question text: "Two words to describe the image are: - inverted, - real, - upright, - virtual".
-     * Mark scheme criteria: "upright" AND "virtual" (image is virtual, upright, and enlarged).
-     * CAREFULLY INSPECT THE STUDENT'S BLUE PEN INK: The student drew underlines ONLY under "upright" and "virtual"!
-     * "inverted" and "real" are merely printed/transcribed list items and are NOT underlined!
-     * Because the student selected "upright" and "virtual", they have chosen the EXACT CORRECT TWO PROPERTIES!
-     * AWARD FULL MARKS: score = 1, max_score = 1 (or 2/2 if 2 marks).
-     * DO NOT hallucinate that "real" or "inverted" were selected!
-     * Zero over-correction rule: since full marks, teacher_correction_note = "".
-   - Part (b)(i) Speed of Light in Glass:
-     * Formula: n = c / v (1 mark). Calculation: v = (3.0 × 10⁸) / 1.5 = 2.0 × 10⁸ m/s with unit (1 mark).
-     * Student's working is 100% correct. AWARD FULL 2/2 MARKS!
-
-4. UNIVERSAL MANDATORY RULE FOR MULTIPLE CHOICE, WORD LISTS, AND SELECTION QUESTIONS (UNDERLINE / CIRCLE / TICK):
-   - Whenever a question presents a word bank or multiple options (e.g. "Two words to describe the image are: - inverted, - real, - upright, - virtual"):
+3. UNIVERSAL MANDATORY RULE FOR MULTIPLE CHOICE, WORD LISTS, AND SELECTION QUESTIONS (UNDERLINE / CIRCLE / TICK):
+   - Whenever a question presents a word bank or multiple options (e.g. "Underline two words from the list: ..."):
    - INSPECT THE PEN INK CLOSELY: A word is ONLY selected if the student has actively underlined it, circled it, or ticked beside it.
    - The printed text of options does NOT mean the student selected all of them!
-   - If the student underlined 'upright' and 'virtual', they selected ONLY those two words.
-   - If those two words match the mark scheme criteria (e.g. virtual and upright for a magnifying glass), AWARD FULL MARKS!
    - POSITIVE MARKING (CAMBRIDGE & ZIMSEC PRINCIPLE): NEVER hallucinate that un-underlined words were chosen, and NEVER cancel out correct marks with imaginary selections!
 
-5. MATHEMATICAL & CALCULATION VERIFICATION:
+4. MATHEMATICAL & CALCULATION VERIFICATION:
    - Carefully verify the student's mathematical steps, formulas, and arithmetic.
-   - For thermal calculations like Q = mcΔT = 0.34 × 4200 × 10 = 14 280 J (or 1.4 × 10⁴ J, or 25 704 J), award full marks immediately!
    - ABSOLUTE BAN ON SELF-CONTRADICTION: Under NO circumstances mark a student step incorrect if your own proposed correction note repeats the exact formula, numbers, or answer the student wrote!
-6. "ANY N FROM" CRITERIA:
+5. "ANY N FROM" CRITERIA:
    - If the mark scheme states "any two from [A, B, C]" or "any three from [D, E, F]", and the student states that required number of valid concepts, award FULL MARKS.
-7. SUBPART MARKS BUDGET INTEGRITY:
+6. SUBPART MARKS BUDGET INTEGRITY:
    - The max marks for each subpart are strictly defined by the mark scheme.
-8. ZERO OVER-CORRECTION ON FULL-MARK ANSWERS:
+7. ZERO OVER-CORRECTION ON FULL-MARK ANSWERS:
    - When a student scores full marks on a subpart, set teacher_correction_note: "", constructive_correction: "", mistake_details: "".
    - Never write red correction notes or underlines over correct answers or drawings.`
     : `======================================================================
 OFFICIAL MARK SCHEME STATUS:
-[NO OFFICIAL MARK SCHEME STORED IN DATABASE FOR QUESTION ${qNum}]
-- Grade fairly and equitably using standard Cambridge / ZIMSEC / IB syllabus principles.
+[NO OFFICIAL MARK SCHEME STORED IN DATABASE FOR QUESTION ${qNum} OF THE TARGET PAPER]
+- Grade strictly against the TARGET PAPER's stored question content above (and the target paper question context provided in this prompt, if any) using standard Cambridge / ZIMSEC / IB syllabus principles.
+- Do NOT grade against question text printed on the student's uploaded sheet — the uploaded pages may belong to a different paper.
+- If the uploaded sheet contains answers to a different paper or question, award ZERO (0) marks.
+- ANTI-INVENTED-TARGET RULE (CRITICAL): NEVER invent specific numeric target values (angles, voltages, currents, wavelengths, etc.) that are not stated in the provided question content or context. If the student's working is mathematically and scientifically correct, AWARD the mark (Benefit of the Doubt). Do NOT deduct marks for rounding differences (e.g. 12.5° vs 12°), and do NOT reject a correct answer against a target value you invented yourself.
 ======================================================================`;
-
-  const layoutGroundingSection = layoutMap ? `
-4. VERIFIED VISUAL GROUNDING (PAGE SURVEYOR AGENT GROUND TRUTH):
-The Page Surveyor Agent has physically mapped this sheet. You MUST anchor to this ground truth:
-- PROTECTED DIAGRAM / APPARATUS REGIONS (NEVER place marks or comments inside these):
-${layoutMap.diagram_regions && layoutMap.diagram_regions.length > 0 ? JSON.stringify(layoutMap.diagram_regions, null, 2) : "None detected"}
-
-- DETECTED SUBPART HANDWRITING REGIONS & BASELINE Y:
-${layoutMap.subpart_regions && layoutMap.subpart_regions.length > 0 ? JSON.stringify(layoutMap.subpart_regions, null, 2) : "None detected"}
-
-COORDINATE ANCHORING INSTRUCTIONS:
-- For every subpart with an "answer_baseline_y", place its right-margin badge (✓ or ✗) at that EXACT Y coordinate: "line_y": answer_baseline_y, "box_2d": [answer_baseline_y - 15, 870, answer_baseline_y + 15, 970].
-- For inline ticks (✓), place them inside that subpart's handwriting_box at the end of the student's valid written step.
-- For teacher corrections, place them in blank ruled space below mistakes, NEVER overlapping the diagrams!` : '';
 
   return `You are the Mentora Senior Chief Examiner and Master Pedagogical Teacher.
 You evaluate student answers under the guiding philosophy:
@@ -1463,13 +1289,30 @@ Total Maximum Marks: ${schemeData.marks}
 Topic: ${schemeData.topic}
 ${pagesText}
 
-EXAM QUESTION TEXT & STEM:
-${schemeData.content_text || "Refer to question on paper."}
+EXAM QUESTION TEXT & STEM (TARGET PAPER — AUTHORITATIVE):
+${schemeData.content_text || "Refer to the target paper's stored question content provided in this prompt — NEVER to question text printed on the student's uploaded sheet."}
 
 ${subpartChecklist}
 
 ${markSchemeSection}
 
+TARGET PAPER CONSISTENCY & ANTI-WRONG-PAPER RULES (CRITICAL):
+- The student submitted these answer pages INTO the target paper (whose questions and mark schemes are provided in this prompt). EVERY page must be evaluated strictly against the TARGET PAPER.
+- If the uploaded pages contain answers to a DIFFERENT question paper (e.g. the student uploaded another paper's answer sheets):
+  * YOU MUST AWARD ZERO (0) MARKS for all subparts of Question ${qNum}!
+  * Under NO circumstances should you cherry-pick isolated formulas, single words, common units, or numbers from an unrelated paper to award marks!
+  * Set total_score: 0, set every subpart score: 0, set all marking_points is_earned: false.
+  * In deductions, state: "Submitted work appears to be from a different exam paper or question; does not attempt Question ${qNum} of this target paper (0 marks)."
+  * In teacher_correction_note, state: "Unrelated paper/question — 0 marks awarded".
+  * Set is_attempting_target_question: false.
+- NEVER adopt question text, topics, or mark schemes printed on the student's uploaded sheet if they belong to a different paper.
+- MISMATCH ≠ DIFFERENT QUESTION (CRITICAL): If the student's answers on the page ATTEMPT the target question but their values differ from the scheme's expected values (e.g. they misread a graph and wrote 20 m s–2 where the scheme expects 16 m s–2, or 4000 m where the scheme expects 3200 m), you MUST STILL GRADE those subparts — output a subpart entry for each, awarding what is earned and deducting what is wrong. NEVER omit an attempted subpart from the "subparts" array. Omitting an attempted subpart is a marking failure, as bad as awarding a wrong mark. The different-paper zero-rule above applies ONLY when the whole submission clearly belongs to a different exam paper — not when individual answers simply disagree with the expected values.
+- MATCH BY CONTENT, NOT HANDWRITTEN LABELS (CRITICAL): Students sometimes mislabel parts on their own pages (e.g. write "2." or "(c)" next to what is actually the target question's next part). Match page content to the rubric rows by SUBJECT MATTER (same figures, equations, quantities, final answers), NOT by the handwritten numbering. If the page's working matches the rubric's rows for the target question (same quantities/equations/energy values), you MUST grade it as the target question's subpart even if the handwritten label differs.
+- RUBRIC ROWS DEFINE SCOPE (CRITICAL): The official rubric rows above are the authoritative definition of what the target question contains. If the "EXAM QUESTION TEXT & STEM" is short, truncated, or only describes the first part of the question (e.g. it only mentions the definition while the rubric rows cover later parts with calculations), that does NOT make the later parts a different question. Any answer on the page that matches a rubric row of the target question belongs to the target question — grade it. NEVER zero-out or skip an answer as "a different part of the question" or "unrelated to the target question" when that answer matches one of the target question's rubric rows.
+${paperQuestionsContext && !schemeData.official_mark_scheme ? `
+TARGET PAPER FULL QUESTION CONTEXT (AUTHORITATIVE — use this to locate this question's content and mark scheme):
+${paperQuestionsContext}
+` : ""}
 STUDENT SUBMISSION NOTES / TRANSCRIPTION:
 ${studentTranscription || "Refer to attached handwriting image(s)."}
 
@@ -1481,18 +1324,18 @@ PROFESSIONAL EXAMINER & PEDAGOGICAL TEACHER PROTOCOL:
      * "criterion": string (mark scheme criteria)
      * "is_earned": boolean (true if earned, false otherwise)
      * "mark_code": string (STRICT 2-3 char code only, e.g. "B1", "M1", "A1", "C1". NEVER write sentences or explanations in mark_code)
-     * "student_phrase": the EXACT word, phrase, equation, or number from the student's handwritten response that earned this mark (e.g. 'upright', 'virtual', 'vibrate about fixed positions', 'Q = mcΔT', '14 280 J'). If not earned, leave empty "".
+     * "student_phrase": the EXACT word, phrase, equation, or number from the student's handwritten response that earned this mark (e.g. 'distillation', 'Q = mcΔT', '2.5 A'). If not earned, leave empty "".
      * "flawed_phrase": if missed due to an incorrect response, the specific flawed word or value written by the student (e.g. 'conduction', 'inverted', 'real'). If omitted entirely, leave empty "".
    - NOTE: You do not need to guess pixel coordinates; the Visual Grounding Agent will localize them in Pass 2 using these target phrases!
 2. CONSTRUCTIVE CORRECTIONS FOR MISSED POINTS:
    - If a student makes an error, write a concise correction note (MAXIMUM 10-12 words, e.g. 'Max current = 7.5/30 = 0.25 A as 30 Ω resistor remains in circuit'). Keep it very short so it fits on one line and never overlaps student writing!
    - If full marks: teacher_correction_note: "", constructive_correction: "", mistake_details: "".
-${layoutGroundingSection}
 
 REQUIRED JSON OUTPUT SCHEMA:
 {
   "identified_question_number": "${qNum}",
   "identified_topic": "${schemeData.topic}",
+  "is_attempting_target_question": boolean, // MANDATORY: true ONLY if the student's page genuinely attempts Question ${qNum} of the target paper (same topic, same sub-parts, same figures/context). If the page answers a different question or belongs to a different exam paper, it MUST be false and every score MUST be 0.
   "total_score": number,
   "total_max_score": ${schemeData.marks},
   "percentage": number,
@@ -1501,7 +1344,7 @@ REQUIRED JSON OUTPUT SCHEMA:
       "part_label": "string (e.g. '(a)', '(b)(i)', '(b)(ii)', '(b)(iii)')",
       "line_y": number, // integer 0-1000 indicating vertical level of student's answer line
       "score": number,
-      "max_score": number,
+      "max_score": number, // MUST equal the official marks for that subpart from the mark scheme above — NEVER invent subpart labels or max marks that are not in the official mark scheme
       "student_answer_detected": "string",
       "marks_awarded": ["string"],
       "deductions": ["string"],
@@ -1536,6 +1379,170 @@ REQUIRED JSON OUTPUT SCHEMA:
   "recommended_next_step": "string"
 }
 Return only JSON. No surrounding markdown backticks.`;
+}
+
+// Relevance gate: cheap per-cluster check that the student's pages genuinely attempt
+// this specific question of the target paper BEFORE spending the expensive grading passes.
+// A confident "not relevant" verdict forces a 0-score evaluation instead of letting the
+// grader award marks on answers that belong to a different paper.
+async function checkQuestionRelevance(
+  openaiApiKey: string | undefined,
+  modelCandidates: string[],
+  qNum: string,
+  officialQuestion: any | null,
+  schemeData: { found: boolean; marks: number; topic: string; content_text: string; official_mark_scheme: string | null },
+  pageImages: string[]
+): Promise<{ relevant: boolean; confidence: string; reason: string } | null> {
+  if (!openaiApiKey || !pageImages || pageImages.length === 0) return null;
+
+  const questionDescription = [
+    officialQuestion?.topic ? `Topic: ${officialQuestion.topic}` : "",
+    officialQuestion?.content_text && officialQuestion.content_text !== "No text provided"
+      ? `Question content: ${String(officialQuestion.content_text).slice(0, 600)}`
+      : (schemeData.content_text ? `Question content: ${String(schemeData.content_text).slice(0, 600)}` : ""),
+    schemeData.official_mark_scheme ? `Official mark scheme: ${String(schemeData.official_mark_scheme).slice(0, 800)}` : ""
+  ].filter(Boolean).join("\n");
+
+  const gatePrompt = `You are a strict exam-paper relevance checker.
+TARGET QUESTION of the paper being marked against:
+Question Number: ${qNum}
+${questionDescription || "(No stored question content — judge by question number and topic context.)"}
+
+TASK: Examine the student's handwritten page(s) below and decide whether they contain answers genuinely attempting THIS SPECIFIC question — same topic, same sub-parts, same figures/context.
+- Merely being the same SUBJECT is NOT enough: the answers must plausibly correspond to this question's specific parts, figures, and context.
+- If the page clearly answers a DIFFERENT question, or belongs to a different exam paper, it is NOT relevant.
+
+Return strictly valid JSON:
+{ "relevant": boolean, "confidence": "high" | "medium" | "low", "reason": "short explanation" }`;
+
+  const userParts: any[] = [{ type: "text", text: gatePrompt }];
+  pageImages.forEach((img, idx) => {
+    userParts.push({ type: "text", text: `--- STUDENT PAGE ${idx + 1} ---` });
+    userParts.push({ type: "image_url", image_url: { url: img, detail: "low" } });
+  });
+
+  try {
+    const gateRes = await executeChatCompletion(openaiApiKey, modelCandidates, {
+      messages: [
+        { role: "system", content: "You are an automated exam-paper relevance checker. Output strictly valid JSON." },
+        { role: "user", content: userParts }
+      ],
+      response_format: { type: "json_object" },
+      temperature: 0.0
+    });
+
+    if (gateRes.ok && gateRes.data?.choices?.[0]?.message?.content) {
+      const cleanJson = gateRes.data.choices[0].message.content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+      const parsed = JSON.parse(cleanJson);
+      return {
+        relevant: parsed.relevant !== false,
+        confidence: String(parsed.confidence || "low"),
+        reason: String(parsed.reason || "")
+      };
+    }
+  } catch (e) {
+    console.warn(`checkQuestionRelevance error for Question ${qNum}:`, e);
+  }
+  return null; // inconclusive → allow grading to proceed
+}
+
+// Compute the EFFECTIVE booklet total from the paper's answer rules.
+// - "Answer all" papers: sum of all questions (identical to legacy behavior).
+// - Sectioned papers: sum of required sections + the best N of each elective section
+//   (e.g. Section A: all = 42, Section B: any 4 of 6 = sum of the 4 highest marks).
+// - "Answer any N" with no sections: sum of the N highest question marks.
+function computeEffectiveBookletTotal(
+  officialPaperQuestions: any[],
+  answerRules: any | null
+): number {
+  const marksOf = (q: any) => Number(q.marks) || 0;
+
+  // No rules → "answer all": sum everything (legacy behavior, no regression).
+  if (!answerRules) {
+    return officialPaperQuestions.reduce((s: number, q: any) => s + marksOf(q), 0);
+  }
+
+  const sections: any[] = Array.isArray(answerRules.sections) ? answerRules.sections : [];
+  const defaultRule = answerRules.default_rule || 'all';
+
+  // No explicit sections but "answer any N": best N marks overall.
+  if (sections.length === 0) {
+    if (defaultRule === 'any' && Number(answerRules.default_count) > 0) {
+      const sorted = officialPaperQuestions.map(marksOf).sort((a: number, b: number) => b - a);
+      return sorted.slice(0, Number(answerRules.default_count)).reduce((s: number, m: number) => s + m, 0);
+    }
+    return officialPaperQuestions.reduce((s: number, q: any) => s + marksOf(q), 0);
+  }
+
+  // Sectioned paper: required sections sum fully; elective sections contribute best-N marks.
+  let total = 0;
+  for (const sec of sections) {
+    const label = String(sec.label || '').trim().toUpperCase();
+    const secQuestions = officialPaperQuestions.filter((q: any) =>
+      String(q.section || '').trim().toUpperCase() === label
+    );
+    if (secQuestions.length === 0) continue; // section label not matched — skip (falls back below)
+    if (sec.requirement === 'any' && Number(sec.count) > 0) {
+      const sorted = secQuestions.map(marksOf).sort((a: number, b: number) => b - a);
+      total += sorted.slice(0, Number(sec.count)).reduce((s: number, m: number) => s + m, 0);
+    } else {
+      // "all" — or invalid requirement — sum the section fully
+      total += secQuestions.reduce((s: number, q: any) => s + marksOf(q), 0);
+    }
+  }
+
+  // Fallback: if section labels didn't match any questions (bad extraction), use the legacy sum
+  if (total === 0) {
+    return officialPaperQuestions.reduce((s: number, q: any) => s + marksOf(q), 0);
+  }
+  return total;
+}
+
+// Compute the student's earned score under the answer rules:
+// - questions in "all" sections: always counted
+// - questions in "any N" sections: best N by score (over-answering keeps the best N)
+// - unmatched/sectionless questions on rule-less papers: all counted
+function computeEffectiveEarnedScore(
+  evaluatedQuestions: any[],
+  officialPaperQuestions: any[],
+  answerRules: any | null
+): number {
+  const rulesBySection = new Map<string, any>();
+  (answerRules?.sections || []).forEach((sec: any) => {
+    rulesBySection.set(String(sec.label || '').trim().toUpperCase(), sec);
+  });
+
+  let earned = 0;
+  const pendingElective: { section: string; score: number }[] = [];
+
+  for (const qEval of evaluatedQuestions) {
+    const qNum = String(qEval.question_number || qEval.identified_question_number || '').trim();
+    const officialQ = officialPaperQuestions.find((oq: any) => String(oq.question_number).trim() === qNum);
+    const section = String(officialQ?.section || '').trim().toUpperCase();
+    const score = Number(qEval.score ?? qEval.total_score ?? 0);
+
+    const rule = section ? rulesBySection.get(section) : undefined;
+    if (rule && rule.requirement === 'any' && Number(rule.count) > 0) {
+      pendingElective.push({ section, score });
+    } else {
+      earned += score; // required section, or no rules — count it
+    }
+  }
+
+  // For each elective section, keep the best N attempts
+  const bySection = new Map<string, number[]>();
+  pendingElective.forEach(pe => {
+    if (!bySection.has(pe.section)) bySection.set(pe.section, []);
+    bySection.get(pe.section)!.push(pe.score);
+  });
+  bySection.forEach((scores, section) => {
+    const rule = rulesBySection.get(section);
+    const n = Number(rule?.count) || scores.length;
+    const best = scores.sort((a, b) => b - a).slice(0, n);
+    earned += best.reduce((s, v) => s + v, 0);
+  });
+
+  return earned;
 }
 
 serve(async (req) => {
@@ -1646,66 +1653,28 @@ serve(async (req) => {
       });
     }
 
-    // 0.5 Sync Database Content with Service Role Key (Populates questions and solutions)
-    if (action === "sync_database_content") {
-      const results: any[] = [];
-      const paperId = payloadPaperId || payload.paper_id || context?.paperId || context?.paper_id;
-      const isPhysics = (paperId === "9085edb4-cda3-4c1e-a5fb-cec588b2f28a") || (payload?.subject && /physics/i.test(payload.subject));
-      const targetPaperId = paperId || (isPhysics ? "9085edb4-cda3-4c1e-a5fb-cec588b2f28a" : "21f06556-c22c-4890-bec6-6e7119ffb86e");
-      const paperData = isPhysics ? BUILTIN_PHYSICS_PAPER : BUILTIN_CHEM_PAPER;
-
-      for (const [qNum, qInfo] of Object.entries(paperData)) {
-        // 1. Update past_paper_questions with complete content_text, marks, and topic
-        const { data: updatedQ, error: qErr } = await supabaseClient
-          .from("past_paper_questions")
-          .update({
-            content_text: qInfo.content_text,
-            marks: qInfo.marks,
-            topic: qInfo.topic
-          })
-          .eq("paper_id", targetPaperId)
-          .eq("question_number", qNum)
-          .select("id, question_number")
-          .maybeSingle();
-
-        if (updatedQ) {
-          // 2. Upsert into past_paper_solutions
-          const { error: solErr } = await supabaseClient
-            .from("past_paper_solutions")
-            .upsert({
-              question_id: updatedQ.id,
-              official_mark_scheme: qInfo.mark_scheme,
-              ai_worked_solution: qInfo.mark_scheme,
-              common_mistakes: isPhysics
-                ? "Inverting direction of electron flow (electrons move from negative sphere to Earth); missing arrowheads on electric field lines; formula transposition errors."
-                : "Claiming fluorine is a gas at -200°C (-200 is colder than -188, so it is a liquid); forgetting state symbols; missing balancing coefficients.",
-              examiner_tips: isPhysics
-                ? "Ensure all field line drawings have arrows pointing towards the negative charge. Pay close attention to signs of charges and compensatory C-marks."
-                : "Read negative temperatures carefully. Always balance symbol equations and check diatomic non-metals."
-            }, { onConflict: "question_id" });
-
-          results.push({ question_number: qNum, question_id: updatedQ.id, success: !solErr, error: solErr });
-        } else {
-          results.push({ question_number: qNum, error: qErr });
-        }
-      }
-
-      return new Response(JSON.stringify({ success: true, targetPaperId, results }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" }
-      });
-    }
 
     // 1. Direct Assessment Action with Vision & Sub-Part Orchestration Support
     if (action === "assess_attempt") {
       let allQuestionsContext = payload.all_questions_context || context?.allQuestionsContext || "";
       const paperId = payloadPaperId || context?.paperId || context?.paper_id;
 
-      if (!allQuestionsContext && paperId && supabaseClient) {
+      let officialPaperQuestions: any[] = [];
+      let paperAnswerRules: any = null;
+      if (paperId && supabaseClient) {
         try {
+          // Fetch the paper's answer rules (section requirements) for effective-total marking
+          const { data: paperRow } = await supabaseClient
+            .from("papers")
+            .select("answer_rules")
+            .eq("id", paperId)
+            .maybeSingle();
+          paperAnswerRules = paperRow?.answer_rules || null;
+
           // Fetch all questions for this paper (valid schema columns only)
           const { data: qData } = await supabaseClient
             .from("past_paper_questions")
-            .select("id, question_number, marks, topic, content_text, subtopic")
+            .select("id, question_number, marks, topic, content_text, subtopic, section")
             .eq("paper_id", paperId);
 
           if (qData && qData.length > 0) {
@@ -1716,34 +1685,28 @@ serve(async (req) => {
               if (numA !== numB) return numA - numB;
               return String(a.question_number).localeCompare(String(b.question_number), undefined, { numeric: true });
             });
+            officialPaperQuestions = qData;
 
-            const qIds = qData.map((q: any) => q.id).filter(Boolean);
-            let solMap: Record<string, string> = {};
-            if (qIds.length > 0) {
-              const { data: solData } = await supabaseClient
-                .from("past_paper_solutions")
-                .select("question_id, official_mark_scheme")
-                .in("question_id", qIds);
-              if (solData && solData.length > 0) {
-                solData.forEach((s: any) => { solMap[s.question_id] = s.official_mark_scheme; });
+            if (!allQuestionsContext) {
+              const qIds = qData.map((q: any) => q.id).filter(Boolean);
+              let solMap: Record<string, string> = {};
+              if (qIds.length > 0) {
+                const { data: solData } = await supabaseClient
+                  .from("past_paper_solutions")
+                  .select("question_id, official_mark_scheme")
+                  .in("question_id", qIds);
+                if (solData && solData.length > 0) {
+                  solData.forEach((s: any) => { solMap[s.question_id] = s.official_mark_scheme; });
+                }
               }
-            }
 
-            const isPhysics = (paperId === "9085edb4-cda3-4c1e-a5fb-cec588b2f28a") || (context?.subject && /physics/i.test(context.subject));
-            const isChemistry = (paperId === "21f06556-c22c-4890-bec6-6e7119ffb86e") || (context?.subject && /chem/i.test(context.subject));
-            const builtinPaper = isPhysics ? BUILTIN_PHYSICS_PAPER : (isChemistry ? BUILTIN_CHEM_PAPER : null);
-
-            // Build full question context block with official mark schemes & subparts
-            allQuestionsContext = qData.map((q: any) => {
-              const numStr = String(q.question_number);
-              const builtin = builtinPaper ? builtinPaper[numStr] : null;
-              const content = (q.content_text && q.content_text.length > 80 && q.content_text.includes("("))
-                ? q.content_text
-                : (builtin?.content_text || q.content_text);
-              const ms = solMap[q.id] || (builtin ? builtin.mark_scheme : null) || "[Official syllabus marking criteria apply]";
-              const totalMarks = q.marks || builtin?.marks || 9;
-              return `======================================================================
-QUESTION ${q.question_number} [${totalMarks} MARKS] — Topic: ${q.topic || builtin?.topic || "Exam Topic"}
+              // Build full question context block with official mark schemes & subparts
+              allQuestionsContext = qData.map((q: any) => {
+                const content = q.content_text || "";
+                const ms = solMap[q.id] || "[Official syllabus marking criteria apply]";
+                const totalMarks = q.marks || 9;
+                return `======================================================================
+QUESTION ${q.question_number} [${totalMarks} MARKS] — Topic: ${q.topic || "Exam Topic"}
 ======================================================================
 EXAM QUESTION CONTENT:
 ${content}
@@ -1751,7 +1714,8 @@ ${content}
 OFFICIAL MARK SCHEME (AUTHORITATIVE EXAMINER CRITERIA & ALLOWED ANSWERS):
 ${ms}
 ======================================================================`;
-            }).join("\n\n");
+              }).join("\n\n");
+            }
           }
         } catch (dbErr) {
           console.warn("assess_attempt: failed to fetch paper questions from DB:", dbErr);
@@ -1763,201 +1727,15 @@ ${ms}
         allQuestionsContext += `\n\n======================================================================\nTARGET QUESTION OFFICIAL MARK SCHEME:\n${mark_scheme.trim()}\n======================================================================`;
       }
 
-      // If still no context, build from appropriate builtin paper or question_text
-      if (!allQuestionsContext || allQuestionsContext.length < 50) {
-        if (question_text && question_text.length > 150) {
-          allQuestionsContext = question_text;
-        } else {
-          const isPhysics = (paperId === "9085edb4-cda3-4c1e-a5fb-cec588b2f28a") || (context?.subject && /physics/i.test(context.subject));
-          const fallbackPaper = isPhysics ? BUILTIN_PHYSICS_PAPER : BUILTIN_CHEM_PAPER;
-          allQuestionsContext = Object.entries(fallbackPaper).map(([num, q]) => {
-            return `======================================================================\nQUESTION ${num} [${q.marks} MARKS] — Topic: ${q.topic}\n======================================================================\nEXAM QUESTION CONTENT:\n${q.content_text}\n\nOFFICIAL MARK SCHEME:\n${q.mark_scheme}\n======================================================================`;
-          }).join("\n\n");
-        }
+      // If still no context, use the client-provided question text.
+      // No hardcoded paper content is ever injected: without stored or provided
+      // content the examiner grades from the printed question on the student's sheet.
+      if ((!allQuestionsContext || allQuestionsContext.length < 50) && question_text && question_text.length > 150) {
+        allQuestionsContext = question_text;
       }
-
-      const assessmentPrompt = `You are the Senior Chief Examiner and Master Pedagogical Teacher for ${context?.subject || "Science"} (${context?.curriculum || "Cambridge / ZIMSEC / IB Examination Board"}). 
-You evaluate student exam papers under the guiding philosophy:
-"MARK LIKE AN EXAMINER, EXPLAIN LIKE A TEACHER, AND ANNOTATE LIKE A PROFESSIONAL TEACHER."
-
-EXAM PAPER — ALL QUESTIONS, SUB-PARTS & OFFICIAL MARK SCHEMES:
-${allQuestionsContext}
-
-STUDENT SUBMISSION NOTES / TRANSCRIPTION:
-${student_answer || document_text || "Attached handwritten image/document submission."}
-
-PROFESSIONAL EXAMINER & PEDAGOGICAL TEACHER PROTOCOL:
-1. POINT-BY-POINT INLINE MARKING (TICKS AT EACH AND EVERY EARNED POINT):
-   - CRITICAL REQUIREMENT: Do NOT merely place a single tick at the far right margin!
-   - Professional examiners mark in-situ: place a neat red checkmark (✓) directly adjacent to or above EACH AND EVERY valid point, formula, substitution, calculated value, unit, chemical name, or key scientific concept in the student's written response.
-   - If a subpart awards multiple marks (e.g. 2, 3, or 4 marks) and the student earned them, there MUST be multiple distinct inline ticks placed across the student's working at each respective scoring point (Point 1 ✓, Point 2 ✓, etc.), IN ADDITION to the subpart mark fraction in the right margin!
-   - In "marking_points" and "annotations", identify the exact inline phrase and location on the paper for each earned tick.
-
-2. CONSTRUCTIVE CORRECTIONS FOR EVERY MISSED POINT (HOW IT SHOULD HAVE BEEN DONE):
-   - CRITICAL REQUIREMENT: Whenever a student misses a mark, loses credit, makes a calculation error, uses the wrong direction/sign, or omits a required step/concept:
-     * NEVER write generic or vague feedback like "wrong answer" or "check working".
-     * You MUST write a concrete, constructive handwritten correction note explaining EXACTLY how it should have been done or answered!
-     * Point out the exact location on the page where the error or omission occurred.
-     * State what was written vs. what SHOULD have been written, providing the actual model formula, corrected numbers/calculations, or exact scientific terminology:
-       - e.g. "Correction: At -200°C, temp is between MP (-220°C) and BP (-188°C) → Liquid state"
-       - e.g. "Correction: a = Δv/Δt = (0.04 - 0) / 0.03 = 1.33 m/s²"
-       - e.g. "Add missing state symbols: Pb²⁺(aq) + 2Br⁻(aq) → PbBr₂(s)"
-       - e.g. "Correction: Electrons move from negative sphere to neutral Earth (sphere has high negative potential)"
-     * The student MUST receive constructive feedback directly on their marked paper that immediately teaches them the correct method and reasoning!
-
-3. INDEPENDENT MARK SCHEME POINT EVALUATION:
-   - Follow the official marking scheme point-by-point strictly and independently.
-   - Award method and compensatory marks ([C], [M], [B], [ecf]) whenever the student demonstrates the required concept, even if their final answer or direction is wrong!
-   - Never award or deduct marks based simply on whether the overall answer "looks right" or "looks messy".
-   - MANDATORY AWARDING OF CAMBRIDGE COMPENSATORY [C] MARKS:
-     * For Question 6(b)(i):
-       Official Scheme: "A2: electrons move (through the wire) from the sphere OR electrons move (through the wire) to(wards) the Earth; C1: electrons move (in the wire);"
-       Max score = 2 marks!
-       - If the student wrote "electrons move from the earth to the sphere", they correctly identified that electrons move in the wire! This EARNS the [C1] compensatory mark!
-       - They lose [A2] because the direction is inverted (it is from the negatively charged sphere to Earth).
-       - Score for 6(b)(i) MUST BE 1/2 marks! (Set score: 1, max_score: 2). DO NOT award 0!
-       - In marks_awarded: ["[C1] Electrons move through the wire"].
-       - In deductions: ["Lost A2: Direction is inverted; electrons move from the negatively charged sphere to Earth"].
-       - Margin mark MUST BE A CHECKMARK: "✓ (1/2)", NEVER a cross "✕" because 1 mark was earned!
-       - Teacher red pen note on paper: Underline "from the earth to the sphere" and write "move from sphere to Earth".
-
-4. RIGOROUS & REASONABLE DIAGRAM / DRAWING AUDITING:
-   - Check diagrams against every requirement in the marking scheme: number of lines, radial pattern, spacing, arrowheads, and boundary contact.
-   - Judge drawings reasonably by eye, as a human examiner would.
-   - For Question 6(a)(ii) (Electric field around negatively charged sphere):
-     * Look closely at the circle and the radial lines. At the end of each line touching the circle, notice the clear arrowhead pointing directly inward towards the sphere!
-     * Arrowheads ARE 100% PRESENT on every radial line! Under NO circumstances claim that arrowheads are missing or write "Add arrowheads pointing towards sphere"!
-     * Transcribe BOTH the drawing and the written text in "student_answer_detected":
-       "Drawn: 8 straight radial lines evenly spaced surrounding sphere, touching sphere with no lines inside, and arrowheads on all lines pointing inward towards the negative sphere. Written: The electric field lines are directed radially inward toward towards the negatively charged sphere."
-     * Score all 3 criteria:
-       - [B1] At least four straight radial lines AND evenly spaced -> EARNED
-       - [B1] Four lines touching sphere AND no lines inside sphere -> EARNED
-       - [B1] At least one arrowhead towards sphere AND no incorrect arrowheads -> EARNED
-     * Award FULL MARKS 3/3 for 6(a)(ii)! Set score: 3, max_score: 3.
-     * In right margin: place red tick "✓ (3/3)".
-     * ZERO OVER-CORRECTION: Do NOT write any correction notes or underlines over this correct drawing!
-
-5. ZERO OVER-CORRECTION ON FULL-MARK ANSWERS:
-   - If a student earns full marks on a subpart (score === max_score):
-     * Simply mark inline ticks at each correct point/keyword and a neat right-margin checkmark "✓ (score/max)".
-     * NEVER add red correction notes, underlines, or unnecessary advice across their correct work or drawings.
-     * For any subpart with full marks:
-       - "teacher_correction_note": MUST BE EMPTY STRING ""
-       - "constructive_correction": MUST BE EMPTY STRING ""
-       - "mistake_details": MUST BE EMPTY STRING ""
-       - "misconception_analysis": MUST BE EMPTY STRING ""
-       - "how_to_improve": MUST BE EMPTY STRING ""
-
-6. EXPLAIN LIKE A TEACHER (CONSTRUCTIVE & PROPORTIONAL FEEDBACK):
-   - Don't just state the correct answer. Explain what the student got wrong, why, and how to improve.
-   - Keep feedback concise, supportive, and appropriate to the error.
-   - When a student makes an error or loses marks:
-     * "misconception_analysis": Diagnose the underlying mental model or scientific error (e.g. "The student understands electrons move, but assumed electrons are drawn towards negative charge rather than being repelled by the high negative electric potential of the sphere to Earth").
-     * "how_to_improve": Provide exactly 1 actionable, high-impact exam tip on how to secure the mark next time (e.g. "Remember that like charges repel: a negatively charged body has excess electrons which repel each other and discharge to neutral Earth").
-     * "constructive_correction": The exact handwritten note to put directly on the student's sheet showing how it should have been done or answered.
-
-7. PRECISE & NON-INTRUSIVE ANNOTATIONS:
-   - Inline marks: Place small, crisp ticks "✓" directly adjacent to or above each earned point in the student's text.
-   - Margin marks: In the RIGHT-HAND MARGIN directly level with the answer line:
-     * When score > 0: "✓ (score/max)" (ALWAYS a checkmark!).
-     * When score === 0: "✕ (0/max)" (cross ONLY for 0 marks).
-   - Underlines & Corrections: If marks are lost, underline or strike through the specific erroneous phrase with a thin red line, or place an insertion caret '^' if a step was missed, and write the constructive correction note showing how it should have been answered.
-   - Never cover or alter the student's original handwriting or diagrams.
-
-8. QUESTION IDENTIFICATION & MARKS INTEGRITY:
-   - Match the student's submission to the exact question in the EXAM PAPER above.
-   - "total_max_score" MUST ALWAYS BE THE EXACT OFFICIAL MARKS FOR THIS SPECIFIC IDENTIFIED QUESTION (e.g. 9 marks for Question 6, 10 marks for Question 1). DO NOT guess or change max marks.
-   - "total_score" MUST be the exact mathematical sum of subpart marks earned.
-   - "percentage" is Math.round((total_score / total_max_score) * 100).
-   - Circled total at bottom right corner: "Total: score/max" (e.g. "Total: 8/9").
-
-9. OMITTED SUB-PARTS:
-   - If the official question has sub-parts that the student DID NOT answer on their sheet:
-     * List them in "subparts" with score: 0, max_score: official marks, student_answer_detected: "None (Unanswered / Omitted on student sheet)", deductions: ["0 marks: Question sub-part omitted / not attempted on sheet"], feedback: "Sub-part omitted. 0 marks awarded.", misconception_analysis: "", how_to_improve: "Attempt every sub-part to secure method marks.", constructive_correction: ""
-
-10. REQUIRED OUTPUT FORMAT:
-Return strictly valid JSON matching this exact structure:
-{
-  "identified_question_number": "string (e.g. '6')",
-  "identified_topic": "string (e.g. 'Electricity and Static Electric Fields')",
-  "total_score": number,
-  "total_max_score": number,
-  "percentage": number,
-  "subparts": [
-    {
-      "part_label": "string (e.g. '(a)(i)' or '(b)(i)')",
-      "part_title": "string (e.g. 'Electric Field Definition' or 'Current Flow Direction')",
-      "official_mark_scheme_criteria": "string (the exact expected answer and scoring criteria from the mark scheme for this subpart)",
-      "line_y": 180,
-      "exact_location": "string (precise position on sheet, e.g. 'Ruled line 2-3 from top, middle of page')",
-      "student_answer_detected": "string (transcription of what the student wrote or drew for this part)",
-      "score": number,
-      "max_score": number,
-      "marking_points": [
-        {
-          "point_number": 1,
-          "criterion": "string (e.g. 'Electrons move in the wire')",
-          "mark_code": "string (e.g. 'C1' or 'B1' or 'M1')",
-          "is_earned": true,
-          "student_phrase": "string (e.g. 'electrons move')",
-          "inline_location": "string (e.g. 'Line 2, words 1-2')",
-          "box_2d": [180, 240, 205, 360],
-          "tick_or_cross": "tick",
-          "constructive_correction": "string (if missed, exact guidance on how it should have been done; empty '' if earned)"
-        }
-      ],
-      "mistake_details": "string (if any mistake was made, describe what is incorrect on the paper; empty string '' if full marks)",
-      "teacher_correction_note": "string (exact concise red-ink note to write on paper, e.g. 'move from sphere to Earth'; empty string '' if full marks)",
-      "constructive_correction": "string (constructive guidance showing how it should have been answered or calculated; empty string '' if full marks)",
-      "misconception_analysis": "string (underlying mental model or scientific misconception that caused this error; empty string '' if full marks)",
-      "how_to_improve": "string (actionable, high-impact guidance on how the student can secure full marks next time; empty string '' if full marks)",
-      "red_pen_action": "string (exact physical action for the image generator, e.g. 'Place inline tick ✓ over electrons move; write red correction note move from sphere to Earth; write ✓ (1/2) in right margin')",
-      "marks_awarded": ["string (e.g. '[C1] Correctly identified electrons move in wire')"],
-      "deductions": ["string (list errors or missing points with examiner explanations; empty array [] if full marks)"],
-      "feedback": "string (concise examiner commentary for this part)"
-    }
-  ],
-  "marking_actions": [
-    {
-      "target_subpart": "string (e.g. '(b)(i)')",
-      "type": "inline_tick | tick | cross | underline_correction | margin_mark",
-      "location_on_page": "string (e.g. 'Line 2 over electrons move' or 'Ruled line 2, right margin')",
-      "mark_text": "string (e.g. '✓' or '✓ (1/2)')",
-      "correction_note": "string (handwritten note showing how to answer correctly, e.g. 'move from sphere to Earth'; empty '' if full marks)",
-      "red_pen_action": "string (e.g. 'Draw inline tick ✓ above electrons move; write correction move from sphere to Earth; write ✓ (1/2) in margin')"
-    }
-  ],
-  "marking_instructions_for_image_editor": "string (complete multi-line numbered instructions for GPT-Image-2.5-Sunburst describing every inline tick at each point, exact line position, cross, constructive correction note on how it should be answered, margin sub-totals, and final total stamp)",
-  "detected_regions": [
-    {
-      "id": "answer_1a_line_1",
-      "type": "answer_line | question_number | answer_area | diagram | margin",
-      "bbox": { "x": 0.22, "y": 0.18, "width": 0.60, "height": 0.035 },
-      "confidence": 0.95
-    }
-  ],
-  "annotations": [
-    {
-      "type": "inline_tick | cross | mark_badge | underline | comment | total_header",
-      "target_id": "answer_1a_line_1",
-      "anchor": "right_of_target | under_target | right_margin | left_margin | bottom_right_stamp",
-      "offset": { "x": 0.012, "y": 0.0 },
-      "text": "✓",
-      "reason": "Electrons move in wire",
-      "teacher_correction": "move from sphere to Earth",
-      "bbox": { "x": 0.83, "y": 0.18, "width": 0.045, "height": 0.035 },
-      "box_2d": [180, 830, 215, 875],
-      "subpart_label": "(a)(i)",
-      "confidence": 0.95
-    }
-  ],
-  "overall_feedback": "string (encouraging, constructive summary of performance across the whole question)",
-  "examiner_model_solution": "string (concise complete model answer for full marks across all parts)",
-  "recommended_next_step": "string (targeted advice on what to review next)"
-}
-CRITICAL: Place every annotation using normalized page coordinates [0.0, 1.0]. Do NOT guess arbitrary pixel values. All annotations MUST reference a valid target_id in detected_regions with an anchor (right_of_target, right_margin, under_target, bottom_right_stamp).
-The "annotations" array and "subparts" array MUST NOT be empty. For EVERY subpart, specify inline ticks at each valid point, exact locations, constructive correction notes for mistakes, right margin marks, and circled final score.
-Return only JSON. No surrounding markdown backticks.`;
+      if (!allQuestionsContext || allQuestionsContext.trim().length < 50) {
+        allQuestionsContext = "[No stored exam paper questions or official mark schemes are available for this submission. Read the printed question text directly from the student's uploaded sheet and grade it using standard Cambridge / ZIMSEC / IB syllabus principles.]";
+      }
 
       let rawImages: string[] = Array.isArray(payload.images) && payload.images.length > 0
         ? payload.images
@@ -1965,13 +1743,14 @@ Return only JSON. No surrounding markdown backticks.`;
           ? payload.answer_files.map((f: any) => f.base64 || f.uri).filter(Boolean)
           : (image_url ? [image_url] : []));
 
-      const requestedModel = model_override || "gpt-6-luna";
-      const pass1Candidates = [requestedModel, "gpt-6-luna", "gpt-4o-mini"];
-      const pass2Candidates = [requestedModel, "gpt-6-luna", "gpt-6.1-sol", "gpt-4o"];
+      const requestedModel = model_override || "gpt-4o";
+      const pass1Candidates = [requestedModel, "gpt-4o-mini", "gpt-4o"];
+      const pass2Candidates = [requestedModel, "gpt-4o", "gpt-4o-mini"];
 
-      if (openaiApiKey && rawImages.length > 1) {
+      let multiPageError: string | null = null;
+      if (openaiApiKey && rawImages.length >= 1) {
         try {
-          console.log(`assess_attempt: multi-page submission detected (${rawImages.length} pages). Starting 3-pass assessment with modern models.`);
+          console.log(`assess_attempt: submission detected (${rawImages.length} page(s)). Starting assessment with multi-subagent perception & deterministic rubric engine.`);
 
           // =========================================================================
           // PASS 1: BOOKLET INDEXER (Fast vision scan with gpt-6-luna to build script_map)
@@ -1983,6 +1762,14 @@ EXAM PAPER QUESTIONS & OFFICIAL MARK SCHEMES:
 ${allQuestionsContext}
 
 YOUR TASK:
+0. SUBMISSION AUTHENTICITY & TARGET PAPER VERIFICATION (CRITICAL MANDATORY CHECK):
+   - Compare the printed question stems, headers, diagrams, and student answers on the scanned pages with the TARGET EXAM PAPER questions listed under "EXAM PAPER QUESTIONS & OFFICIAL MARK SCHEMES" above.
+   - Determine whether this student submission is attempting the TARGET EXAM PAPER, or if the student uploaded answer sheets from a DIFFERENT examination paper (e.g. wrong subject, wrong year, or different syllabus/paper).
+   - In your JSON response, set:
+     * "is_unrelated_paper": boolean (true if the uploaded pages clearly belong to a different exam paper or unrelated topics)
+     * "detected_submission_nature": "target_paper" | "unrelated_paper" | "mixed"
+     * "detected_paper_summary": string explaining what paper or topic the student uploaded vs what the target paper is (e.g. 'Student uploaded Biology answers with plant cells and enzymes, but target paper is Physics 5054 Mechanics/Electricity')
+
 1. Examine all ${rawImages.length} pages in sequential order.
 2. CRITICAL: Identify where each question STARTS and ENDS.
    - Look at the question headings at the top or margins of each page (e.g. "3 (a)", "3 (c)", "4 (a)").
@@ -2000,6 +1787,9 @@ YOUR TASK:
 4. Detect all questions present in the booklet and their exact pages.
 5. Return strictly valid JSON matching this schema:
 {
+  "is_unrelated_paper": boolean,
+  "detected_submission_nature": "target_paper" | "unrelated_paper" | "mixed",
+  "detected_paper_summary": "string",
   "script_map": [
     {
       "question_number": "string (e.g. '1', '2', '3', '6')",
@@ -2041,14 +1831,91 @@ YOUR TASK:
           });
 
           let scriptMap: any[] = [];
+          let isUnrelatedSubmission = false;
+          let detectedPaperSummary = "";
+
           if (indexRes.ok && indexRes.data?.choices?.[0]?.message?.content) {
             try {
               const cleanIndexJson = indexRes.data.choices[0].message.content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
               const parsed = JSON.parse(cleanIndexJson);
               scriptMap = Array.isArray(parsed.script_map) ? parsed.script_map : [];
+              if (parsed.is_unrelated_paper === true || parsed.submission_matches_target_paper === false || parsed.detected_submission_nature === "unrelated_paper") {
+                isUnrelatedSubmission = true;
+                detectedPaperSummary = parsed.detected_paper_summary || parsed.unrelated_paper_summary || "Uploaded pages belong to a different exam paper/topic.";
+              }
             } catch (e) {
               console.warn("Pass 1 script_map JSON parse error:", e);
             }
+          }
+
+          // If the student uploaded answer sheets from a completely different question paper,
+          // immediately assign an authoritative 0 / total score under standard exam board regulations!
+          if (isUnrelatedSubmission) {
+            console.log(`Pass 1 detected UNRELATED examination paper submission: ${detectedPaperSummary}`);
+            const grandTotalMax = officialPaperQuestions.reduce((s: number, q: any) => s + (Number(q.marks) || 0), 0) || 60;
+            const questionSummaries = (officialPaperQuestions.length > 0 ? officialPaperQuestions : [{ question_number: "1", marks: grandTotalMax, topic: "Examination Paper" }]).map((oq: any) => ({
+              question_number: String(oq.question_number),
+              topic: oq.topic || "Exam Topic",
+              score: 0,
+              max_score: Number(oq.marks) || 0,
+              percentage: 0,
+              spanned_pages: [],
+              subparts: [],
+              unattempted: true,
+              notes: `Unrelated exam paper submitted (${detectedPaperSummary || 'different examination paper'}). 0 marks awarded.`
+            }));
+
+            const pages = rawImages.map((imgUrl, pIdx) => ({
+              page_index: pIdx,
+              original_image_url: imgUrl,
+              page_score: 0,
+              page_max_score: Math.round(grandTotalMax / rawImages.length) || 10,
+              questions_present: [],
+              annotations: [
+                {
+                  type: 'total_header',
+                  text: `Unrelated Paper: 0/${grandTotalMax}`,
+                  comment: `Submitted script belongs to a different exam paper (${detectedPaperSummary || 'different syllabus/topic'})`,
+                  box_2d: [40, 680, 85, 960],
+                  page_index: pIdx
+                },
+                {
+                  type: 'cross',
+                  text: '0',
+                  comment: 'Unrelated paper (0 marks)',
+                  box_2d: [150, 450, 250, 550],
+                  page_index: pIdx
+                }
+              ],
+              subparts: [],
+              layout_regions: []
+            }));
+
+            const unrelatedAssessment: any = {
+              identified_question_number: questionSummaries.map(q => q.question_number).join(', '),
+              identified_topic: officialPaperQuestions[0]?.topic || "Examination Script",
+              total_score: 0,
+              total_max_score: grandTotalMax,
+              score: 0,
+              max_score: grandTotalMax,
+              percentage: 0,
+              subparts: [],
+              layout_regions: [],
+              annotations: pages.flatMap(p => p.annotations),
+              question_summaries: questionSummaries,
+              pages: pages,
+              overall_feedback: `⚠️ UNRELATED EXAM PAPER SUBMISSION DETECTED: The answer sheets uploaded belong to a different question paper (${detectedPaperSummary || 'different syllabus/topic'}) and do not correspond to this target paper. Under standard Cambridge / Edexcel / ZIMSEC / IB examination rules, answers written for a different paper are awarded 0 out of ${grandTotalMax} marks (0%). Please ensure you upload the correct handwritten answer sheets for this specific question paper.`,
+              examiner_model_solution: "Refer to the target paper's mark scheme for full official worked solutions.",
+              recommended_next_step: "Upload the answer sheets corresponding to this specific question paper.",
+              model_used: indexRes.modelUsed || "gpt-4o"
+            };
+
+            return new Response(JSON.stringify({
+              assessment: unrelatedAssessment,
+              marked_image_url: null
+            }), {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+            });
           }
 
           if (!scriptMap || scriptMap.length === 0) {
@@ -2182,6 +2049,45 @@ YOUR TASK:
                 ? qEntry.spanned_pages
                 : [0];
 
+              // === STRICT TARGET-PAPER ENFORCEMENT (code-level, not model-level) ===
+              // Snap the cluster's question number to the official paper's question list.
+              const officialQ = officialPaperQuestions.find((oq: any) => {
+                const oNum = String(oq.question_number).trim();
+                const cNum = qNum.trim();
+                if (oNum === cNum) return true;
+                const leadingDigits = cNum.match(/^\d+/)?.[0];
+                return !!leadingDigits && oNum === leadingDigits;
+              });
+              const officialMarks = officialQ ? (Number(officialQ.marks) || 0) : 0;
+              const isUnmatchedQuestion = officialPaperQuestions.length > 0 && !officialQ;
+
+              // A cluster whose question number does not exist in the paper being marked
+              // is graded 0 with a note — it can never be marked against another paper.
+              if (isUnmatchedQuestion) {
+                console.log(`Strict enforcement: Question ${qNum} does not exist in the target paper. Awarding 0 with note.`);
+                return {
+                  identified_question_number: qNum,
+                  question_number: qNum,
+                  identified_topic: qEntry.topic || "Unmatched",
+                  total_score: 0,
+                  score: 0,
+                  total_max_score: 0,
+                  max_score: 0,
+                  percentage: 0,
+                  unmatched: true,
+                  subparts: [],
+                  annotations: [],
+                  layout_regions: [],
+                  spanned_pages: spannedPages,
+                  start_page: Math.min(...spannedPages),
+                  end_page: Math.max(...spannedPages),
+                  overall_feedback: `The pages assigned to Question ${qNum} do not correspond to any question in this paper, so they were graded 0.`,
+                  examiner_model_solution: "",
+                  recommended_next_step: "Upload the answer sheets corresponding to this specific question paper.",
+                  model_used: "code-enforcement"
+                };
+              }
+
               // Tool Call: Retrieve official mark scheme for this specific question from DB or syllabus
               const schemeData = await getQuestionMarkScheme(
                 supabaseClient,
@@ -2191,6 +2097,14 @@ YOUR TASK:
                 mark_scheme
               );
 
+              // Note: Relevance is checked directly by Subagent 1 (Visual Perception Agent)
+              // which examines the student's handwritten script against Question qNum.
+              let relevanceBlocked = false;
+              let relevanceReason = "";
+
+              // Grade the whole cluster (all spanned pages) — wrapped in a local function so
+              // an under-graded result can be detected and retried (completeness check below).
+              const gradeCluster = async (): Promise<any> => {
               // Evaluate EACH page of this question with dedicated focus so that NO subpart on ANY page is ever missed!
               const pageEvals = await Promise.all(
                 spannedPages.map(async (pIdx: number) => {
@@ -2201,7 +2115,8 @@ YOUR TASK:
                     schemeData,
                     student_answer || document_text,
                     spannedPages,
-                    pIdx
+                    pIdx,
+                    allQuestionsContext
                   );
 
                   const qUserParts: any[] = [{ type: "text", text: targetedPrompt }];
@@ -2233,7 +2148,7 @@ YOUR TASK:
                   try {
                     const qRes = await executeChatCompletion(openaiApiKey, pass2Candidates, {
                       messages: [
-                        { role: "system", content: `You are the Mentora Senior Chief Examiner. Evaluate and mark EVERY subpart written on Page ${pIdx} strictly according to the mark scheme. Apply standard Cambridge/ZIMSEC Benefit of the Doubt (BOD): award marks when valid scientific understanding is demonstrated, ignore accidental smudges/stray marks, and enforce strict deterministic marking without inconsistency. Output strictly valid JSON.` },
+                        { role: "system", content: `You are the Mentora Senior Chief Examiner. Evaluate and mark student handwriting on Page ${pIdx} strictly against Question ${qNum} of the TARGET PAPER. MANDATORY RELEVANCE: Marks are ONLY awarded for answers that genuinely attempt Question ${qNum}. If the student wrote an answer to a different question, or if this sheet belongs to a different exam paper/topic, you MUST award ZERO (0) marks for all subparts. Never award marks for coincidental words, standard units, or generic formulas. Output strictly valid JSON.` },
                         { role: "user", content: qUserParts }
                       ],
                       response_format: { type: "json_object" },
@@ -2245,9 +2160,31 @@ YOUR TASK:
                       const parsed = JSON.parse(cleanQJson);
                       parsed.model_used = qRes.modelUsed;
 
+                      // Enforce zero marks if question evaluation detected unrelated work or different paper
+                      if (parsed.is_attempting_target_question === false || parsed.is_unrelated_paper === true) {
+                        parsed.total_score = 0;
+                        parsed.score = 0;
+                        if (Array.isArray(parsed.subparts)) {
+                          parsed.subparts.forEach((sp: any) => {
+                            sp.score = 0;
+                            sp.marks_awarded = [];
+                            sp.deductions = [`Work belongs to a different question or paper; does not attempt Question ${qNum} (0 marks).`];
+                            sp.teacher_correction_note = "Unrelated question/paper — 0 marks";
+                            if (Array.isArray(sp.marking_points)) {
+                              sp.marking_points.forEach((mp: any) => { mp.is_earned = false; });
+                            }
+                          });
+                        }
+                      }
+
                       if (Array.isArray(parsed.subparts)) {
                         parsed.subparts.forEach((sp: any) => {
                           sp.page_index = pIdx; // Enforce exact target page binding!
+                          const notesLower = `${sp.student_answer_detected || ''} ${sp.teacher_correction_note || ''} ${sp.deductions?.join(' ') || ''}`.toLowerCase();
+                          if (notesLower.includes('different paper') || notesLower.includes('unrelated paper') || notesLower.includes('different question') || notesLower.includes('unrelated question') || notesLower.includes('unrelated topic')) {
+                            sp.score = 0;
+                            sp.marks_awarded = [];
+                          }
                         });
                       }
 
@@ -2340,7 +2277,11 @@ YOUR TASK:
 
               // Direct sum of all subparts for this question
               const allEarnedSum = allQSubparts.reduce((sum: number, sp: any) => sum + (Number(sp.score) || 0), 0);
-              const maxPossible = schemeData.found && schemeData.marks ? schemeData.marks : (canonicalMaxSum || validPageEvals[0]?.total_max_score || 10);
+              // STRICT: the question's max comes ONLY from the official paper (DB) —
+              // the model may never inflate it by inventing subpart max scores.
+              const maxPossible = officialMarks > 0
+                ? officialMarks
+                : (schemeData.found && schemeData.marks ? schemeData.marks : (canonicalMaxSum || validPageEvals[0]?.total_max_score || 10));
               
               // If all subparts are on a single page, or if all subparts are distinct, use the accurate earned sum
               const resolvedScore = (spannedPages.length <= 1 && allEarnedSum > 0)
@@ -2367,9 +2308,314 @@ YOUR TASK:
                 overall_feedback: validPageEvals.map((pe: any) => pe.overall_feedback).filter(Boolean).join(' ') || "",
                 examiner_model_solution: validPageEvals[0]?.examiner_model_solution || "",
                 recommended_next_step: validPageEvals[0]?.recommended_next_step || "",
-                model_used: validPageEvals[0]?.model_used || "gpt-6-luna"
+                model_used: validPageEvals[0]?.model_used || "gpt-4o"
               };
-              return null;
+              }; // end gradeCluster
+
+              let clusterResult = await gradeCluster();
+
+              // === SUBAGENT 1: VISUAL PERCEPTION AGENT (The Examiner's Eyes) ===
+              // Before judging any rubric criteria, Subagent 1 inventories the student's
+              // handwritten text, calculations, mathematical working, and drawn diagrams/graphs
+              // across the question's spanned pages. It strictly records what is physically
+              // present on the page without judging correctness or computing scores.
+              let questionPerception: QuestionPerceptionResult | null = null;
+              try {
+                if (Array.isArray(clusterResult?.subparts) && clusterResult.subparts.length > 0) {
+                  const expectedSubsForPerception = clusterResult.subparts.map((sp: any) => ({
+                    label: String(sp.part_label || '').replace(/^\(?|\)?$/g, ''),
+                    marks: Number(sp.max_score) || 1
+                  }));
+                  const perceptionPrompt = buildPerceptionPrompt(
+                    qNum,
+                    expectedSubsForPerception,
+                    schemeData.topic,
+                    schemeData.content_text
+                  );
+                  const perceptionUserParts: any[] = [{ type: "text", text: perceptionPrompt }];
+                  for (const fp of spannedPages) {
+                    if (rawImages[fp]) {
+                      perceptionUserParts.push({ type: "text", text: `--- STUDENT SCRIPT PAGE ${fp} (Question ${qNum}) ---` });
+                      perceptionUserParts.push({ type: "image_url", image_url: { url: rawImages[fp], detail: "high" } });
+                    }
+                  }
+
+                  const perceptionRes = await executeChatCompletion(openaiApiKey, pass2Candidates, {
+                    messages: [
+                      { role: "system", content: "You are the Senior Chief Examiner's Perception Specialist. Strictly record physical handwriting, math working, diagrams, and selections on the page. Do NOT score or judge correctness. Output strictly valid JSON." },
+                      { role: "user", content: perceptionUserParts }
+                    ],
+                    response_format: { type: "json_object" },
+                    temperature: 0.0,
+                    seed: 42
+                  });
+
+                  if (perceptionRes.ok && perceptionRes.data?.choices?.[0]?.message?.content) {
+                    const cleanPerception = perceptionRes.data.choices[0].message.content
+                      .replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+                    questionPerception = JSON.parse(cleanPerception) as QuestionPerceptionResult;
+                    console.log(`Q${qNum}: Subagent 1 (Visual Perception) inventoried ${questionPerception?.subparts?.length || 0} subparts.`);
+                    if (questionPerception && questionPerception.is_attempting_target_question === false) {
+                      console.log(`Q${qNum}: Subagent 1 determined student work is unrelated (${questionPerception.relevance_reason || 'unrelated'}).`);
+                      clusterResult.score = 0;
+                      clusterResult.total_score = 0;
+                      clusterResult.relevance_blocked = true;
+                      if (Array.isArray(clusterResult.subparts)) {
+                        clusterResult.subparts.forEach((sp: any) => {
+                          sp.score = 0;
+                          sp.marks_awarded = [];
+                          sp.deductions = [`Work does not attempt Question ${qNum}: ${questionPerception?.relevance_reason || 'unrelated'}`];
+                          sp.teacher_correction_note = "Unrelated question/paper — 0 marks";
+                        });
+                      }
+                    }
+                  }
+                }
+              } catch (perceptErr) {
+                console.warn(`Subagent 1 (Visual Perception) failed for Q${qNum} (falling back to cluster detected text):`, perceptErr);
+              }
+
+              // === SUBAGENT 2 & DETERMINISTIC ENGINE: PER-SUBPART EVALUATION ===
+              try {
+                if (schemeData.official_mark_scheme && Array.isArray(clusterResult?.subparts) && clusterResult.subparts.length > 0) {
+                  const refined = await Promise.all(clusterResult.subparts.map(async (sp: any) => {
+                    if (!sp?.part_label) return sp;
+                    const label = String(sp.part_label).replace(/^\(?|\)?$/g, '');
+                    // SINGLE PARSER: the rubric engine's own parseRubric is the sole
+                    // source of structural truth.
+                    const rubricCheck = parseRubric(label, schemeData.official_mark_scheme);
+                    const hasCriteria = rubricCheck.criteria.length >= 1 || rubricCheck.criteria.some((c: any) => c.isLevel);
+                    if (!hasCriteria) {
+                      if (rubricCheck.criteria.length === 0 && String(schemeData.official_mark_scheme || '').trim().length > 50) {
+                        console.warn(`⚠️ RUBRIC PARSE WARNING: Q${qNum}(${label}) — stored mark scheme has ${String(schemeData.official_mark_scheme).length} chars but parsed to 0 criteria. Unknown dialect? Engine skipped; cluster marks stand.`);
+                        sp.rubric_parse_warning = 'stored mark scheme could not be parsed (unknown format) — deterministic engine skipped';
+                      }
+                      return sp;
+                    }
+
+                    // Printed marks for this subpart: prefer the STORED part data from DB,
+                    // then rubric text, then cluster's own max.
+                    let printedMax: number | null = null;
+                    try {
+                      if (officialQ?.id && supabaseClient) {
+                        const labelClean = String(label).toLowerCase().replace(/[^a-z0-9]/g, '');
+                        const { data: dbParts } = await supabaseClient
+                          .from("question_parts")
+                          .select("part_label, marks")
+                          .eq("question_id", officialQ.id);
+                        const dbPart = (dbParts || []).find((p: any) =>
+                          String(p.part_label).toLowerCase().replace(/[^a-z0-9]/g, '') === labelClean);
+                        if (dbPart && Number(dbPart.marks) > 0) printedMax = Number(dbPart.marks);
+                      }
+                    } catch (dbPartErr) {
+                      console.warn(`Q${qNum}(${label}): stored part lookup failed:`, dbPartErr);
+                    }
+                    if (printedMax === null) printedMax = subpartMarksFromRubric(schemeData.official_mark_scheme, label);
+
+                    const clusterScore = Number(sp.score) || 0;
+                    const clusterMax = Number(sp.max_score) || 1;
+
+                    const focusPages = Array.from(new Set([
+                      ...(typeof sp.page_index === 'number' ? [sp.page_index] : []),
+                      ...spannedPages
+                    ])).filter((p: number) => rawImages[p]);
+
+                    // Match perceived work from Subagent 1
+                    const normLabel = (l: string) => String(l || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+                    const perceivedSubpart = questionPerception?.subparts?.find((p: ObservedSubpartWork) => {
+                      const pl = normLabel(p.part_label);
+                      const sl = normLabel(label);
+                      return pl === sl || pl.endsWith(sl) || sl.endsWith(pl);
+                    });
+
+                    const subpartPerception: SubpartPerceptionDetails = {
+                      written_text: perceivedSubpart?.written_text || String(sp.student_answer_detected || ''),
+                      math_steps: perceivedSubpart?.math_steps || [],
+                      diagram_features: perceivedSubpart?.diagram_features || [],
+                      selections: perceivedSubpart?.selections || []
+                    };
+
+                    if (perceivedSubpart?.written_text && !sp.student_answer_detected) {
+                      sp.student_answer_detected = perceivedSubpart.written_text;
+                    }
+
+                    // === DETERMINISTIC RUBRIC ENGINE (two-stage) ===
+                    // Stage A (LLM Subagent 2): judge each rubric criterion — satisfied? with concrete evidence.
+                    // Stage B (code): compute the score via overlap-aware, capped arithmetic.
+                    const rubricParsed = parseRubric(label, schemeData.official_mark_scheme);
+                    const overlapMemberGroups = new Map<number, number[]>();
+                    rubricParsed.criteria.forEach((c: any) => {
+                      const g = c.overlapGroup ?? c.index;
+                      if (!overlapMemberGroups.has(g)) overlapMemberGroups.set(g, []);
+                      overlapMemberGroups.get(g)!.push(c.index);
+                    });
+                    const overlapGroups = [...overlapMemberGroups.entries()]
+                      .filter(([, members]) => members.length > 1)
+                      .map(([group, members]) => ({ group, memberIndices: members }));
+
+                    const evalPrompt = buildCriterionEvaluationPrompt(
+                      qNum,
+                      label,
+                      rubricParsed.criteria.map((c: any) => ({ index: c.index, code: c.code, value: c.value, text: c.text, isLevel: c.isLevel, guidance: c.guidance || '' })),
+                      printedMax ?? clusterMax,
+                      overlapGroups,
+                      subpartPerception
+                    );
+
+                    const subUserParts: any[] = [{ type: "text", text: evalPrompt }];
+                    for (const fp of focusPages) {
+                      subUserParts.push({ type: "text", text: `--- STUDENT SCRIPT PAGE ${fp} (find part (${label}) of Question ${qNum}) ---` });
+                      subUserParts.push({ type: "image_url", image_url: { url: rawImages[fp], detail: "high" } });
+                    }
+
+                    try {
+                      console.log(`Q${qNum}(${label}): Subagent 2 (Rubric Judge) evaluating (${rubricParsed.criteria.length} criteria, ${overlapGroups.length} overlap groups)...`);
+
+                    // Evaluator function for Subagent 2
+                    const evalOnce = async (voteIdx: number): Promise<any[] | null> => {
+                      const subRes = await executeChatCompletion(openaiApiKey, pass2Candidates, {
+                        messages: [
+                          { role: "system", content: `You are the Mentora Senior Chief Examiner. Judge EACH criterion of subpart (${label}) of Question ${qNum} independently against the student's answer (handwriting, calculations, or drawn diagrams). Universal Benefit of the Doubt (BOD) and scientific equivalence apply. Concrete evidence (verbatim phrase, math calculation step, or drawn diagram feature) is MANDATORY for every satisfied verdict — if not demonstrated in the student's work, verdict is satisfied: false with evidence: "". Output strictly valid JSON.` },
+                          { role: "user", content: subUserParts }
+                        ],
+                        response_format: { type: "json_object" },
+                        temperature: 0.0,
+                        seed: 42 + voteIdx
+                      });
+                      if (!subRes.ok || !subRes.data?.choices?.[0]?.message?.content) return null;
+                      try {
+                        const cleanSub = subRes.data.choices[0].message.content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+                        const subParsed = JSON.parse(cleanSub);
+                        const rv: any[] = Array.isArray(subParsed.verdicts) ? subParsed.verdicts : [];
+                        return rv.map((v: any) => ({
+                          criterionIndex: Number(v.criterion_index),
+                          satisfied: !!v.satisfied && !!(String(v.evidence || '').trim().length > 0),
+                          evidence: String(v.evidence || '').trim()
+                        }));
+                      } catch (_) { return null; }
+                    };
+
+                    const voteRounds = rubricParsed.schemeType === 'levels' ? 3 : 1;
+                    const voteResults = (await Promise.all(
+                      Array.from({ length: voteRounds }, (_, vi) => evalOnce(vi))
+                    )).filter(Boolean) as any[][];
+
+                    if (voteResults.length > 0) {
+                      const allIndices = new Set<number>();
+                      voteResults.forEach(votes => votes.forEach(v => allIndices.add(v.criterionIndex)));
+                      const validatedVerdicts = [...allIndices].map((idx: number) => {
+                        const perCriterion = voteResults.map(votes => votes.find(v => v.criterionIndex === idx)).filter(Boolean) as any[];
+                        const yes = perCriterion.filter(v => v.satisfied).length;
+                        const satisfied = perCriterion.length > 0 && yes * 2 > perCriterion.length; // strict majority
+                        const firstYes = perCriterion.find(v => v.satisfied);
+                        return { criterionIndex: idx, satisfied, evidence: firstYes?.evidence || '' };
+                      });
+
+                      // === DETERMINISTIC SCORE (overlap-aware, capped at printed max) ===
+                      const engineScore = computeSubpartScore(
+                        rubricParsed,
+                        validatedVerdicts.map(v => ({ criterionIndex: v.criterionIndex, satisfied: v.satisfied })),
+                        printedMax ?? Math.max(clusterMax, 1)
+                      );
+                      const subScore = engineScore.score;
+                      const subMax = printedMax ?? Math.max(clusterMax, 1);
+
+                      // Map verdicts back into marking_points for the annotation layer
+                      const criterionByIndex = new Map(rubricParsed.criteria.map((c: any) => [c.index, c]));
+                      const engineMarkingPoints = validatedVerdicts.map((v: any) => {
+                        const c = criterionByIndex.get(v.criterionIndex) || {} as any;
+                        return {
+                          point_number: v.criterionIndex + 1,
+                          criterion: c.text || '',
+                          mark_code: c.code || 'B1',
+                          is_earned: v.satisfied,
+                          student_phrase: v.evidence || '',
+                          flawed_phrase: '',
+                          page_index: typeof sp.page_index === 'number' ? sp.page_index : focusPages[0]
+                        };
+                      });
+
+                      console.log(`Q${qNum}(${label}): Subagent 2 score ${subScore}/${subMax} replaces cluster ${clusterScore}/${clusterMax}.`);
+                      return {
+                        ...sp,
+                        score: subScore,
+                        max_score: subMax,
+                        student_answer_detected: sp.student_answer_detected,
+                        marking_points: engineMarkingPoints,
+                        teacher_correction_note: sp.teacher_correction_note,
+                        marks_awarded: validatedVerdicts.filter((v: any) => v.satisfied).map((v: any) => {
+                          const c = criterionByIndex.get(v.criterionIndex) as any;
+                          return c?.text || '';
+                        }),
+                        focused_agent: true,
+                        rubric_engine: true,
+                        overlap_capped: engineScore.cappedByOverlap
+                      };
+                    }
+                  } catch (subErr) {
+                    console.warn(`Q${qNum}(${label}) criterion evaluation failed (keeping cluster result):`, subErr);
+                  }
+                  return sp;
+                }));
+                clusterResult.subparts = refined;
+
+                  // === BADGE & STAMP RESYNCHRONIZATION ===
+                  // The annotation layer (margin badges, inline ticks, Q-total stamps) was
+                  // synthesized from the CLUSTER scores before refinement. Update every
+                  // mark badge to the refined score and drop stale inline ticks whose
+                  // points no longer exist, so the rendered paper shows the actual marks.
+                  const refinedByLabel = new Map<string, any>();
+                  refined.forEach((x: any) => refinedByLabel.set(String(x.part_label || '').toLowerCase(), x));
+
+                  if (Array.isArray(clusterResult.annotations)) {
+                    clusterResult.annotations = clusterResult.annotations.map((ann: any) => {
+                      const target = refinedByLabel.get(String(ann.subpart_label || '').toLowerCase());
+                      if (!target) return ann;
+                      if (ann.type === 'mark_badge') {
+                        const newText = `(${target.score}/${target.max_score})`;
+                        if (ann.text !== newText) {
+                          return {
+                            ...ann,
+                            text: newText,
+                            comment: target.score > 0
+                              ? (target.marks_awarded?.[0] || `Part ${target.part_label}: ${target.score}/${target.max_score} marks`)
+                              : (target.deductions?.[0] || `Part ${target.part_label}: 0/${target.max_score} marks`)
+                          };
+                        }
+                        return ann;
+                      }
+                      if (ann.type === 'inline_tick' || ann.type === 'tick') {
+                        // Drop ticks that no longer correspond to an earned refined point
+                        const earnedPhrases = new Set(
+                          (target.marking_points || [])
+                            .filter((mp: any) => mp.is_earned)
+                            .map((mp: any) => String(mp.student_phrase || mp.criterion || '').toLowerCase().slice(0, 30))
+                        );
+                        const tickText = String(ann.comment || ann.text || '').toLowerCase().slice(0, 30);
+                        if (earnedPhrases.size > 0 && ![...earnedPhrases].some(p => tickText.includes(p.slice(0, 15)) || p.includes(tickText))) {
+                          return null; // stale tick — remove
+                        }
+                      }
+                      return ann;
+                    }).filter(Boolean);
+                  }
+
+                  // Recompute the cluster totals from the refined subparts
+                  const refinedScore = refined.reduce((s: number, x: any) => s + (Number(x.score) || 0), 0);
+                  const refinedMax = refined.reduce((s: number, x: any) => s + (Number(x.max_score) || 0), 0);
+                  if (refinedMax > 0) {
+                    clusterResult.total_score = refinedScore;
+                    clusterResult.score = refinedScore;
+                    clusterResult.total_max_score = refinedMax;
+                    clusterResult.max_score = refinedMax;
+                    clusterResult.percentage = Math.round((refinedScore / refinedMax) * 100);
+                  }
+                }
+              } catch (refineErr) {
+                console.warn(`Per-subpart refinement failed for Q${qNum} (keeping cluster result):`, refineErr);
+              }
+
+              return clusterResult;
             })
           );
 
@@ -2382,24 +2628,109 @@ YOUR TASK:
           const allAnnotations: any[] = [];
           const questionSummaries: any[] = [];
           let grandTotalScore = 0;
-          let grandTotalMax = 0;
+          // grandTotalMax is computed from the answer rules at the end of aggregation:
+          // "answer all" papers sum every question (legacy); sectioned papers sum the
+          // effective total (required sections + best-N of elective sections).
+          const hasAnswerRules = !!paperAnswerRules && (
+            (paperAnswerRules.sections && paperAnswerRules.sections.length > 0) ||
+            paperAnswerRules.default_rule === 'any'
+          );
 
+          // NOTE: `officialPaperQuestions` is fetched once at the top of assess_attempt
+          // (already sorted numerically). Do NOT re-declare it here — shadowing it with a
+          // second `let` puts the earlier uses in this block into the temporal dead zone.
+
+          // Build the official marks lookup — STRICT: totals come from the DB, never the model
+          const officialMarksMap = new Map<string, number>();
+          officialPaperQuestions.forEach((oq: any) => {
+            officialMarksMap.set(String(oq.question_number).trim(), Number(oq.marks) || 0);
+          });
+
+          // Build a set of question numbers the student actually attempted (snapped to official
+          // numbering). Gated/unmatched evaluations still leave their question "unattempted" so
+          // its official marks are added to the booklet total by the loop below.
+          const attemptedQNums = new Set(
+            validQuestions
+              .filter((q: any) => q.unmatched !== true && q.relevance_blocked !== true)
+              .map((q: any) => {
+                const qn = String(q.identified_question_number || q.question_number || "").trim();
+                return qn.match(/^\d+/)?.[0] || qn;
+              })
+          );
+
+          // Add zero-score entries for every unattempted official question
+          if (officialPaperQuestions.length > 0) {
+            for (const oq of officialPaperQuestions) {
+              const oqNum = String(oq.question_number);
+              if (!attemptedQNums.has(oqNum)) {
+                questionSummaries.push({
+                  question_number: oqNum,
+                  topic: oq.topic || "Exam Topic",
+                  score: 0,
+                  max_score: Number(oq.marks) || 0,
+                  percentage: 0,
+                  spanned_pages: [],
+                  subparts: [],
+                  unattempted: true
+                });
+              }
+            }
+          }
+
+          const seenOfficialQs = new Set<string>();
           validQuestions.forEach((qEval: any) => {
-            const qNum = qEval.identified_question_number || qEval.question_number || "1";
+            const rawQNum = String(qEval.identified_question_number || qEval.question_number || "1").trim();
+            const snappedQNum = rawQNum.match(/^\d+/)?.[0] || rawQNum;
+            const officialMax = officialMarksMap.get(snappedQNum) ?? officialMarksMap.get(rawQNum);
             const qScore = Number(qEval.total_score ?? qEval.score ?? 0);
-            const qMax = Number(qEval.total_max_score ?? qEval.max_score ?? 10);
-            grandTotalScore += qScore;
-            grandTotalMax += qMax;
+            const isUnmatched = qEval.unmatched === true || (officialPaperQuestions.length > 0 && officialMax === undefined);
 
-            questionSummaries.push({
-              question_number: qNum,
-              topic: qEval.identified_topic || qEval.topic || "Exam Topic",
-              score: qScore,
-              max_score: qMax,
-              percentage: qMax > 0 ? Math.round((qScore / qMax) * 100) : 0,
-              spanned_pages: qEval.spanned_pages || [0],
-              subparts: qEval.subparts || []
+            // STRICT: per-question max comes ONLY from the official paper marks (DB) — never the model.
+            // Unmatched questions (not part of this paper) contribute 0/0 and never inflate the total.
+            const qMax = officialMax !== undefined
+              ? officialMax
+              : (isUnmatched ? 0 : Number(qEval.total_max_score ?? qEval.max_score ?? 10));
+
+            const wasGraded = !isUnmatched && qEval.relevance_blocked !== true;
+            grandTotalScore += wasGraded ? qScore : 0;
+            // NOTE: grandTotalMax is computed once after aggregation from the answer
+            // rules (see below) — never accumulated per-question here.
+
+            // Gated/unmatched evaluations merge into the unattempted summary the loop above created
+            const existingUnattempted = questionSummaries.find((qs: any) => {
+              const qsNum = String(qs.question_number).trim();
+              return qs.unattempted && (qsNum === snappedQNum || (qsNum.match(/^\d+/)?.[0] || qsNum) === snappedQNum);
             });
+            if (existingUnattempted && (isUnmatched || qEval.relevance_blocked === true)) {
+              existingUnattempted.notes = existingUnattempted.notes || (isUnmatched
+                ? "Content does not correspond to any question in this paper. 0 marks awarded."
+                : ((qEval.overall_feedback || "").slice(0, 160) || "Answers did not correspond to this question. 0 marks awarded."));
+              existingUnattempted.spanned_pages = (qEval.spanned_pages && qEval.spanned_pages.length > 0) ? qEval.spanned_pages : existingUnattempted.spanned_pages;
+            } else {
+            // Merge duplicate summaries for the same official question (best attempt wins)
+            const existingSummary = questionSummaries.find((qs: any) => {
+              const qsNum = String(qs.question_number).trim();
+              return !qs.unattempted && (qsNum === snappedQNum || (qsNum.match(/^\d+/)?.[0] || qsNum) === snappedQNum);
+            });
+            if (existingSummary) {
+              existingSummary.score = Math.max(Number(existingSummary.score) || 0, isUnmatched ? 0 : qScore);
+              existingSummary.subparts = [...(existingSummary.subparts || []), ...(qEval.subparts || [])];
+              existingSummary.spanned_pages = Array.from(new Set([...(existingSummary.spanned_pages || []), ...(qEval.spanned_pages || [])]));
+              existingSummary.percentage = existingSummary.max_score > 0 ? Math.round((existingSummary.score / existingSummary.max_score) * 100) : 0;
+            } else {
+              questionSummaries.push({
+                question_number: rawQNum,
+                topic: qEval.identified_topic || qEval.topic || "Exam Topic",
+                score: isUnmatched ? 0 : qScore,
+                max_score: qMax,
+                percentage: qMax > 0 ? Math.round((isUnmatched ? 0 : qScore) / qMax * 100) : 0,
+                spanned_pages: qEval.spanned_pages || [0],
+                subparts: qEval.subparts || [],
+                unmatched: isUnmatched || undefined,
+                notes: isUnmatched ? "Content does not correspond to any question in this paper. 0 marks awarded." : undefined
+              });
+            }
+            }
 
             if (Array.isArray(qEval.subparts)) {
               allSubparts.push(...qEval.subparts);
@@ -2408,6 +2739,26 @@ YOUR TASK:
               allAnnotations.push(...qEval.annotations);
             }
           });
+
+          // =========================================================================
+          // BOOKLET TOTAL — ANSWER-RULES AWARE (effective total)
+          // "Answer all" papers: sum of all official questions (legacy, no regression).
+          // Sectioned / "any N" papers: required sections sum fully; elective sections
+          // contribute their best-N question marks. The student's earned score also
+          // keeps only the best N of over-answered elective questions.
+          // =========================================================================
+          let grandTotalMax: number;
+          if (hasAnswerRules && officialPaperQuestions.length > 0) {
+            grandTotalMax = computeEffectiveBookletTotal(officialPaperQuestions, paperAnswerRules);
+            const rulesEarned = computeEffectiveEarnedScore(validQuestions, officialPaperQuestions, paperAnswerRules);
+            if (rulesEarned > grandTotalScore) grandTotalScore = rulesEarned;
+            grandTotalScore = Math.min(grandTotalScore, grandTotalMax);
+            console.log(`Answer rules applied: effective booklet total ${grandTotalMax} (full paper sum: ${officialPaperQuestions.reduce((s: number, q: any) => s + (Number(q.marks) || 0), 0)})`);
+          } else {
+            grandTotalMax = officialPaperQuestions.length > 0
+              ? officialPaperQuestions.reduce((s: number, q: any) => s + (Number(q.marks) || 0), 0)
+              : validQuestions.reduce((s: number, q: any) => s + (Number(q.total_max_score ?? q.max_score ?? 0) || 10), 0);
+          }
 
           // Build per-page evaluations
           const pages: any[] = rawImages.map((imgUrl, pIdx) => {
@@ -2418,51 +2769,20 @@ YOUR TASK:
 
             const pageAnnotations = allAnnotations.filter((ann: any) => ann.page_index === pIdx);
 
-            // 1. Stamp Question Total Badge on the FIRST PAGE where each question begins
-            const questionsStartingHere = questionSummaries.filter((qs: any) => {
-              const startPage = Math.min(...(qs.spanned_pages || [0]));
-              return startPage === pIdx;
-            });
+            // 1–2. Per-question "Q Total" badges and "Cont." labels are intentionally NOT
+            // generated anymore — they cluttered every page's top. Per-question scores live
+            // in the subpart margin badges (✓ 2/2) and the explanations panel.
 
-            questionsStartingHere.forEach((qs: any, qIdx: number) => {
-              const topY = 40 + qIdx * 50;
-              const qBadgeText = `Q${qs.question_number} Total: ${qs.score}/${qs.max_score}`;
-              pageAnnotations.push({
-                type: 'total_header',
-                text: qBadgeText,
-                comment: `Question ${qs.question_number} Total: ${qs.score}/${qs.max_score} marks (${qs.percentage}%)`,
-                box_2d: [topY, 680, topY + 45, 960],
-                page_index: pIdx
-              });
-            });
-
-            // 2. Identify if any question is continuing from a previous page
-            const questionsContinuingHere = questionSummaries.filter((qs: any) => {
-              const startPage = Math.min(...(qs.spanned_pages || [0]));
-              return (qs.spanned_pages || []).includes(pIdx) && pIdx > startPage;
-            });
-
-            questionsContinuingHere.forEach((qs: any, cIdx: number) => {
-              const topY = 40 + cIdx * 50;
-              const startPage = Math.min(...(qs.spanned_pages || [0]));
-              const contText = `Q${qs.question_number} (Cont. from Page ${startPage + 1})`;
-              pageAnnotations.push({
-                type: 'total_header',
-                text: contText,
-                comment: `Question ${qs.question_number} continued from Page ${startPage + 1}`,
-                box_2d: [topY, 660, topY + 45, 960],
-                page_index: pIdx
-              });
-            });
-
-            // 3. On the final booklet page, stamp overall booklet total at the bottom
-            if (isLastPage) {
+            // 3. Stamp the overall booklet total at the TOP-LEFT of the FIRST page.
+            // (Previously the bottom of the final page — it overlapped the last question's
+            // total badge, since all total stamps rendered in the same bottom-right spot.)
+            if (pIdx === 0) {
               const finalBadgeText = `Booklet Total: ${grandTotalScore}/${grandTotalMax}`;
               pageAnnotations.push({
                 type: 'total_header',
                 text: finalBadgeText,
                 comment: `Overall Booklet Total: ${grandTotalScore}/${grandTotalMax} marks`,
-                box_2d: [840, 720, 880, 960],
+                box_2d: [12, 20, 52, 420],
                 page_index: pIdx
               });
             }
@@ -2507,7 +2827,7 @@ YOUR TASK:
             overall_feedback: validQuestions.map(q => q.overall_feedback).filter(Boolean).join(' ') || `Completed multi-page booklet evaluation across ${rawImages.length} pages. Scored ${grandTotalScore}/${grandTotalMax} marks.`,
             examiner_model_solution: validQuestions.map(q => q.examiner_model_solution).filter(Boolean).join('\n\n'),
             recommended_next_step: validQuestions[0]?.recommended_next_step || "Review teacher constructive corrections on the marked booklet pages.",
-            model_used: validQuestions[0]?.model_used || indexRes.modelUsed || "gpt-6-luna"
+            model_used: validQuestions[0]?.model_used || indexRes.modelUsed || "gpt-4o"
           };
 
           // Concurrently generate authentic teacher red-ink marked images for ALL pages!
@@ -2570,6 +2890,7 @@ YOUR TASK:
 
         } catch (multiPageErr: any) {
           console.error("Multi-page assessment pipeline error, falling back to standard evaluator:", multiPageErr);
+          multiPageError = String(multiPageErr?.message || multiPageErr);
         }
       }
 
@@ -2593,11 +2914,15 @@ ${student_answer || document_text || "Refer to attached handwriting image."}
 ACTIVE CLIENT TAB: Question ${context?.questionNumber || '1'}
 
 YOUR GRADING PROTOCOL:
+0. TARGET PAPER CONSISTENCY (CRITICAL):
+   - The student submitted these answers INTO the exam paper whose questions are listed under "EXAM PAPER QUESTIONS & OFFICIAL MARK SCHEMES" above (the TARGET paper).
+   - The uploaded sheet may belong to a different paper (e.g. the student uploaded another paper's answers by mistake). Question numbers, headings, and topics printed on the uploaded sheet may NOT match the target paper — IGNORE them completely.
+   - Grade the ENTIRE submission against the target paper's questions and official mark schemes above. NEVER grade against question text printed on the student's uploaded sheet, and NEVER adopt question numbering read off the uploaded pages.
 1. QUESTION MATCHING:
    - Inspect the student's handwritten working, headings (e.g. "(a)(i)", "(a)(ii)", "(b)(i)", "(b)(ii)"), diagrams, and formulas.
    - Match the student's work to the EXACT question in the exam paper above.
-   - For example: if the student defines an electric field, draws radial field lines around a negatively charged sphere, discusses electrons in an earthed wire, and calculates current with I = Q/t = (3.5 × 10^-10) / (0.14 × 10^-9) = 2.5 A, this is unequivocally **QUESTION 6** (Electricity and Static Electric Fields)! Set "identified_question_number": "6".
-   - Grade strictly against THAT question's official mark scheme! Do NOT mark against Question 1 if the student answered Question 6!
+   - For example: if the exam paper context above shows a question about electric fields and the student's working defines an electric field and draws field lines, set "identified_question_number" to that question's exact number.
+   - Grade strictly against THAT question's official mark scheme! Do NOT mark the student's work against a different question's mark scheme!
 
 2. MARK SCHEME COMPLIANCE & INTEGRITY:
    - The official mark scheme is the SUPREME BINDING GROUND TRUTH.
@@ -2606,26 +2931,6 @@ YOUR GRADING PROTOCOL:
      * Do NOT dock marks for unlabelled reference points on diagrams if physically plausible, minor spelling slips, or faint stray smudges.
      * Enforce strict deterministic consistency across all papers.
    - Carefully verify student calculation steps, formulas, and values.
-   - For thermal physics (Question 3):
-     * Part (a) Particle Motion: Award the 1 mark if student states particles in ice vibrate (about fixed positions) OR water particles move / slide past each other. DO NOT dock marks claiming "only stated fixed positions not motion".
-     * Specific Heat Capacity (Q = mcΔT): Formula is Q = mcΔT, substitution is 0.34 × 4200 × ΔT. Whether ΔT is written with a negative sign or positive, if student states energy transferred = 14 280 J (or 1.4 × 10⁴ J, or 25 704 J), award FULL 2/2 MARKS! NEVER dock marks for an intermediate minus sign when the answer line has the positive energy!
-     * NEVER cross out Q = mcΔT and tell the student to use Q = mcΔT!
-     * Internal energy: decreases because temperature decreases / particles lose kinetic energy (2/2 marks).
-   - Award points for correct formulas, substitutions, final answers, and accurate scientific diagrams.
-   - Never mark a student step incorrect if the student wrote the correct answer!
-   - Zero over-correction on full marks: if a student earns full marks on a subpart, set teacher_correction_note: "", constructive_correction: "", mistake_details: "".
-
-   - For optics / lenses / light (Question 4):
-     * Part (a)(i) Focal Point: Rays meet / focused after lens (1 mark) AND rays parallel to principal axis (1 mark). Total 2 marks. If student states rays focused after passing lens: 1/2 marks.
-     * Part (a)(ii) Magnifying Glass Object Position: Between lens and principal focus / focal point. Award 1/1 mark.
-     * Part (a)(iii) Two words for magnifying glass image (inverted, real, upright, virtual):
-       The image formed by a magnifying glass is VIRTUAL and UPRIGHT (and magnified).
-       CAREFULLY INSPECT THE STUDENT'S INK: Check which specific words have pen underlines!
-       If student underlined 'upright' and 'virtual', they chose the EXACT correct two words!
-       AWARD FULL 1/1 MARK!
-       NEVER hallucinate that 'real' or 'inverted' are selected!
-     * Part (b)(i) Speed of light in glass: n = c / v => v = 3.0×10⁸ / 1.5 = 2.0×10⁸ m/s. 100% correct, AWARD FULL 2/2 MARKS!
-
    - SELECTION & WORD LIST QUESTIONS (UNIVERSAL RULE):
      * When options are listed (e.g. underline / circle / tick):
      * Look ONLY at the words the student actively underlined or circled.
@@ -2635,7 +2940,7 @@ YOUR GRADING PROTOCOL:
 3. COMPLETE SUBPART GRADING — DO NOT STOP EARLY:
    - Scan the entire student page completely from TOP TO BOTTOM.
    - Grade EVERY subpart present on the sheet (for example (a), (b)(i), (b)(ii), (b)(iii)).
-   - ABSOLUTE BAN ON EARLY STOPPING: Never omit or stop after the first subpart or paragraph! If the student answered calculations (e.g. Q = mcΔT = 14280 J) or further parts below, you MUST evaluate them and award marks.
+   - ABSOLUTE BAN ON EARLY STOPPING: Never omit or stop after the first subpart or paragraph! If the student answered calculations or further parts below, you MUST evaluate them and award marks.
    - Output an entry in "subparts" for EVERY subpart visible on the sheet.
 
 4. EXACT PHRASE EXTRACTION FOR POINT-BY-POINT GROUNDING:
@@ -2644,7 +2949,7 @@ YOUR GRADING PROTOCOL:
      * "criterion": string (mark scheme criteria)
      * "is_earned": boolean (true if earned, false otherwise)
      * "mark_code": string (e.g. "B1", "M1", "A1")
-     * "student_phrase": the EXACT word, phrase, equation, or number from the student's handwritten response that earned this mark (e.g. 'upright', 'virtual', 'vibrate about fixed positions', 'Q = mcΔT', '14 280 J'). If not earned, leave empty "".
+     * "student_phrase": the EXACT word, phrase, equation, or number from the student's handwritten response that earned this mark (e.g. 'distillation', 'Q = mcΔT', '2.5 A'). If not earned, leave empty "".
      * "flawed_phrase": if missed due to an incorrect response, the specific flawed word or value written by the student (e.g. 'conduction', 'inverted', 'real'). If omitted entirely, leave empty "".
    - NOTE: You do not need to guess pixel coordinates; the Visual Grounding Agent will localize them in Pass 2 using these target phrases!
 
@@ -2731,7 +3036,42 @@ Return only JSON.`;
             context,
             mark_scheme
           );
-          if (schemeData.found && schemeData.marks) {
+
+          // STRICT TARGET-PAPER ENFORCEMENT (code-level):
+          // 1. If the identified question does not exist in the paper being marked → 0.
+          // 2. The question's max comes ONLY from the official paper marks (DB).
+          // 3. If the model reports the page is not attempting this question → 0.
+          const snappedQNum = identifiedQNum.trim().match(/^\d+/)?.[0] || identifiedQNum.trim();
+          const officialQSingle = officialPaperQuestions.find((oq: any) => {
+            const oNum = String(oq.question_number).trim();
+            return oNum === snappedQNum || oNum === identifiedQNum.trim();
+          });
+          const officialMarksSingle = officialQSingle ? (Number(officialQSingle.marks) || 0) : 0;
+          const isUnmatchedSingle = officialPaperQuestions.length > 0 && !officialQSingle;
+
+          if (isUnmatchedSingle || assessment.is_attempting_target_question === false) {
+            console.log(`Strict enforcement (single-page): Question ${identifiedQNum} ${isUnmatchedSingle ? "does not exist in the target paper" : "was reported as not attempted"}. Awarding 0.`);
+            assessment.total_score = 0;
+            assessment.score = 0;
+            assessment.total_max_score = officialMarksSingle;
+            assessment.max_score = officialMarksSingle;
+            assessment.percentage = 0;
+            if (Array.isArray(assessment.subparts)) {
+              assessment.subparts.forEach((sp: any) => {
+                sp.score = 0;
+                sp.marks_awarded = [];
+                sp.teacher_correction_note = isUnmatchedSingle
+                  ? "Content does not correspond to any question in this paper — 0 marks"
+                  : "Does not attempt this question — 0 marks";
+                if (Array.isArray(sp.marking_points)) {
+                  sp.marking_points.forEach((mp: any) => { mp.is_earned = false; });
+                }
+              });
+            }
+          } else if (officialMarksSingle > 0) {
+            assessment.total_max_score = officialMarksSingle;
+            assessment.max_score = officialMarksSingle;
+          } else if (schemeData.found && schemeData.marks) {
             assessment.total_max_score = schemeData.marks;
             assessment.max_score = schemeData.marks;
           }
@@ -2837,9 +3177,10 @@ Return only JSON.`;
             }
           ];
 
-          return new Response(JSON.stringify({ 
-            assessment, 
-            marked_image_url: assessment.generated_marked_image_url || null 
+          return new Response(JSON.stringify({
+            assessment,
+            marked_image_url: assessment.generated_marked_image_url || null,
+            multi_page_error: multiPageError || undefined
           }), {
             headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
@@ -2914,10 +3255,10 @@ TUTORING INSTRUCTIONS:
    - Write equations and calculations directly and cleanly on their own lines or bullet points.
    - Maintain a standardized, professional look: do not randomly bold isolated numbers or mix random colors. Use bold only for clear step titles or key terminology.
 10. FOLLOW-UP DISCUSSIONS & REVIEWING SUBPARTS:
-    - When the student asks about a specific subpart (e.g. "Bro are you sure c(ii) is correct?", "why did I lose marks on (b)(i)?", "is helium fusion right?"):
+    - When the student asks about a specific subpart (e.g. "Bro are you sure c(ii) is correct?", "why did I lose marks on (b)(i)?", "is my reasoning for (c) right?"):
       * Look directly at their detected student working from the assessment above, the official mark scheme criteria, and the underlying scientific principles.
       * Answer immediately, conversationally, warmly, and thoroughly! NEVER give generic delay responses like "If you want, I can help you go through it step by step. Just let me know!"—give them the real, helpful answer directly right now.
-      * If they ask whether a part is correct, examine what they wrote. For instance, if they wrote "Helium nuclei fuse together" for a protostar forming a stable star, explain that in main sequence stars, hydrogen nuclei fuse into helium (helium fusion only happens later in red giants); explain why the Cambridge mark scheme awarded marks (e.g. for nuclear fusion and balanced forces) while validating their scientific awareness!`;
+      * If they ask whether a part is correct, examine what they wrote, cross-reference the official mark scheme criteria and the underlying science, and explain clearly why marks were awarded or withheld while validating their scientific awareness!`;
 
     const formattedHistory = chatHistory
       .filter((m: any) => m.content && (m.role === 'user' || m.role === 'assistant'))
@@ -2968,7 +3309,7 @@ TUTORING INSTRUCTIONS:
     }
 
     // Call OpenAI LLM to generate the direct conversational tutoring response
-    const chatCandidates = ["gpt-6-luna", "gpt-4o-mini"];
+    const chatCandidates = ["gpt-4o-mini", "gpt-4o"];
     const chatRes = await executeChatCompletion(openaiApiKey, chatCandidates, {
       messages,
       temperature: 0.4

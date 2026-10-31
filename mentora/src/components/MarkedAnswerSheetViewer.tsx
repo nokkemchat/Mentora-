@@ -749,7 +749,7 @@ const styles = StyleSheet.create({
     zIndex: 15,
   },
   redPenInlineTick: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '900',
     color: '#DC2626',
     textShadowColor: 'rgba(255, 255, 255, 0.95)',
@@ -766,7 +766,7 @@ const styles = StyleSheet.create({
     textShadowRadius: 2,
   },
   redPenTick: {
-    fontSize: 20,
+    fontSize: 17,
     fontWeight: '900',
     color: '#DC2626',
     textShadowColor: 'rgba(255, 255, 255, 0.95)',
@@ -781,7 +781,7 @@ const styles = StyleSheet.create({
     transform: [{ rotate: '2deg' }],
   },
   redPenCross: {
-    fontSize: 18,
+    fontSize: 15,
     fontWeight: '900',
     color: '#DC2626',
     textShadowColor: 'rgba(255, 255, 255, 0.95)',
@@ -789,7 +789,7 @@ const styles = StyleSheet.create({
     textShadowRadius: 3,
   },
   redPenScore: {
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: '800',
     color: '#DC2626',
     fontStyle: 'italic',
@@ -806,7 +806,7 @@ const styles = StyleSheet.create({
   },
   marginBadgeRedText: {
     color: '#DC2626',
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: '800',
     fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif',
     textShadowColor: 'rgba(255, 255, 255, 0.95)',
@@ -828,7 +828,7 @@ const styles = StyleSheet.create({
   },
   marginBadgeTextZero: {
     color: '#DC2626',
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: '800',
     fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif',
     textShadowColor: 'rgba(255, 255, 255, 0.95)',
@@ -837,7 +837,7 @@ const styles = StyleSheet.create({
   },
   marginBadgeTextEarned: {
     color: '#DC2626',
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: '800',
     fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif',
     textShadowColor: 'rgba(255, 255, 255, 0.95)',
@@ -856,7 +856,7 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
   },
   crossCommentText: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '700',
     color: '#DC2626',
     fontStyle: 'italic',

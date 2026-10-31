@@ -90,16 +90,28 @@ export default function ProfileScreen() {
         <View style={styles.roleBadge}>
           <Text style={styles.roleText}>{roleText}</Text>
         </View>
-        
-        {profile?.role === 'teacher' && (
+
+        <View style={styles.roleActionRow}>
+          {profile?.role === 'teacher' && (
+            <Pressable 
+              style={styles.teacherSwitchButton}
+              onPress={() => router.push('/teacher/dashboard')}
+            >
+              <Feather name="briefcase" size={15} color={colors.primary} />
+              <Text style={styles.teacherSwitchText}>Teacher Dashboard</Text>
+            </Pressable>
+          )}
+
           <Pressable 
-            style={styles.teacherSwitchButton}
-            onPress={() => router.push('/teacher/dashboard')}
+            style={styles.roleSwitchButton}
+            onPress={() => router.push('/(auth)/role-selection')}
           >
-            <Feather name="briefcase" size={16} color={colors.primary} />
-            <Text style={styles.teacherSwitchText}>Teacher Dashboard</Text>
+            <Feather name="repeat" size={14} color={colors.primary} />
+            <Text style={styles.roleSwitchText}>
+              {profile?.role === 'teacher' ? 'Switch to Student' : 'Switch to Teacher'}
+            </Text>
           </Pressable>
-        )}
+        </View>
       </View>
 
       {/* Theme Settings Card */}
@@ -134,6 +146,16 @@ export default function ProfileScreen() {
 
       {/* Account Settings Menu */}
       <View style={styles.section}>
+        <Pressable 
+          style={styles.menuItem}
+          onPress={() => router.push('/(auth)/role-selection')}
+        >
+          <Feather name="user-check" size={18} color={colors.primary} />
+          <Text style={[styles.menuItemText, { color: colors.primary, fontWeight: '600' }]}>
+            Change Role ({profile?.role === 'teacher' ? 'Teacher' : 'Student'})
+          </Text>
+          <Feather name="chevron-right" size={18} color={colors.textSecondary} />
+        </Pressable>
         <Pressable 
           style={styles.menuItem}
           onPress={() => router.push('/settings/account')}
@@ -227,19 +249,44 @@ const createStyles = (colors: any, isDark: boolean) => StyleSheet.create({
     color: colors.primary,
     fontWeight: '600',
   },
+  roleActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+  },
   teacherSwitchButton: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: isDark ? colors.surfaceHighlight : colors.primaryLight,
-    paddingHorizontal: spacing.lg,
+    paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     borderRadius: borderRadius.full,
-    marginTop: spacing.lg,
-    gap: spacing.sm,
+    gap: spacing.xs,
+    borderWidth: 1,
+    borderColor: isDark ? 'rgba(59, 130, 246, 0.3)' : 'transparent',
   },
   teacherSwitchText: {
     color: colors.primary,
     fontWeight: typography.weights.bold,
+    fontSize: typography.sizes.sm,
+  },
+  roleSwitchButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: isDark ? colors.surfaceHighlight : '#F1F5F9',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.full,
+    gap: spacing.xs,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+  },
+  roleSwitchText: {
+    color: colors.primary,
+    fontWeight: typography.weights.semibold,
     fontSize: typography.sizes.sm,
   },
   section: {

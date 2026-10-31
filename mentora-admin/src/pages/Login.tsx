@@ -34,6 +34,7 @@ export default function Login() {
         options: {
           data: {
             role: roleChoice,
+            role_selected: true,
           },
         },
       });

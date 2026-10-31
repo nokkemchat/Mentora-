@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Session, User } from '@supabase/supabase-js';
+import * as Linking from 'expo-linking';
 import { supabase } from '../lib/supabase';
+import { handleAuthRedirect } from '../lib/auth';
 import { useRouter, useSegments } from 'expo-router';
 
 type AuthContextType = {
@@ -47,9 +49,31 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
     );
 
+    // Listen for incoming deep links (e.g. OAuth redirects or email recovery)
+    Linking.getInitialURL().then(async (url) => {
+      if (url && (url.includes('code=') || url.includes('access_token=') || url.includes('error='))) {
+        try {
+          await handleAuthRedirect(url);
+        } catch (err) {
+          console.error('Initial deep link auth error:', err);
+        }
+      }
+    }).catch((err) => console.log('Error checking initial URL:', err));
+
+    const linkSubscription = Linking.addEventListener('url', async ({ url }) => {
+      if (url && (url.includes('code=') || url.includes('access_token=') || url.includes('error='))) {
+        try {
+          await handleAuthRedirect(url);
+        } catch (err) {
+          console.error('Incoming deep link auth error:', err);
+        }
+      }
+    });
+
     return () => {
       clearTimeout(failsafeTimer);
       authListener.subscription.unsubscribe();
+      linkSubscription.remove();
     };
   }, []);
 
@@ -63,11 +87,24 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       // Redirect unauthenticated users to onboarding/auth
       router.replace('/(auth)/onboarding');
     } else if (user) {
-      // Check if user has completed profile
+      // Check if user has chosen a role
+      const role = user.user_metadata?.role;
+      const roleSelected = user.user_metadata?.role_selected === true || role === 'teacher';
+      const isRoleSelectionScreen = segments[1] === 'role-selection';
+      const isBoardSelectionScreen = segments[1] === 'board-selection';
+
+      // 1. If user has NOT chosen a role yet (e.g. first-time Google sign-in)
+      if (!role || !roleSelected) {
+        if (!isRoleSelectionScreen && !isBoardSelectionScreen) {
+          router.replace('/(auth)/role-selection');
+        }
+        return;
+      }
+
+      // 2. User has chosen a role: Check if profile is completed
       const hasCompletedProfile = user.user_metadata?.profile_completed === true;
       const isCompleteProfileScreen = segments[1] === 'complete-profile';
       const isTeacherProfileScreen = segments[1] === 'complete-teacher-profile';
-      const role = user.user_metadata?.role;
 
       if (!hasCompletedProfile && !isCompleteProfileScreen && !isTeacherProfileScreen) {
         // Force them to complete profile based on role
@@ -76,8 +113,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         } else {
           router.replace('/(auth)/complete-profile');
         }
-      } else if (hasCompletedProfile && inAuthGroup) {
-        // Redirect authenticated users away from auth screens
+      } else if (hasCompletedProfile && inAuthGroup && !isRoleSelectionScreen && !isBoardSelectionScreen) {
+        // Redirect authenticated users away from auth screens (unless deliberately changing role or board)
         router.replace('/(tabs)');
       }
     }

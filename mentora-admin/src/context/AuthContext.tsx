@@ -42,32 +42,52 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const resolveRole = async (u: User | null | undefined): Promise<UserRole> => {
     if (!u) return null;
 
-    // Check for super admin credentials or admin metadata
+    // 1. Check for super admin credentials or admin metadata
     const adminEmails = ['admin@mentora.com', 'nokkemanyeza@gmail.com', 'devadmin@mentora.com'];
     if (adminEmails.includes(u.email || '') || u.user_metadata?.role === 'admin') {
       return 'admin';
     }
 
-    // Check profiles table in Supabase
+    // 2. Check if the user has explicitly selected/confirmed a role
+    const hasRoleSelected = u.user_metadata?.role_selected === true;
+
+    // 3. Check profiles table in Supabase
+    let profileRole: string | null = null;
+    let isProfileCompleted = false;
     try {
       const { data: profile } = await supabase
         .from('profiles')
-        .select('role')
+        .select('role, profile_completed')
         .eq('id', u.id)
         .maybeSingle();
 
-      if (profile?.role === 'teacher' || profile?.role === 'student' || profile?.role === 'admin') {
-        return profile.role;
+      if (profile) {
+        profileRole = profile.role;
+        isProfileCompleted = profile.profile_completed === true;
       }
     } catch (e) {
       console.warn('Error fetching user profile role:', e);
     }
 
-    // Check user_metadata
-    if (u.user_metadata?.role === 'teacher' || u.user_metadata?.role === 'student') {
-      return u.user_metadata.role;
+    if (profileRole === 'admin') {
+      return 'admin';
     }
 
+    // Teachers are never assigned by default; if marked as teacher, honor it
+    if (profileRole === 'teacher' || u.user_metadata?.role === 'teacher') {
+      return 'teacher';
+    }
+
+    // For student: only treat as resolved if the user explicitly selected this role OR completed onboarding.
+    // In Supabase, the handle_new_user database trigger defaults profiles.role to 'student' and profile_completed to false.
+    // New Google OAuth accounts have NOT confirmed their role yet, so we must return null to trigger the modal.
+    if (hasRoleSelected || isProfileCompleted) {
+      if (profileRole === 'student' || u.user_metadata?.role === 'student') {
+        return 'student';
+      }
+    }
+
+    // Unresolved: User must choose whether they are a teacher or a student
     return null;
   };
 
@@ -82,7 +102,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         if (pendingRole) {
           sessionStorage.removeItem('mentora_signup_role');
           try {
-            await supabase.auth.updateUser({ data: { role: pendingRole } });
+            await supabase.auth.updateUser({ data: { role: pendingRole, role_selected: true } });
             await supabase.from('profiles').upsert(
               {
                 id: session.user.id,
@@ -106,22 +126,27 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           }
         }
 
-        const resolvedRole = pendingRole || await resolveRole(session.user);
+        const resolvedRole = pendingRole || (await resolveRole(session.user));
         setRoleState(resolvedRole);
 
         // If user is authenticated but hasn't picked a role yet, trigger the role selection modal!
         if (!resolvedRole) {
           setShowRoleModal(true);
+        } else {
+          setShowRoleModal(false);
         }
       } else {
         setSession(null);
         setUser(null);
         setRoleState(null);
+        setShowRoleModal(false);
       }
       setLoading(false);
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
       setSession(newSession);
       setUser(newSession?.user ?? null);
       if (newSession?.user) {
@@ -129,7 +154,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         if (pendingRole) {
           sessionStorage.removeItem('mentora_signup_role');
           try {
-            await supabase.auth.updateUser({ data: { role: pendingRole } });
+            await supabase.auth.updateUser({ data: { role: pendingRole, role_selected: true } });
             await supabase.from('profiles').upsert(
               {
                 id: newSession.user.id,
@@ -153,13 +178,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           }
         }
 
-        const resolvedRole = pendingRole || await resolveRole(newSession.user);
+        const resolvedRole = pendingRole || (await resolveRole(newSession.user));
         setRoleState(resolvedRole);
         if (!resolvedRole) {
           setShowRoleModal(true);
+        } else {
+          setShowRoleModal(false);
         }
       } else {
         setRoleState(null);
+        setShowRoleModal(false);
       }
       setLoading(false);
     });
@@ -173,7 +201,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     try {
       // 1. Update Supabase Auth user metadata
       await supabase.auth.updateUser({
-        data: { role: newRole },
+        data: { role: newRole, role_selected: true },
       });
 
       // 2. Update public.profiles table

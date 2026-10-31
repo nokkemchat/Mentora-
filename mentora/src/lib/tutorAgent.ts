@@ -485,17 +485,12 @@ export class TutorAgentTools {
       console.warn('get_paper_manifest DB lookup:', e);
     }
 
-    return (BUILTIN_QUESTIONS['chemistry'] || []).map(q => ({
-      question_number: q.question_number,
-      marks: q.marks,
-      topic: q.topic,
-      subtopic: q.subtopic
-    }));
+    return [];
   }
 
   /**
    * Tool: get_all_paper_questions
-   * Dynamically retrieves all questions and marking schemes for the currently opened paper from Supabase.
+   * Dynamically retrieves all questions and marking schemes strictly for the currently opened paper from Supabase.
    */
   static async get_all_paper_questions(paperId: string): Promise<QuestionData[]> {
     try {
@@ -514,7 +509,7 @@ export class TutorAgentTools {
           return String(a.question_number).localeCompare(String(b.question_number), undefined, { numeric: true });
         });
 
-        // Fetch solutions for mark schemes if available
+        // Fetch solutions for mark schemes strictly for this paper's questions
         const qIds = data.map((q: any) => q.id);
         const { data: solData } = await supabase
           .from('past_paper_solutions')
@@ -526,17 +521,18 @@ export class TutorAgentTools {
           solData.forEach((s: any) => solMap.set(s.question_id, s));
         }
 
-        const chemFallback = BUILTIN_QUESTIONS['chemistry'] || [];
+        // Only use curated fallback if paperId matches the curated built-in paper!
+        const matchingCuratedList = Object.values(BUILTIN_QUESTIONS)
+          .flat()
+          .filter(c => c.paper_id === paperId);
 
         return data.map((item: any) => {
           const solution = solMap.get(item.id);
           const cleanNum = String(item.question_number).toLowerCase();
-          const curated = chemFallback.find(c => c.question_number.toLowerCase() === cleanNum);
+          const curated = matchingCuratedList.find(c => c.question_number.toLowerCase() === cleanNum);
 
           let markScheme = item.mark_scheme || solution?.official_mark_scheme || curated?.mark_scheme || '';
-          let contentText = (item.content_text && item.content_text.length > 100 && item.content_text.includes('('))
-            ? item.content_text
-            : (curated?.content_text || item.content_text || `Question ${item.question_number}`);
+          let contentText = item.content_text || curated?.content_text || `Question ${item.question_number}`;
 
           return {
             id: item.id,
@@ -563,31 +559,38 @@ export class TutorAgentTools {
       console.warn('get_all_paper_questions error:', e);
     }
 
-    return BUILTIN_QUESTIONS['chemistry'] || [];
+    // Only return built-in questions if paperId actually matches the built-in paper
+    const builtInMatch = Object.values(BUILTIN_QUESTIONS)
+      .flat()
+      .filter(q => q.paper_id === paperId);
+    return builtInMatch.length > 0 ? builtInMatch : [];
   }
 
   /**
    * Tool: get_question
-   * Retrieves complete structured question, marks, topic, and visual assets for a single targeted question.
+   * Retrieves complete structured question, marks, topic, and visual assets for a single targeted question
+   * strictly associated with the specified paperId.
    */
   static async get_question(paperId: string, questionNumber: string, questionPart?: string): Promise<QuestionData | null> {
     const cleanNum = questionNumber.replace(/[^0-9a-z]/gi, '').toLowerCase();
 
-    // Look for matching question in curated built-in question repository first as fallback
-    const chemQuestions = BUILTIN_QUESTIONS['chemistry'] || [];
-    const curated = chemQuestions.find(q => 
+    // Look for matching question in curated built-in question repository ONLY if paperId matches
+    const matchingCuratedList = Object.values(BUILTIN_QUESTIONS)
+      .flat()
+      .filter(q => q.paper_id === paperId);
+    const curated = matchingCuratedList.find(q => 
       q.question_number.toLowerCase() === cleanNum ||
       q.question_number.toLowerCase().startsWith(cleanNum)
     );
 
     try {
-      // Query past_paper_questions table in Supabase
+      // Query past_paper_questions table in Supabase strictly for this paper
       const { data, error } = await supabase
         .from('past_paper_questions')
         .select('*')
         .eq('paper_id', paperId)
         .eq('question_number', cleanNum)
-        .single();
+        .maybeSingle();
 
       if (!error && data) {
         let markScheme = data.mark_scheme;
@@ -609,10 +612,7 @@ export class TutorAgentTools {
           markScheme = curated.mark_scheme;
         }
 
-        // If DB has short placeholder text without subparts, merge rich curated content
-        const contentText = (data.content_text && data.content_text.length > 100 && data.content_text.includes('('))
-          ? data.content_text
-          : (curated?.content_text || data.content_text || `Question ${cleanNum}`);
+        const contentText = data.content_text || curated?.content_text || `Question ${cleanNum}`;
 
         return {
           id: data.id,
@@ -638,21 +638,25 @@ export class TutorAgentTools {
       console.warn('get_question DB lookup:', e);
     }
 
-    // Fallback curated questions
-    return curated || chemQuestions[0] || null;
+    // Fallback curated questions ONLY if paperId matched
+    return curated || null;
   }
 
   /**
    * Tool: get_question_assets
    * Retrieves visual assets (diagrams, tables, graphs) for a question.
    */
-  static async get_question_assets(questionId: string): Promise<string[]> {
+  static async get_question_assets(questionId: string, paperId?: string): Promise<string[]> {
     try {
-      const { data } = await supabase
+      let query = supabase
         .from('past_paper_questions')
-        .select('content_images')
-        .eq('id', questionId)
-        .single();
+        .select('content_images');
+
+      if (paperId) {
+        query = query.eq('paper_id', paperId);
+      }
+
+      const { data } = await query.eq('id', questionId).maybeSingle();
 
       if (data && Array.isArray(data.content_images) && data.content_images.length > 0) {
         return data.content_images;
@@ -672,10 +676,12 @@ export class TutorAgentTools {
       console.warn('get_question_assets error:', e);
     }
 
-    for (const cat of Object.keys(BUILTIN_QUESTIONS)) {
-      const q = BUILTIN_QUESTIONS[cat].find(item => item.id === questionId);
-      if (q && q.content_images && q.content_images.length > 0) {
-        return q.content_images;
+    if (paperId) {
+      for (const cat of Object.keys(BUILTIN_QUESTIONS)) {
+        const q = BUILTIN_QUESTIONS[cat].find(item => item.id === questionId && item.paper_id === paperId);
+        if (q && q.content_images && q.content_images.length > 0) {
+          return q.content_images;
+        }
       }
     }
 
@@ -684,15 +690,49 @@ export class TutorAgentTools {
 
   /**
    * Tool: get_mark_scheme
-   * Retrieves marking criteria, method/accuracy marks, and common mistakes.
+   * Retrieves marking criteria strictly associated with the specific question paper being marked.
    */
-  static async get_mark_scheme(questionId: string): Promise<string> {
+  static async get_mark_scheme(questionId: string, paperId?: string): Promise<string> {
     try {
+      let targetQId = questionId;
+
+      if (paperId) {
+        // questionId could be a question UUID or a question number like "1", "2"
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(questionId);
+        let query = supabase
+          .from('past_paper_questions')
+          .select('id, mark_scheme, paper_id')
+          .eq('paper_id', paperId);
+
+        if (isUuid) {
+          query = query.eq('id', questionId);
+        } else {
+          const cleanNum = questionId.replace(/[^0-9a-z]/gi, '').toLowerCase();
+          query = query.eq('question_number', cleanNum);
+        }
+
+        const { data: qData, error: qErr } = await query.maybeSingle();
+
+        if (qErr || !qData) {
+          // The requested question is NOT associated with the paper being marked!
+          console.warn(`Question ${questionId} is not associated with paper ${paperId}`);
+          return '';
+        }
+
+        targetQId = qData.id;
+
+        // If mark_scheme is directly stored on past_paper_questions
+        if (qData.mark_scheme && qData.mark_scheme.trim().length > 10) {
+          return qData.mark_scheme;
+        }
+      }
+
+      // Fetch official mark scheme from past_paper_solutions for this specific question
       const { data } = await supabase
         .from('past_paper_solutions')
         .select('official_mark_scheme, ai_worked_solution, common_mistakes')
-        .eq('question_id', questionId)
-        .single();
+        .eq('question_id', targetQId)
+        .maybeSingle();
 
       if (data && data.official_mark_scheme && data.official_mark_scheme.length > 10) {
         return data.official_mark_scheme;
@@ -701,10 +741,14 @@ export class TutorAgentTools {
       console.warn('get_mark_scheme DB error:', e);
     }
 
-    // Search in built-in questions
-    for (const cat of Object.keys(BUILTIN_QUESTIONS)) {
-      const q = BUILTIN_QUESTIONS[cat].find(item => item.id === questionId || item.question_number === questionId);
-      if (q && q.mark_scheme && q.mark_scheme.trim().length > 15) return q.mark_scheme;
+    // Search in built-in questions ONLY if paperId matches that specific built-in paper
+    if (paperId) {
+      for (const cat of Object.keys(BUILTIN_QUESTIONS)) {
+        const q = BUILTIN_QUESTIONS[cat].find(item => 
+          item.paper_id === paperId && (item.id === questionId || item.question_number === questionId)
+        );
+        if (q && q.mark_scheme && q.mark_scheme.trim().length > 15) return q.mark_scheme;
+      }
     }
 
     return '';
@@ -1327,7 +1371,17 @@ export class QuestionPaperTutorAgent {
    * Initializes a fresh session state for the given paper.
    */
   static createInitialState(paperContext: PaperContext, studentId: string, initialQuestion?: QuestionData): TutorSessionState {
-    const q = initialQuestion || BUILTIN_QUESTIONS['chemistry'][0];
+    const builtInMatch = Object.values(BUILTIN_QUESTIONS).flat().find(item => item.paper_id === paperContext.paper_id);
+    const q = initialQuestion || builtInMatch || {
+      id: `placeholder-1`,
+      paper_id: paperContext.paper_id,
+      question_number: '1',
+      topic: paperContext.subject || 'Exam Question',
+      difficulty: 'Medium' as const,
+      marks: 5,
+      content_text: 'Question 1',
+      mark_scheme: ''
+    };
     return {
       session_id: `session_${Date.now()}`,
       student_id: studentId,
@@ -1446,9 +1500,19 @@ export class QuestionPaperTutorAgent {
         }
       }
 
-      // Fallback if question was not found
+      // Fallback if question was not found in DB
       if (!activeQ) {
-        activeQ = BUILTIN_QUESTIONS['chemistry'][0];
+        const builtInMatch = Object.values(BUILTIN_QUESTIONS).flat().find(item => item.paper_id === state.paper_id && item.question_number === targetQNum);
+        activeQ = builtInMatch || {
+          id: `placeholder-${targetQNum}`,
+          paper_id: state.paper_id,
+          question_number: targetQNum,
+          topic: state.paper_context?.subject || 'Exam Question',
+          difficulty: 'Medium' as const,
+          marks: 5,
+          content_text: `Question ${targetQNum}`,
+          mark_scheme: ''
+        };
         state.retrieved_question = activeQ;
         state.question_id = activeQ.id;
         state.question_number = activeQ.question_number;
@@ -1459,7 +1523,7 @@ export class QuestionPaperTutorAgent {
         if (activeQ.content_images && activeQ.content_images.length > 0) {
           state.retrieved_question_assets = activeQ.content_images;
         } else {
-          const assets = await TutorAgentTools.get_question_assets(activeQ.id);
+          const assets = await TutorAgentTools.get_question_assets(activeQ.id, state.paper_id);
           if (assets && assets.length > 0) {
             state.retrieved_question_assets = assets;
             state.tool_history['get_question_assets'] = { result: assets, timestamp: Date.now() };
@@ -1468,7 +1532,7 @@ export class QuestionPaperTutorAgent {
       }
 
       // STEP 4: LOAD MARK SCHEME CRITERIA
-      markScheme = state.retrieved_mark_scheme || activeQ.mark_scheme || await TutorAgentTools.get_mark_scheme(activeQ.id);
+      markScheme = state.retrieved_mark_scheme || activeQ.mark_scheme || await TutorAgentTools.get_mark_scheme(activeQ.id, state.paper_id);
       hasOfficialScheme = !!(markScheme && markScheme.trim().length > 15 && !markScheme.includes('• Method Mark (M1): Accurate application'));
       state.retrieved_mark_scheme = markScheme;
       state.has_official_mark_scheme = hasOfficialScheme;
@@ -1480,7 +1544,17 @@ export class QuestionPaperTutorAgent {
       // We do not waste time on sequential DB queries for question 1;
       // get_all_paper_questions will load the complete paper questions and official mark schemes.
       if (!activeQ) {
-        activeQ = BUILTIN_QUESTIONS['chemistry'].find(q => q.question_number === targetQNum) || BUILTIN_QUESTIONS['chemistry'][0];
+        const builtInMatch = Object.values(BUILTIN_QUESTIONS).flat().find(item => item.paper_id === state.paper_id && item.question_number === targetQNum);
+        activeQ = builtInMatch || {
+          id: `placeholder-${targetQNum}`,
+          paper_id: state.paper_id,
+          question_number: targetQNum,
+          topic: state.paper_context?.subject || 'Exam Question',
+          difficulty: 'Medium' as const,
+          marks: 5,
+          content_text: `Question ${targetQNum}`,
+          mark_scheme: ''
+        };
         state.retrieved_question = activeQ;
         state.question_id = activeQ.id;
         state.question_number = activeQ.question_number;
@@ -1704,27 +1778,19 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
    - MATCH the student's work to the exact corresponding question in the EXAM PAPER above.
    - Set "identified_question_number" to that question number (e.g. "6").
    - Set "identified_topic" to that question's topic.
-   - The question's "total_max_score" MUST ALWAYS BE THE FULL OFFICIAL MARKS of that identified question from the paper header above (e.g. 9 marks for Question 6, 10 marks for Question 1, 8 marks for Question 2). NEVER default to 14 marks!
+   - The question's "total_max_score" MUST ALWAYS BE THE FULL OFFICIAL MARKS of that identified question from the paper header above. NEVER default to an arbitrary number of marks!
    - Under NO circumstances reduce "total_max_score" because the student skipped sub-parts.
 
 2. RIGOROUS SUB-PART MARKING & DIAGRAM AUDITING:
    - Inspect every official sub-part belonging to the identified question.
    - VISUAL INSPECTION OF DRAWINGS & DIAGRAMS:
-     * When a question asks to "draw" or "sketch" (e.g. electric field lines in Question 6(a)(ii)):
-       - You MUST visually inspect the actual drawing in the image! Look at the arrows, lines, circle, and charges.
-       - If arrowheads are drawn on the lines pointing inward towards the sphere, THEY ARE PRESENT! DO NOT claim arrowheads are missing!
-       - In "student_answer_detected", transcribe BOTH the drawing and any accompanying text: e.g. "Drawn: 8 straight radial lines evenly spaced surrounding sphere, touching sphere with no lines inside, and arrowheads on all lines pointing inward towards the negative sphere. Written: The electric field lines are directed radially inward toward towards the negatively charged sphere."
-       - Score all criteria according to the mark scheme: [B1] radial lines evenly spaced, [B1] lines touching sphere with no lines inside, [B1] inward arrowheads -> EARNED 3/3 MARKS!
+      * When a question asks to "draw" or "sketch", you MUST visually inspect the actual drawing in the image — inspect the lines, arrows, labels, and apparatus in detail.
+      * Judge drawings reasonably by eye as a human examiner would: credit each mark-scheme criterion the drawing genuinely satisfies. Never claim a required feature is missing when it is actually present, and never credit a feature that is absent.
+      * In "student_answer_detected", transcribe BOTH the drawing and any accompanying written text.
    - CAMBRIDGE COMPENSATORY [C] MARKS & ACCURACY [A] MARKS:
      * [C] marks are compensatory marks awarded for identifying the correct principle, formula, or phenomenon.
-     * In Question 6(b)(i):
-       - Official Scheme: "A2: electrons move (through the wire) from the sphere OR electrons move (through the wire) to(wards) the Earth; C1: electrons move (in the wire);"
-       - Max score is 2 marks.
-       - If the student states that electrons move in the wire (e.g. "electrons move from the earth to the sphere"), they EARN the compensatory mark [C1]!
-       - They lose [A2] because the direction is inverted (it is from sphere to Earth).
-       - Score for 6(b)(i) is 1/2 marks! (NOT 0/1, NOT 0/2!).
-       - Margin mark MUST BE A CHECKMARK: "✓ (1/2)", NEVER a cross "✕" because 1 mark was earned!
-       - Teacher red pen note on paper: Underline "from the earth to the sphere" and write "move from sphere to Earth".
+      * [A] marks require the fully accurate answer. If the student identifies the correct principle, formula, or phenomenon but gets a detail or direction wrong, award the compensatory mark(s) and withhold only the accuracy mark(s).
+      * Partial credit must be reflected in the margin as a checkmark with the fraction (e.g. "✓ (1/2)"), never as a cross, whenever at least one mark was earned.
    - For every sub-part attempted:
      * Transcribe what the student wrote or drew in "student_answer_detected".
      * Evaluate mathematical and scientific claims with extreme rigor.
@@ -1744,9 +1810,8 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
 3. NORMALIZED PAGE COORDINATES & ANNOTATION ANCHORS:
    Do NOT guess arbitrary pixel coordinates. Every annotation MUST be placed using normalized page coordinates [0.0, 1.0] where (0,0) is top-left and (1,1) is bottom-right:
    - PRIMARY ANSWER GROUNDING RULE:
-     * When student answers or repeated attempts appear both above and below a diagram, ALWAYS ground marks and comments to the PRIMARY answer line ABOVE the diagram (Y ~ 0.44 - 0.55).
-     * NEVER place ticks, crosses, badges, or comment boxes below a diagram (Y > 0.65). Post-diagram notes or scratchpad at the bottom of the sheet MUST remain clean and unmarked.
-     * For equation questions (e.g. 8(a)(i)), place ticks directly on Line 1 (Y ~ 0.050 - 0.065) level with each equation term, NEVER on subsequent repeat lines.
+      * When a student's answers or repeated attempts appear in multiple places, ALWAYS ground marks and comments to the PRIMARY answer line, not to scratch or duplicate attempts.
+      * Where possible, keep scratch space and unrelated working clean and unmarked.
    a) "detected_regions": Identify semantic layout regions on the student sheet:
       - individual written answer lines (e.g. id: "answer_3b_line_1", type: "answer_line", bbox: { x: 0.21, y: 0.43, width: 0.62, height: 0.035 }, confidence: 0.95)
       - question numbers (type: "question_number")
@@ -1832,7 +1897,7 @@ CONVERSATIONAL TUTORING INSTRUCTION:
 - If the student asks about, discusses, or questions a specific subpart (e.g. "are you sure c(ii) is correct?", "why did I get this wrong?", "what about part b?"):
   * Look at their detected student handwriting from the assessment above.
   * Cross-reference with the official mark scheme criteria and the physical/chemical concepts.
-  * Explain whether their answer was fully correct, partially correct, or flawed. If they caught a subtle error or misconception (e.g. in Question 9(c)(ii), hydrogen fuses into helium during the main sequence, whereas helium fusion only occurs later in red giant stars), praise their sharp scientific eye! Explain both the official examiner rubric perspective (how marks were awarded) and the scientific reality so their conceptual mastery is rock-solid.
+  * Explain whether their answer was fully correct, partially correct, or flawed. If they caught a subtle error or misconception, praise their sharp scientific eye! Explain both the official examiner rubric perspective (how marks were awarded) and the scientific reality so their conceptual mastery is rock-solid.
 - Use rich, beautiful Markdown formatting with bold for examiner key terms and clean layout. Do NOT use LaTeX display brackets like \\[ ... \\] or $$ ... $$.`;
     } else {
       // Natural conversation / greeting / casual inquiry — DO NOT send question content or mark scheme!
@@ -1923,73 +1988,11 @@ STUDENT SAYS:
     } catch (edgeErr: any) {
       console.warn('tutor-chat Edge Function error:', edgeErr);
       if (edgeErr?.message === 'REQUEST_TIMEOUT') {
-        throw edgeErr; // Bubble timeout up immediately; do not launch a 2nd duplicate heavy request
+        throw edgeErr; // Bubble the timeout up immediately so the caller can retry cleanly.
       }
     }
 
-    // 2. Secondary: Direct HTTP fetch to Edge Function (backup in case invoke wrapper had issues)
-    try {
-      const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFramJlamV4aGRhd2VscmZ5Z3ViIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ3MjAwMTgsImV4cCI6MjEwMDI5NjAxOH0.L2t-AiTbkMOtadI6rNVII9QZ9qLVZqD3ep9ekHqvI7Y';
-      const edgeUrl = 'https://akjbejexhdawelrfygub.supabase.co/functions/v1/tutor-chat';
-
-      const directRes = await fetch(edgeUrl, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-          'apikey': SUPABASE_ANON_KEY,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          message: contextualizedMessage,
-          context: {
-            ...contextPayload,
-            questionText: isAnswerSubmission ? submissionQuestionsContext : (hasQuestionSpecificIntent ? activeQ.content_text : undefined),
-            allQuestionsContext: submissionQuestionsContext,
-            manifestOverview,
-            marks: isAnswerSubmission ? undefined : (activeQ.marks || 5)
-          },
-          all_questions_context: submissionQuestionsContext,
-          sessionId: state.session_id,
-          chatHistory: chatHistory.slice(-8),
-          image_url: activeImageUrl,
-          images: activeImages.length > 0 ? activeImages : undefined,
-          answer_files: payload?.answer_files,
-          action: isAnswerSubmission ? 'assess_attempt' : 'chat',
-          generate_marked_image: isAnswerSubmission,
-          paper_id: state.paper_id,
-          question_text: isAnswerSubmission ? submissionQuestionsContext : (hasQuestionSpecificIntent ? activeQ.content_text : undefined),
-          mark_scheme: activeQ?.mark_scheme || state.retrieved_mark_scheme || undefined,
-          student_answer: payload?.answer_text || studentInput,
-          model_override: payload?.model_override || 'gpt-6-luna'
-        })
-      });
-
-      if (directRes.ok) {
-        const directData = await directRes.json();
-        if (directData?.assessment) {
-          return await QuestionPaperTutorAgent.handleAssessmentOutcome(
-            directData.assessment,
-            activeQ,
-            state,
-            payload,
-            studentInput,
-            chatHistory
-          );
-        }
-        if (directData?.reply) {
-          TutorAgentTools.save_learning_session(state, [...chatHistory, { role: 'assistant', content: directData.reply }]);
-          return {
-            newState: state,
-            replyText: directData.reply,
-            ui: { type: 'standard_chat' }
-          };
-        }
-      }
-    } catch (fetchErr) {
-      console.warn('Direct fetch error:', fetchErr);
-    }
-
-    // 3. Helpful fallback only when network connection drops
+    // Helpful fallback when the edge function cannot be reached
     return {
       newState: state,
       replyText: `I encountered a connection issue while evaluating your submission. Please tap send or try uploading again!`,
@@ -2061,7 +2064,21 @@ STUDENT SAYS:
     }
 
     // Reconcile assessment against official question marks
-    reconcileAssessment(assessment, isMultiPage ? assessment.total_max_score : evaluatedQ.marks);
+    // For multi-page booklets, compute the TRUE paper total from all official questions
+    // (not just the ones the student attempted) so the student is marked out of the
+    // full paper total, not a subset.
+    let officialPaperTotal: number | undefined;
+    if (isMultiPage) {
+      try {
+        const allPaperQs = await TutorAgentTools.get_all_paper_questions(state.paper_id);
+        if (allPaperQs && allPaperQs.length > 0) {
+          officialPaperTotal = allPaperQs.reduce((sum: number, q: QuestionData) => sum + (q.marks || 0), 0);
+        }
+      } catch (e) {
+        console.warn('Could not fetch all paper questions for paper total reconciliation:', e);
+      }
+    }
+    reconcileAssessment(assessment, isMultiPage ? (officialPaperTotal || assessment.total_max_score) : evaluatedQ.marks);
     // Do NOT synthesize fallback annotations — if AI returned none, keep empty array.
     // Phantom positions are worse than no markings at all.
     if (!assessment.annotations) {
@@ -2129,8 +2146,12 @@ STUDENT SAYS:
     if (isMultiPage && assessment.question_summaries && assessment.question_summaries.length > 0) {
       reply += `### 📋 Booklet Question Breakdown:\n`;
       assessment.question_summaries.forEach((qs: any) => {
-        const pList = qs.spanned_pages.map((p: number) => `Page ${p + 1}`).join(', ');
-        reply += `• **Question ${qs.question_number}** (${qs.topic || 'Topic'}): **${qs.score} / ${qs.max_score} marks** (${qs.percentage}%) • [${pList}]\n`;
+        if (qs.unattempted) {
+          reply += `• **Question ${qs.question_number}** (${qs.topic || 'Topic'}): **0 / ${qs.max_score} marks** (0%) — *Not attempted on submitted sheet*\n`;
+        } else {
+          const pList = qs.spanned_pages && qs.spanned_pages.length > 0 ? qs.spanned_pages.map((p: number) => `Page ${p + 1}`).join(', ') : 'N/A';
+          reply += `• **Question ${qs.question_number}** (${qs.topic || 'Topic'}): **${qs.score} / ${qs.max_score} marks** (${qs.percentage}%) • [${pList}]\n`;
+        }
       });
       reply += `\n`;
     }

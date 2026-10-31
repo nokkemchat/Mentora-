@@ -32,6 +32,28 @@ export default function CompleteProfileScreen() {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
 
+  // Auto-prefill names from OAuth (e.g. Google) metadata if available
+  React.useEffect(() => {
+    if (user?.user_metadata) {
+      const meta = user.user_metadata;
+      if (!firstName) {
+        if (meta.first_name) setFirstName(meta.first_name);
+        else if (meta.given_name) setFirstName(meta.given_name);
+        else if (meta.full_name || meta.name) {
+          const parts = (meta.full_name || meta.name).trim().split(/\s+/);
+          setFirstName(parts[0] || '');
+          if (!lastName && parts.length > 1) {
+            setLastName(parts.slice(1).join(' '));
+          }
+        }
+      }
+      if (!lastName) {
+        if (meta.last_name) setLastName(meta.last_name);
+        else if (meta.family_name) setLastName(meta.family_name);
+      }
+    }
+  }, [user]);
+
   // Grade state
   const [grade, setGrade] = useState('');
   const [isGradeDropdownVisible, setGradeDropdownVisible] = useState(false);
@@ -105,6 +127,7 @@ export default function CompleteProfileScreen() {
         grade: grade,
         city: city.trim(),
         profile_completed: true,
+        avatar_url: user.user_metadata?.avatar_url || user.user_metadata?.picture || null,
         updated_at: new Date().toISOString()
       })
       .eq('id', user.id);

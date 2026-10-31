@@ -24,6 +24,31 @@ export default function CompleteTeacherProfileScreen() {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
 
+  // Prefill teacher details from OAuth metadata (e.g. Google)
+  useEffect(() => {
+    if (user?.user_metadata) {
+      const meta = user.user_metadata;
+      if (!firstName) {
+        if (meta.first_name) setFirstName(meta.first_name);
+        else if (meta.given_name) setFirstName(meta.given_name);
+        else if (meta.full_name || meta.name) {
+          const parts = (meta.full_name || meta.name).trim().split(/\s+/);
+          setFirstName(parts[0] || '');
+          if (!lastName && parts.length > 1) {
+            setLastName(parts.slice(1).join(' '));
+          }
+        }
+      }
+      if (!lastName) {
+        if (meta.last_name) setLastName(meta.last_name);
+        else if (meta.family_name) setLastName(meta.family_name);
+      }
+      if (!avatarUri && (meta.avatar_url || meta.picture)) {
+        setAvatarUri(meta.avatar_url || meta.picture);
+      }
+    }
+  }, [user]);
+
   // School state
   const [selectedSchoolOption, setSelectedSchoolOption] = useState('');
   const [customSchool, setCustomSchool] = useState('');
@@ -138,6 +163,8 @@ export default function CompleteTeacherProfileScreen() {
       .filter(c => selectedCourseIds.includes(c.id))
       .map(c => c.title);
 
+    const finalAvatarUrl = uploadedAvatarUrl || avatarUri || user?.user_metadata?.avatar_url || user?.user_metadata?.picture || null;
+
     // 1. Update user metadata
     const { error: metaError } = await supabase.auth.updateUser({
       data: {
@@ -145,7 +172,7 @@ export default function CompleteTeacherProfileScreen() {
         last_name: lastName.trim(),
         school: finalSchool.trim(),
         profile_completed: true,
-        avatar_url: uploadedAvatarUrl,
+        avatar_url: finalAvatarUrl,
       }
     });
 
@@ -165,7 +192,7 @@ export default function CompleteTeacherProfileScreen() {
         subjects_taught: selectedCourseTitles,
         years_of_experience: parseInt(yearsExperience.trim(), 10) || 0,
         bio: bio.trim(),
-        avatar_url: uploadedAvatarUrl,
+        avatar_url: finalAvatarUrl,
         profile_completed: true,
         updated_at: new Date().toISOString()
       })

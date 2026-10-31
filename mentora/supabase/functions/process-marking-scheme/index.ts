@@ -40,7 +40,17 @@ serve(async (req) => {
     );
 
     const openaiKey = Deno.env.get("OPENAI_API_KEY");
-    if (!openaiKey) {
+    // === TEMPORARY PROVIDER OVERRIDE (Caimex gateway) ===
+    // When CAIMEX_API_KEY is set, rubric extraction routes through the Caimex gateway
+    // (OpenAI-compatible). The OPENAI_API_KEY secret stays untouched; removing the
+    // CAIMEX_* secrets restores the original behavior.
+    const caimexKey = Deno.env.get("CAIMEX_API_KEY");
+    const providerBaseUrl = caimexKey
+      ? (Deno.env.get("CAIMEX_BASE_URL") || "https://caimex.econetai.co.zw:2052/v1")
+      : "https://api.openai.com/v1";
+    const providerKey = caimexKey || openaiKey;
+    const providerModel = caimexKey ? (Deno.env.get("CAIMEX_MODEL") || "zai-glm-5-3") : "gpt-4o";
+    if (!providerKey) {
       throw new Error("OPENAI_API_KEY is not configured in Supabase secrets");
     }
 
@@ -109,17 +119,14 @@ serve(async (req) => {
       ? extractedMsText.substring(0, 120000)
       : extractedMsText;
 
-    // 4. Build prompt with question references
-    const questionsSummary = (questions || []).map(q => ({
-      id: q.id,
-      question_number: q.question_number,
-      marks: q.marks,
-      snippet: (q.content_text || "").substring(0, 150)
-    }));
+    // 4. Per-question rubric extraction: one dedicated call per question so the official
+    // mark scheme table is preserved ROW-BY-ROW instead of being compressed into a flat,
+    // lossy one-liner like "B1 for X; C1 for Y". Deterministic: temperature 0.
+    const EXTRACT_MODEL = "gpt-4o";
 
-    const systemPrompt = `
-You are an expert Cambridge and ZIMSEC examination marking scheme specialist.
-Your task is to parse an official Marking Scheme document and extract the rubrics, worked solutions, and examiner insights for each question.
+    const extractRubricForQuestion = async (q: any): Promise<ExtractedSolution | null> => {
+      const systemPrompt = `You are an expert Cambridge and ZIMSEC examination marking scheme specialist.
+Extract the COMPLETE official rubric for ONE question from the marking scheme text provided.
 
 Paper details:
 - Curriculum: ${paper.curriculum}
@@ -127,62 +134,108 @@ Paper details:
 - Year: ${paper.year}
 - Paper Number: ${paper.paper_number}
 
-Questions present in the examination paper:
-${JSON.stringify(questionsSummary, null, 2)}
+TARGET QUESTION: Question ${q.question_number} — official total: ${q.marks || 'unknown'} marks.
+Question content snippet (for matching): ${(q.content_text || "").substring(0, 300)}
 
-FOR EACH QUESTION in the paper:
-1. "question_number": e.g. "1", "2", "3" (must match the question numbers in the paper).
-2. "official_mark_scheme": The exact criteria, M/A/B marks, allowed answers, and scoring breakdown from the marking scheme.
-3. "ai_worked_solution": A clear, step-by-step complete solution demonstrating full working and answers.
-4. "common_mistakes": Pitfalls, common errors, or misconceptions noted by examiners or typical students.
-5. "examiner_tips": Key guidance, essential keywords required, or time-saving exam technique.
+THE OFFICIAL MARK SCHEME IS A TABLE with columns: Question | Answer | Marks. EACH ROW of the table is ONE marking point.
 
-Return ONLY raw JSON with schema:
-{
-  "solutions": [
-    {
-      "question_number": "1",
-      "official_mark_scheme": "...",
-      "ai_worked_solution": "...",
-      "common_mistakes": "...",
-      "examiner_tips": "..."
-    }
-  ]
-}
-`;
+"official_mark_scheme" FORMAT (CRITICAL — one line per marking-point row, in this exact structure):
+(subpart) [MARKCODE] exact criteria / allowed answer
 
-    console.log("Calling OpenAI gpt-4o-mini for marking scheme parsing...");
-    const aiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${openaiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: `Here is the full text of the Marking Scheme PDF:\n\n${trimmedMsText}` },
-        ],
-        response_format: { type: "json_object" },
-        temperature: 0.1,
-      }),
+REAL EXAMPLE (a Cambridge electricity question):
+(a) [B1] sum of current(s) into junction = sum of current(s) out junction; or (algebraic) sum of current(s) at a junction is zero
+(b)(i) [C1] line with negative gradient
+(b)(i) [A1] line from 0 °C to 100 °C, starting at (0, R0) with negative gradient throughout and never reaching R = 0
+(b)(ii) [B1] (resistance of T decreases so) total resistance (of circuit) decreases
+(b)(ii) [B1] current in cell increases (so p.d. across internal resistance increases)
+(c)(i) [C1] p.d. across r = 1.50 – (6.00 × 0.200) (= 0.30 V)
+(c)(i) [A1] current in cell = 0.30 / 0.12 (= 2.5 A)
+
+STRICT RULES:
+1. ONE LINE PER MARKING-POINT ROW of the official table. Include EVERY row for this question — never merge or skip rows.
+2. Preserve the EXACT criteria text, allowed answers, "or" alternatives, bracketed guidance, and figures from the table. Do NOT summarise, compress, or rephrase. Prose like "B1 for statement of conservation of charge; C1 for correct graph shape" is FORBIDDEN.
+3. EXACT NUMBERS (CRITICAL): copy every number, unit, angle, and value EXACTLY as printed in the mark scheme. NEVER round, approximate, or reformat values — "12.5°" must stay "12.5°" (never "12°"), "6.2°" must stay "6.2°", "0.52 Ω" must stay "0.52 Ω". If a value is unclear in the extracted text, keep the closest literal form and do not invent a rounded version.
+4. Keep each subpart label exactly as printed (e.g. "(a)", "(b)(i)", "(c)(ii)") followed by the mark code in square brackets, e.g. [B1], [C1], [A1], [M1].
+5. The sum of the mark codes MUST equal the question's official total (${q.marks || 'see table'} marks). If a row's mark code appears multiple times, output it once per occurrence.
+6. If the mark scheme also has a "Notes" or guidance column for a row, append it to that row's line after " — Guidance: ...".
+7. "ai_worked_solution": a clear step-by-step full solution. "common_mistakes": pitfalls/misconceptions. "examiner_tips": key guidance.
+
+Return ONLY raw JSON:
+{ "question_number": "${q.question_number}", "official_mark_scheme": "...", "ai_worked_solution": "...", "common_mistakes": "...", "examiner_tips": "..." }`;
+
+      console.log(`Extracting rubric for Question ${q.question_number} (${EXTRACT_MODEL})...`);
+      try {
+        const aiResponse = await fetch(`${providerBaseUrl}/chat/completions`, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${providerKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: providerModel,
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: `Extract the full structured rubric for Question ${q.question_number} only.\n\nHere is the full text of the Marking Scheme PDF:\n\n${trimmedMsText}` },
+            ],
+            response_format: { type: "json_object" },
+            temperature: 0,
+          }),
+        });
+
+        if (!aiResponse.ok) {
+          const errText = await aiResponse.text();
+          console.error(`Rubric extraction failed for Q${q.question_number}: ${aiResponse.status} ${errText.substring(0, 200)}`);
+          return null;
+        }
+
+        const aiData = await aiResponse.json();
+        const rawContent = aiData.choices?.[0]?.message?.content || "{}";
+        const parsed = JSON.parse(rawContent);
+        return {
+          question_number: parsed.question_number || String(q.question_number),
+          official_mark_scheme: parsed.official_mark_scheme || "",
+          ai_worked_solution: parsed.ai_worked_solution || "",
+          common_mistakes: parsed.common_mistakes || "",
+          examiner_tips: parsed.examiner_tips || "",
+        };
+      } catch (qErr) {
+        console.error(`Rubric extraction error for Q${q.question_number}:`, qErr);
+        return null;
+      }
+    };
+
+    // Parallel extraction: all questions extract CONCURRENTLY with bounded concurrency
+    // (a small worker pool) so the whole paper's rubrics are extracted in ~1 wave instead
+    // of one-at-a-time. Results stay indexed to their questions.
+    const runPool = async (items: any[], limit: number, fn: (item: any) => Promise<ExtractedSolution | null>) => {
+      const results: Array<ExtractedSolution | null> = new Array(items.length).fill(null);
+      let next = 0;
+      const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+        while (next < items.length) {
+          const idx = next++;
+          results[idx] = await fn(items[idx]);
+        }
+      });
+      await Promise.all(workers);
+      return results;
+    };
+
+    const CONCURRENCY = 4; // parallel extraction calls at a time
+    const poolResults = await runPool(questions || [], CONCURRENCY, async (q) => {
+      // Retry: a transient OpenAI timeout here would silently leave a question with NO
+      // stored rubric, and the grading agent would then invent its own target values.
+      let sol: ExtractedSolution | null = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        sol = await extractRubricForQuestion(q);
+        if (sol) break;
+        console.warn(`Rubric extraction for Q${q.question_number} attempt ${attempt + 1}/3 failed — retrying...`);
+        if (attempt < 2) await new Promise(r => setTimeout(r, 5000));
+      }
+      return sol;
     });
+    const extractedSolutions: ExtractedSolution[] = poolResults.filter((s): s is ExtractedSolution => s !== null);
 
-    if (!aiResponse.ok) {
-      const errText = await aiResponse.text();
-      throw new Error(`OpenAI API error: ${aiResponse.status} ${errText}`);
-    }
-
-    const aiData = await aiResponse.json();
-    const rawContent = aiData.choices?.[0]?.message?.content || "{}";
-    const parsed = JSON.parse(rawContent);
-
-    const extractedSolutions: ExtractedSolution[] = Array.isArray(parsed.solutions)
-      ? parsed.solutions
-      : [];
-
-    console.log(`Extracted ${extractedSolutions.length} solutions from marking scheme.`);
+    console.log(`Extracted ${extractedSolutions.length}/${(questions || []).length} structured per-subpart rubrics from the marking scheme (${CONCURRENCY} parallel extraction calls).`);
 
     // 5. Match solutions to existing questions and upsert into past_paper_solutions
     const qMap = new Map<string, any>();
@@ -192,6 +245,25 @@ Return ONLY raw JSON with schema:
     }
 
     let matchedCount = 0;
+    const rubricDetails: Array<{ question_number: string; rubric_rows: number; rubric_marks_total: number; official_marks: number | null; marks_match: boolean }> = [];
+
+    // Count total marks in a structured rubric by summing its [MARKCODE] tokens (B1/C1/A1/M1...)
+    const countRubricMarks = (rubric: string): { rows: number; total: number } => {
+      const rows = rubric.split("\n").filter((l: string) => /\[[A-Z]\s*\d+\s*(?:×\s*\d+)?\]/.test(l));
+      let total = 0;
+      for (const row of rows) {
+        const marksMatch = row.match(/\[[A-Z]\s*(\d+)\s*(?:×\s*(\d+))?\]/);
+        if (marksMatch) {
+          const base = parseInt(marksMatch[1], 10) || 1;
+          const multiplier = marksMatch[2] ? parseInt(marksMatch[2], 10) : 1;
+          total += base * multiplier;
+        } else {
+          total += 1;
+        }
+      }
+      return { rows: rows.length, total };
+    };
+
     for (const sol of extractedSolutions) {
       const qNorm = normalizeQNum(sol.question_number);
       const targetQ = qMap.get(qNorm) || qMap.get(sol.question_number);
@@ -200,6 +272,21 @@ Return ONLY raw JSON with schema:
         console.warn(`Could not match solution for Q${sol.question_number} to any existing question.`);
         continue;
       }
+
+      // Verify: the rubric's marking points should sum to the question's official marks
+      const rubricCount = countRubricMarks(sol.official_mark_scheme || "");
+      const officialMarks = targetQ.marks ? Number(targetQ.marks) : null;
+      const marksMatch = officialMarks === null ? true : rubricCount.total === officialMarks;
+      if (!marksMatch) {
+        console.warn(`Rubric verification for Q${targetQ.question_number}: rubric marks total ${rubricCount.total} != official marks ${officialMarks} — extraction may be incomplete.`);
+      }
+      rubricDetails.push({
+        question_number: String(targetQ.question_number),
+        rubric_rows: rubricCount.rows,
+        rubric_marks_total: rubricCount.total,
+        official_marks: officialMarks,
+        marks_match: marksMatch
+      });
 
       const { error: upsertErr } = await supabaseAdmin
         .from("past_paper_solutions")
@@ -224,9 +311,10 @@ Return ONLY raw JSON with schema:
     return new Response(
       JSON.stringify({
         success: true,
-        message: `Processed marking scheme: ${matchedCount} solutions mapped and saved.`,
+        message: `Processed marking scheme: ${matchedCount} structured rubrics mapped and saved.`,
         solutions_extracted: extractedSolutions.length,
         solutions_saved: matchedCount,
+        rubric_details: rubricDetails
       }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },

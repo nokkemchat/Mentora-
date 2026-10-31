@@ -66,7 +66,7 @@ serve(async (req) => {
   let jobIdGlobal: string | null = null;
 
   try {
-    const { paper_id, mark_scheme_url: reqMarkSchemeUrl } = await req.json();
+    const { paper_id, mark_scheme_url: reqMarkSchemeUrl, text_only } = await req.json();
     if (!paper_id) {
       throw new Error("Missing paper_id");
     }
@@ -186,7 +186,6 @@ serve(async (req) => {
       .maybeSingle();
 
     // If an ingestion agent is currently actively rendering/extracting, do not clobber it
-    const { text_only } = await req.clone().json().catch(() => ({}));
     if (job && job.status === "extracting" && !text_only) {
       console.log(`Ingestion job ${job.id} is actively extracting with Mentora Content Ingestion Agent. Deferring to visual pipeline.`);
       return new Response(
@@ -475,10 +474,13 @@ Return ONLY raw valid JSON matching this schema:
       }
     }
 
-    // 9. Mark ingestion job completed
+    // 9. Job status: this cloud path extracts TEXT ONLY (no images). Reset the job to
+    // 'uploaded' so the Mentora Ingestion Agent picks it up on its next run and adds the
+    // visual assets (cropped diagrams/figures). Marking it 'completed' here would silently
+    // leave the paper without images forever.
     await supabaseAdmin
       .from("ingestion_jobs")
-      .update({ status: "completed" })
+      .update({ status: "uploaded" })
       .eq("id", job.id);
 
     // 10. If mark_scheme_url exists, trigger and await process-marking-scheme

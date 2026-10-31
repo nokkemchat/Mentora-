@@ -155,6 +155,22 @@ export default function AccountSettingsScreen() {
                 placeholderTextColor={colors.textTertiary}
                 placeholder="Enter last name"
               />
+              <Text style={styles.inputLabel}>Account Role</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: colors.surfaceHighlight || colors.surface, paddingHorizontal: 16, paddingVertical: 12, borderRadius: 12, marginBottom: 16 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Feather name={role === 'teacher' ? 'award' : 'book-open'} size={18} color={colors.primary} />
+                  <Text style={{ color: colors.text, fontWeight: '600', fontSize: 15 }}>
+                    {role === 'teacher' ? 'Educator (Teacher)' : 'Student'}
+                  </Text>
+                </View>
+                <Pressable
+                  onPress={() => router.push('/(auth)/role-selection')}
+                  style={{ backgroundColor: colors.primary, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 }}
+                >
+                  <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '600' }}>Change</Text>
+                </Pressable>
+              </View>
+
               <Pressable style={styles.saveButton} onPress={updateProfile} disabled={saving}>
                 <Text style={styles.saveButtonText}>{saving ? 'Saving...' : 'Update Profile'}</Text>
               </Pressable>
