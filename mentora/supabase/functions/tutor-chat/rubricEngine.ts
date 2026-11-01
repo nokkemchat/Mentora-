@@ -297,11 +297,58 @@ function assignOverlapGroups(rows: RubricCriterion[]): void {
       if (rows[i].isLevel || rows[j].isLevel) continue; // levels handled separately
 
       // Math/Calculation criteria: distinct method (M), accuracy (A), and independent calculation (B) steps
-      // represent separate stages in a calculation derivation — NEVER merge them by lexical similarity!
+      // represent separate stages in a calculation derivation.
+      // NEVER merge distinct sequential calculation steps by loose lexical similarity.
+      // BUT DO MERGE:
+      // 1. Explicit alternatives ('or', 'instead', 'alternative')
+      // 2. Descending partial tiers for the same calculation step (e.g. M2 with M1 partial factorisation,
+      //    or B2 with B1 for one correct value, or SC1 fallback). These represent mutually exclusive tiers
+      //    of the same mark and MUST share an overlap group so the engine awards Math.max(valA, valB).
       const isCalculationStep = (c: string, t: string) =>
-        /^(?:M\d|A\d)(?:DEP)?$/i.test(c) || (/^B\d(?:DEP)?$/i.test(c) && /[\d=+\-*/<>]/.test(t));
+        /^(?:M\d|A\d|SC\d?)(?:DEP)?$/i.test(c) || (/^B\d(?:DEP)?$/i.test(c) && /[\d=+\-*/<>]/.test(t));
       const isExplicitAlt = (t: string) => /^(?:or\s+|instead\s+|alternative\b)/i.test(t);
-      if (isCalculationStep(rows[i].code, rows[i].text) && isCalculationStep(rows[j].code, rows[j].text) && !isExplicitAlt(rows[j].text)) {
+
+      const isSameFamilyPartial = (idxA: number, idxB: number): boolean => {
+        const cA = rows[idxA].code.toUpperCase().replace(/[^A-Z0-9]/g, '');
+        const cB = rows[idxB].code.toUpperCase().replace(/[^A-Z0-9]/g, '');
+        const tB = rows[idxB].text;
+        const vA = rows[idxA].value;
+        const vB = rows[idxB].value;
+
+        const letterA = cA.replace(/\d+.*$/, '');
+        const letterB = cB.replace(/\d+.*$/, '');
+
+        // 1. Same mark family (e.g. M2 & M1, or B2 & B1) where row B is a lower partial value
+        if (letterA && letterA === letterB && vA > vB) {
+          // If immediately adjacent, row B is the partial fallback tier of row A's step
+          if (idxB === idxA + 1) return true;
+          // Or if text explicitly signals partial credit / alternative condition
+          if (/partial|instead|\bor\b|where|or\s+better|or\s+equivalent|for\s+one|for\s+either/i.test(tB)) {
+            const wi = words[idxA], wj = words[idxB];
+            if ([...wi].some(w => wj.has(w))) return true;
+          }
+        }
+
+        // 2. Special Case (SC): only link to the immediately preceding criterion it serves as fallback for
+        if (cB.startsWith('SC')) {
+          if (idxB === idxA + 1 && (tB.toLowerCase().includes(letterA.toLowerCase() + '0') || /instead|alternative|if\s+0/i.test(tB))) {
+            return true;
+          }
+        }
+
+        // 3. Cross-type partial tier: e.g. B2 with M1 partial (e.g. B2 for 65/80, M1 for 9/80 + 56/80)
+        if (idxB === idxA + 1 && vA > vB && /partial|\bor\b|for/i.test(tB)) {
+          const wi = words[idxA], wj = words[idxB];
+          if ([...wi].some(w => wj.has(w))) return true;
+        }
+
+        return false;
+      };
+
+      if (isCalculationStep(rows[i].code, rows[i].text) && isCalculationStep(rows[j].code, rows[j].text)) {
+        if (isSameFamilyPartial(i, j) || isExplicitAlt(rows[j].text)) {
+          union(i, j);
+        }
         continue;
       }
 

@@ -292,6 +292,31 @@ assert(histRub.criteria.length === 3, `3 criteria parsed for History (got ${hist
 assert(histRub.criteria[0].overlapGroup === histRub.criteria[1].overlapGroup, `qualitative B1 rows on Prussian dominance share an overlap group (got group ${histRub.criteria[0].overlapGroup})`);
 assert(histRub.criteria[0].overlapGroup !== histRub.criteria[2].overlapGroup, `distinct historical fact has different overlap group (got group ${histRub.criteria[2].overlapGroup})`);
 
+console.log('\n[19] CAMBRIDGE MATHEMATICS — descending partial tiers (M2 with M1 partial) must merge:');
+const MATH_Q3 = `
+(a)(ii) [M2] (2x + 21)(x - 5) = 0
+(a)(ii) [M1] for (2x + a)(x + b) where ab = -105 or 2b + a = 11
+(a)(ii) [B1] 5
+`;
+const mathQ3Rub = parseRubric('a.ii', MATH_Q3);
+assert(mathQ3Rub.criteria.length === 3, `3 criteria parsed (got ${mathQ3Rub.criteria.length})`);
+assert(mathQ3Rub.criteria[0].overlapGroup === mathQ3Rub.criteria[1].overlapGroup, `M2 and M1 partial factorisation share an overlap group (got ${mathQ3Rub.criteria[0].overlapGroup} vs ${mathQ3Rub.criteria[1].overlapGroup})`);
+assert(mathQ3Rub.criteria[0].overlapGroup !== mathQ3Rub.criteria[2].overlapGroup, `M2 and B1 final answer have distinct overlap groups`);
+
+// Candidate satisfies both M2 and M1 (model checks both) plus B1: score MUST be 3/3, never 4/3
+const q3Verdicts = mathQ3Rub.criteria.map((c) => ({ criterionIndex: c.index, satisfied: true }));
+const q3Score = computeSubpartScore(mathQ3Rub, q3Verdicts, 3);
+assert(q3Score.score === 3, `student scores 3/3 without stacking M2 + M1 (got ${q3Score.score}/3)`);
+
+// Candidate satisfies ONLY M1 partial plus B1: score MUST be 2/3
+const q3PartialVerdicts = [
+  { criterionIndex: 0, satisfied: false },
+  { criterionIndex: 1, satisfied: true },
+  { criterionIndex: 2, satisfied: true },
+];
+const q3PartialScore = computeSubpartScore(mathQ3Rub, q3PartialVerdicts, 3);
+assert(q3PartialScore.score === 2, `student scores 2/3 with partial M1 + B1 (got ${q3PartialScore.score}/3)`);
+
 console.log(`\n══════════════════════════════════════`);
 console.log(`FINAL: ${passed} passed, ${failed} failed`);
 console.log(`══════════════════════════════════════`);

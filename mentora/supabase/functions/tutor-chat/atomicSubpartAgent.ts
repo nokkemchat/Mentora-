@@ -274,20 +274,20 @@ ${overlapNote}
 ${previousAnswerSnippet ? `\nCANDIDATE'S PREVIOUS SUBPART ANSWER (for Follow-Through / FT credit if applicable):\n"${previousAnswerSnippet}"\n` : ''}
 
 CRITICAL RULES FOR ATOMIC SUBPART MARKING:
-1. ISOLATED SUBPART FOCUS:
-   - Your ONLY job is to evaluate subpart (${subpartLabel}) on the attached page image.
-   - Look at the student's handwritten working in the designated answer space for (${subpartLabel}) AND ANY SCRATCH WORK OR CALCULATIONS IN THE MARGINS OR WORKSPACE NEAR THIS SUBPART.
-   - Ignore all other subparts or questions on this page.
-2. CANDIDATE INK ONLY (CRITICAL):
+1. MANDATORY 3-ZONE SYSTEMATIC INSPECTION:
+   - Zone 1 (Answer Line): Check the printed dotted answer line "......................" or answer bracket at the bottom of the question. Transcribe the exact value written there (e.g., "95.1°", "5", "65/80"). NEVER miss or overlook the final answer line!
+   - Zone 2 (Main Working): Inspect every handwritten line top-to-bottom in the dedicated working space between the question prompt and the answer line.
+   - Zone 3 (Margins & Scratch Work): Inspect the left, right, and lower margins directly adjacent to this subpart. Candidates frequently write intermediate fractions (e.g. "9/80", "56/80"), second-difference sequences (e.g. "12, 18, 24..."), or factorisation attempts in margins. If candidate ink is visible in the margin for this subpart, transcribe it into "transcription_notes" and credit valid method/accuracy criteria!
+2. CANDIDATE INK ONLY:
    - Evidence MUST come exclusively from what the candidate wrote, calculated, or drew with pen or pencil.
    - Pre-printed exam paper text, diagrams, and figures belong to the exam board. NEVER credit pre-printed elements as candidate work!
-3. CALCULATIONS, METHOD (M), AND ACCURACY (A):
-   - Check formulas, substitutions, intermediate steps, and final numbers.
-   - Numerical values: accept standard rounding, fractions (e.g. 63/395, 56/80), or equivalent algebraic forms.
-   - If the student wrote a valid intermediate working step in the margins or scratch area (e.g. "56/80" or "9/79"), credit it as evidence!
-4. CRITERION VERDICTS:
+3. STRICT MATHEMATICAL & ALGEBRAIC EQUIVALENCE:
+   - For algebraic expressions: check variables and signs strictly! Do NOT credit mismatched expressions (e.g., "(x - 3)(x + 3)" or "(x - 3)(2x + 5)" does NOT satisfy "(x - 3)(2y + 5)").
+   - For calculus: setting "dy/dx = 0" does NOT satisfy "set dy/dx = 10" or "their dy/dx = 10" unless explicitly permitted by the mark scheme.
+   - For numerical accuracy (A) and independent (B) marks: verify numbers against the scheme or acceptable range. Accept standard rounding or equivalent fractions.
+4. CRITERION VERDICTS & EVIDENCE:
    - For EACH criterion listed above (by index 0..N-1), judge whether it is satisfied (true or false).
-   - If satisfied, quote the candidate's exact handwritten words, mathematical expression, or drawn feature in "evidence".
+   - If satisfied, quote the candidate's exact handwritten expression, number, or words from the image in "evidence".
    - If not satisfied, "evidence" must be empty "".
 5. ANSWER LINE COORDINATE & STUDENT DETECTED ANSWER:
    - "answer_line_y": estimate the 0-1000 vertical coordinate where the printed answer line or student's final answer sits on the page.
