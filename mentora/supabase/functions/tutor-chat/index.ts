@@ -2397,7 +2397,7 @@ YOUR TASK:
               if (validPageEvals.length === 0) return null;
 
               // Aggregate all subparts and annotations across all pages of this question
-              const allQSubparts = validPageEvals.flatMap((pe: any) => pe.subparts || []);
+              let allQSubparts = validPageEvals.flatMap((pe: any) => pe.subparts || []);
               const allQAnnotations = validPageEvals.flatMap((pe: any) => pe.annotations || []);
 
               // Normalize subparts and enforce anti-hallucination / zero over-correction rules
