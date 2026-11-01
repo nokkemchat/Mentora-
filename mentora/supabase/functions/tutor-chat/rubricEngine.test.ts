@@ -281,9 +281,22 @@ assert(isAlgebraicMatch('15, 39, 71, 80', '15, 39, 71, 80') === true, 'matches c
 assert(isAlgebraicMatch('1.629', '1.63875') === false, 'correctly rejects wrong calculation 1.629');
 assert(isAlgebraicMatch('1/5, 2/7, 1/3', '1/5, 2/7, 3/9 final answer') === false, 'correctly rejects wrong sequence term');
 
+console.log('\n[18] HUMANITIES REGRESSION SAFETY — qualitative History B1 rows still merge on same idea:');
+const HISTORY_PARALLEL = `
+(a) [B1] Prussia now dominated Germany.
+(a) [B1] Prussia was dominating Germany and the North German states.
+(a) [B1] The King of Prussia became President of the North German Confederation.
+`;
+const histRub = parseRubric('a', HISTORY_PARALLEL);
+assert(histRub.criteria.length === 3, `3 criteria parsed for History (got ${histRub.criteria.length})`);
+assert(histRub.criteria[0].overlapGroup === histRub.criteria[1].overlapGroup, `qualitative B1 rows on Prussian dominance share an overlap group (got group ${histRub.criteria[0].overlapGroup})`);
+assert(histRub.criteria[0].overlapGroup !== histRub.criteria[2].overlapGroup, `distinct historical fact has different overlap group (got group ${histRub.criteria[2].overlapGroup})`);
+
 console.log(`\n══════════════════════════════════════`);
 console.log(`FINAL: ${passed} passed, ${failed} failed`);
 console.log(`══════════════════════════════════════`);
 if (failed > 0) { process.exit(1); }
+
+
 
 

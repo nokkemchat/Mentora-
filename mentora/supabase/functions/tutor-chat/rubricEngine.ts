@@ -296,11 +296,12 @@ function assignOverlapGroups(rows: RubricCriterion[]): void {
     for (let j = i + 1; j < rows.length; j++) {
       if (rows[i].isLevel || rows[j].isLevel) continue; // levels handled separately
 
-      // Math/Calculation criteria: distinct method (M), accuracy (A), and independent (B) steps
+      // Math/Calculation criteria: distinct method (M), accuracy (A), and independent calculation (B) steps
       // represent separate stages in a calculation derivation — NEVER merge them by lexical similarity!
-      const isMathStep = (c: string) => /^(?:M\d|A\d|B\d)(?:DEP)?$/i.test(c);
+      const isCalculationStep = (c: string, t: string) =>
+        /^(?:M\d|A\d)(?:DEP)?$/i.test(c) || (/^B\d(?:DEP)?$/i.test(c) && /[\d=+\-*/<>]/.test(t));
       const isExplicitAlt = (t: string) => /^(?:or\s+|instead\s+|alternative\b)/i.test(t);
-      if (isMathStep(rows[i].code) && isMathStep(rows[j].code) && !isExplicitAlt(rows[j].text)) {
+      if (isCalculationStep(rows[i].code, rows[i].text) && isCalculationStep(rows[j].code, rows[j].text) && !isExplicitAlt(rows[j].text)) {
         continue;
       }
 
