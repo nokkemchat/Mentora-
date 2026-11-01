@@ -421,11 +421,11 @@ export function getGroundTruthVerticalY(
   }
 
   // 2. Dynamic Universal Ruled-Line Distribution
-  // Lined student exam paper content lives strictly between Y = 0.06 and Y = 0.88
+  // Lined student exam paper content lives strictly between Y = 0.06 and Y = 0.92
   const startY = 0.070;
-  const availableSpan = Math.min(0.80, Math.max(0.20, (totalParts - 1) * (0.80 / Math.max(1, totalParts - 1))));
+  const availableSpan = Math.min(0.85, Math.max(0.20, (totalParts - 1) * (0.85 / Math.max(1, totalParts - 1))));
   const step = totalParts > 1 ? availableSpan / (totalParts - 1) : 0.15;
-  return Math.min(0.88, startY + idx * step);
+  return Math.min(0.92, startY + idx * step);
 }
 
 /**
@@ -610,7 +610,7 @@ export function buildNormalizedLayoutFromAssessment(
     regions.push({
       id: lineRegionId,
       type: 'answer_line',
-      bbox: { x: 0.20, y: Math.max(0.05, Math.min(yPos, 0.88)), width: 0.62, height: 0.035 },
+      bbox: { x: 0.20, y: Math.max(0.05, Math.min(yPos, 0.92)), width: 0.62, height: 0.035 },
       confidence: 0.92,
       subpart_label: partLabel,
       text_snippet: sp.student_answer_detected,

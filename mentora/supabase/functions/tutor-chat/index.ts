@@ -872,6 +872,11 @@ TASK:
 
 COORDINATE SYSTEM:
 All coordinates are normalized integers 0 to 1000 (0,0 is top-left, 1000,1000 is bottom-right).
+CRITICAL: The sheet spans 0 to 1000 from top to bottom:
+- 0 to 100: Top of page / question header
+- 500: Middle of page
+- 850 to 950: Bottom lines of handwritten calculations
+DO NOT compress coordinates to a 0-500 scale — use the full 0-1000 height of the image canvas!
 
 Return strictly valid JSON matching this schema:
 {
@@ -964,6 +969,21 @@ function applyVisualGroundingToAssessment(
 
   let prevBadgeY = 0;
 
+  // Auto-detect if LLM vision returned vertically compressed coordinates (0-500 scale)
+  const allGroundingY: number[] = [];
+  (grounding?.subpart_groundings || []).forEach((sg: any) => {
+    if (typeof sg.answer_baseline_y === 'number' && sg.answer_baseline_y > 40) allGroundingY.push(sg.answer_baseline_y);
+    if (Array.isArray(sg.handwriting_box) && sg.handwriting_box[2] > 40) allGroundingY.push(sg.handwriting_box[2]);
+  });
+  subparts.forEach((sp: any) => {
+    if (typeof sp.line_y === 'number' && sp.line_y > 40) allGroundingY.push(sp.line_y);
+  });
+  const maxDetectedY = allGroundingY.length > 0 ? Math.max(...allGroundingY) : 0;
+  const targetMaxY = totalParts >= 4 ? 920 : (totalParts === 3 ? 890 : 850);
+  const groundingScale = (totalParts >= 2 && maxDetectedY > 0 && maxDetectedY <= 680)
+    ? Math.min(2.1, targetMaxY / maxDetectedY)
+    : 1.0;
+
   subparts.forEach((sp: any, idx: number) => {
     const max = Number(sp.max_score) || 1;
     sp.score = Math.max(0, Math.min(Number(sp.score) || 0, max));
@@ -981,22 +1001,34 @@ function applyVisualGroundingToAssessment(
       return gPart === cleanPart || gPart.endsWith(cleanPart) || cleanPart.endsWith(gPart);
     });
 
-    // 1. Determine answer baseline Y
+    // 1. Determine answer baseline Y with coordinate scaling
     let detectedY: number | null = null;
     if (matchedGrounding && typeof matchedGrounding.answer_baseline_y === 'number' && matchedGrounding.answer_baseline_y >= 40 && matchedGrounding.answer_baseline_y <= 950) {
-      detectedY = matchedGrounding.answer_baseline_y;
+      detectedY = Math.min(940, Math.round(matchedGrounding.answer_baseline_y * groundingScale));
       sp.line_y = detectedY;
     } else if (matchedGrounding && Array.isArray(matchedGrounding.handwriting_box) && matchedGrounding.handwriting_box[2] > 40) {
-      detectedY = Math.round((matchedGrounding.handwriting_box[0] + matchedGrounding.handwriting_box[2]) / 2);
+      detectedY = Math.min(940, Math.round(((matchedGrounding.handwriting_box[0] + matchedGrounding.handwriting_box[2]) / 2) * groundingScale));
       sp.line_y = detectedY;
     } else if (typeof sp.line_y === 'number' && sp.line_y >= 40 && sp.line_y <= 950) {
-      detectedY = sp.line_y;
+      detectedY = Math.min(940, Math.round(sp.line_y * groundingScale));
+    }
+
+    // Scale earned_points box_2d if present
+    if (groundingScale > 1.0 && matchedGrounding && Array.isArray(matchedGrounding.earned_points)) {
+      matchedGrounding.earned_points.forEach((ep: any) => {
+        if (Array.isArray(ep.box_2d) && ep.box_2d.length === 4) {
+          const h = Math.max(15, ep.box_2d[2] - ep.box_2d[0]);
+          const newY = Math.min(935, Math.round(ep.box_2d[0] * groundingScale));
+          ep.box_2d[0] = newY;
+          ep.box_2d[2] = Math.min(960, newY + h);
+        }
+      });
     }
 
     const defaultY = Math.round(70 + idx * (800 / Math.max(1, totalParts - 1)));
     const rawY = detectedY && detectedY >= 40 && detectedY <= 950 ? detectedY : defaultY;
-    // Raise position by 20 units above the end-of-answer line so there is clear room to see which answer it belongs to
-    let yMid = Math.max(rawY - 20, 35);
+    // Align directly with student answer line (no artificial subtraction offset)
+    let yMid = Math.max(rawY, 35);
 
     // Collision prevention with diagrams
     if (grounding?.diagram_regions && grounding.diagram_regions.length > 0) {
