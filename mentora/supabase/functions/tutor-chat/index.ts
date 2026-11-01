@@ -3,6 +3,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 import { parseRubric, computeSubpartScore, isAlgebraicMatch } from "./rubricEngine.ts";
 import { buildCriterionEvaluationPrompt, SubpartPerceptionDetails } from "./criterionEvaluation.ts";
 import { buildPerceptionPrompt, QuestionPerceptionResult, ObservedSubpartWork } from "./perceptionAgent.ts";
+import { fingerprintAndSortBooklet, BookletLayout, getSubpartKey, canonicalSubpartLabel } from "./pageFingerprinter.ts";
+import { evaluateBookletAtomically, synthesizeBookletAnnotations, extractQuestionSubparts } from "./atomicSubpartAgent.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -1865,6 +1867,8 @@ serve(async (req) => {
 
       let officialPaperQuestions: any[] = [];
       let paperAnswerRules: any = null;
+      let solMap: Record<string, string> = {};
+      let dbPartsMap: Record<string, any[]> = {};
       if (paperId && supabaseClient) {
         try {
           // Fetch the paper's answer rules (section requirements) for effective-total marking
@@ -1891,19 +1895,29 @@ serve(async (req) => {
             });
             officialPaperQuestions = qData;
 
-            if (!allQuestionsContext) {
-              const qIds = qData.map((q: any) => q.id).filter(Boolean);
-              let solMap: Record<string, string> = {};
-              if (qIds.length > 0) {
-                const { data: solData } = await supabaseClient
-                  .from("past_paper_solutions")
-                  .select("question_id, official_mark_scheme")
-                  .in("question_id", qIds);
-                if (solData && solData.length > 0) {
-                  solData.forEach((s: any) => { solMap[s.question_id] = s.official_mark_scheme; });
-                }
+            const qIds = qData.map((q: any) => q.id).filter(Boolean);
+            if (qIds.length > 0) {
+              const { data: solData } = await supabaseClient
+                .from("past_paper_solutions")
+                .select("question_id, official_mark_scheme")
+                .in("question_id", qIds);
+              if (solData && solData.length > 0) {
+                solData.forEach((s: any) => { solMap[s.question_id] = s.official_mark_scheme; });
               }
 
+              const { data: partsData } = await supabaseClient
+                .from("question_parts")
+                .select("question_id, part_label, marks")
+                .in("question_id", qIds);
+              if (partsData && partsData.length > 0) {
+                partsData.forEach((p: any) => {
+                  if (!dbPartsMap[p.question_id]) dbPartsMap[p.question_id] = [];
+                  dbPartsMap[p.question_id].push(p);
+                });
+              }
+            }
+
+            if (!allQuestionsContext) {
               // Build full question context block with official mark schemes & subparts
               allQuestionsContext = qData.map((q: any) => {
                 const content = q.content_text || "";
@@ -1954,1129 +1968,102 @@ ${ms}
       let multiPageError: string | null = null;
       if (openaiApiKey && rawImages.length >= 1) {
         try {
-          console.log(`assess_attempt: submission detected (${rawImages.length} page(s)). Starting assessment with multi-subagent perception & deterministic rubric engine.`);
+          console.log(`assess_attempt: submission detected (${rawImages.length} page(s)). Starting atomic subquestion-by-subquestion marking architecture.`);
 
-          // =========================================================================
-          // PASS 1: BOOKLET INDEXER (Fast vision scan with gpt-6-luna to build script_map)
-          // =========================================================================
-          const indexPrompt = `You are the Senior Chief Examiner indexing exam booklet pages submitted by a student.
-There are ${rawImages.length} scanned pages (Page 0 to Page ${rawImages.length - 1} in sequential order).
-
-EXAM PAPER QUESTIONS & OFFICIAL MARK SCHEMES:
-${allQuestionsContext}
-
-YOUR TASK:
-0. SUBMISSION AUTHENTICITY & TARGET PAPER VERIFICATION (CRITICAL MANDATORY CHECK):
-   - Compare the printed question stems, headers, diagrams, and student answers on the scanned pages with the TARGET EXAM PAPER questions listed under "EXAM PAPER QUESTIONS & OFFICIAL MARK SCHEMES" above.
-   - Determine whether this student submission is attempting the TARGET EXAM PAPER, or if the student uploaded answer sheets from a DIFFERENT examination paper (e.g. wrong subject, wrong year, or different syllabus/paper).
-   - In your JSON response, set:
-     * "is_unrelated_paper": boolean (true if the uploaded pages clearly belong to a different exam paper or unrelated topics)
-     * "detected_submission_nature": "target_paper" | "unrelated_paper" | "mixed"
-     * "detected_paper_summary": string explaining what paper or topic the student uploaded vs what the target paper is (e.g. 'Student uploaded Biology answers with plant cells and enzymes, but target paper is Physics 5054 Mechanics/Electricity')
-
-1. Examine all ${rawImages.length} pages in sequential order.
-2. CRITICAL: Identify where each question STARTS and ENDS.
-   - Look at the question headings at the top or margins of each page (e.g. "3 (a)", "3 (c)", "4 (a)").
-   - Questions frequently span multiple pages!
-     For example:
-     - Question 3 begins on one page (with parts 3(a), 3(b)) and continues onto another page (with parts 3(c)(i), 3(c)(ii), 3(c)(iii), 3(c)(iv)).
-     - BOTH pages belong to QUESTION 3!
-     - DO NOT split Question 3 into separate questions just because it continues onto another page!
-3. CRITICAL SUBPART & CHRONOLOGICAL PAGE ORDERING MANDATE:
-   - Students frequently upload images in random order! (e.g. uploading the page containing 3(c) BEFORE the page containing 3(a)).
-   - In "spanned_pages", YOU MUST ARRANGE the pages in chronological subpart reading order:
-     Part (a) MUST ALWAYS COME FIRST, followed by part (b), then part (c), then (d), etc.
-   - For example: If Page 3 contains 3(c) and Page 4 contains 3(a), then for Question 3, "spanned_pages" MUST BE [4, 3], NEVER [3, 4]!
-   - Under "page_details", explicitly record every page index and the subparts found on that page, along with the "earliest_subpart" (e.g. 'a', 'b', 'c').
-4. Detect all questions present in the booklet and their exact pages.
-5. Return strictly valid JSON matching this schema:
-{
-  "is_unrelated_paper": boolean,
-  "detected_submission_nature": "target_paper" | "unrelated_paper" | "mixed",
-  "detected_paper_summary": "string",
-  "script_map": [
-    {
-      "question_number": "string (e.g. '1', '2', '3', '6')",
-      "topic": "string",
-      "start_page": number, // 0-based page index where this question begins chronologically (with earliest subpart e.g. (a))
-      "end_page": number,   // 0-based page index where this question finishes chronologically
-      "spanned_pages": [number], // ordered chronologically by subpart flow (e.g. [4, 3] if Page 4 has 3(a) and Page 3 has 3(c))
-      "page_details": [
-        {
-          "page": number,
-          "subparts": ["string (e.g. 'a', 'b(i)', 'b(ii)')"],
-          "earliest_subpart": "string (e.g. 'a')"
-        }
-      ],
-      "notes": "string"
-    }
-  ]
-}`;
-
-          const indexUserParts: any[] = [{ type: "text", text: indexPrompt }];
-          rawImages.forEach((img, idx) => {
-            indexUserParts.push({
-              type: "text",
-              text: `--- BOOKLET / SUBMISSION PAGE ${idx} ---`
+          // Prepare ChatCompletion caller for the isolated vision fingerprinter (temperature 0, seed 42)
+          const callFingerprintChat = async (messages: any[]) => {
+            return await executeChatCompletion(openaiApiKey, pass1Candidates, {
+              messages,
+              temperature: 0.0,
+              seed: 42,
+              response_format: { type: "json_object" }
             });
-            indexUserParts.push({
-              type: "image_url",
-              image_url: { url: img, detail: "low" }
-            });
-          });
-
-          const indexRes = await executeChatCompletion(openaiApiKey, pass1Candidates, {
-            messages: [
-              { role: "system", content: "You are the Senior Chief Examiner indexing exam booklet pages. Output strictly valid JSON." },
-              { role: "user", content: indexUserParts }
-            ],
-            response_format: { type: "json_object" },
-            temperature: 0.0
-          });
-
-          let scriptMap: any[] = [];
-          let isUnrelatedSubmission = false;
-          let detectedPaperSummary = "";
-
-          if (indexRes.ok && indexRes.data?.choices?.[0]?.message?.content) {
-            try {
-              const cleanIndexJson = indexRes.data.choices[0].message.content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-              const parsed = JSON.parse(cleanIndexJson);
-              scriptMap = Array.isArray(parsed.script_map) ? parsed.script_map : [];
-              if (parsed.is_unrelated_paper === true || parsed.submission_matches_target_paper === false || parsed.detected_submission_nature === "unrelated_paper") {
-                isUnrelatedSubmission = true;
-                detectedPaperSummary = parsed.detected_paper_summary || parsed.unrelated_paper_summary || "Uploaded pages belong to a different exam paper/topic.";
-              }
-            } catch (e) {
-              console.warn("Pass 1 script_map JSON parse error:", e);
-            }
-          }
-
-          // If the student uploaded answer sheets from a completely different question paper,
-          // immediately assign an authoritative 0 / total score under standard exam board regulations!
-          if (isUnrelatedSubmission) {
-            console.log(`Pass 1 detected UNRELATED examination paper submission: ${detectedPaperSummary}`);
-            const grandTotalMax = officialPaperQuestions.reduce((s: number, q: any) => s + (Number(q.marks) || 0), 0) || 60;
-            const questionSummaries = (officialPaperQuestions.length > 0 ? officialPaperQuestions : [{ question_number: "1", marks: grandTotalMax, topic: "Examination Paper" }]).map((oq: any) => ({
-              question_number: String(oq.question_number),
-              topic: oq.topic || "Exam Topic",
-              score: 0,
-              max_score: Number(oq.marks) || 0,
-              percentage: 0,
-              spanned_pages: [],
-              subparts: [],
-              unattempted: true,
-              notes: `Unrelated exam paper submitted (${detectedPaperSummary || 'different examination paper'}). 0 marks awarded.`
-            }));
-
-            const pages = rawImages.map((imgUrl, pIdx) => ({
-              page_index: pIdx,
-              original_image_url: imgUrl,
-              page_score: 0,
-              page_max_score: Math.round(grandTotalMax / rawImages.length) || 10,
-              questions_present: [],
-              annotations: [
-                {
-                  type: 'total_header',
-                  text: `Unrelated Paper: 0/${grandTotalMax}`,
-                  comment: `Submitted script belongs to a different exam paper (${detectedPaperSummary || 'different syllabus/topic'})`,
-                  box_2d: [40, 680, 85, 960],
-                  page_index: pIdx
-                },
-                {
-                  type: 'cross',
-                  text: '0',
-                  comment: 'Unrelated paper (0 marks)',
-                  box_2d: [150, 450, 250, 550],
-                  page_index: pIdx
-                }
-              ],
-              subparts: [],
-              layout_regions: []
-            }));
-
-            const unrelatedAssessment: any = {
-              identified_question_number: questionSummaries.map(q => q.question_number).join(', '),
-              identified_topic: officialPaperQuestions[0]?.topic || "Examination Script",
-              total_score: 0,
-              total_max_score: grandTotalMax,
-              score: 0,
-              max_score: grandTotalMax,
-              percentage: 0,
-              subparts: [],
-              layout_regions: [],
-              annotations: pages.flatMap(p => p.annotations),
-              question_summaries: questionSummaries,
-              pages: pages,
-              overall_feedback: `⚠️ UNRELATED EXAM PAPER SUBMISSION DETECTED: The answer sheets uploaded belong to a different question paper (${detectedPaperSummary || 'different syllabus/topic'}) and do not correspond to this target paper. Under standard Cambridge / Edexcel / ZIMSEC / IB examination rules, answers written for a different paper are awarded 0 out of ${grandTotalMax} marks (0%). Please ensure you upload the correct handwritten answer sheets for this specific question paper.`,
-              examiner_model_solution: "Refer to the target paper's mark scheme for full official worked solutions.",
-              recommended_next_step: "Upload the answer sheets corresponding to this specific question paper.",
-              model_used: indexRes.modelUsed || "gpt-4o"
-            };
-
-            return new Response(JSON.stringify({
-              assessment: unrelatedAssessment,
-              marked_image_url: null
-            }), {
-              headers: { ...corsHeaders, "Content-Type": "application/json" },
-            });
-          }
-
-          if (!scriptMap || scriptMap.length === 0) {
-            // Intelligent Per-Page Fallback: Each page is treated as an individual question candidate
-            scriptMap = rawImages.map((_, i) => ({
-              question_number: String(i + 1),
-              topic: "Science / Examination Paper",
-              start_page: i,
-              end_page: i,
-              spanned_pages: [i],
-              notes: `Submission page ${i + 1}`
-            }));
-          } else {
-            // CRITICAL LOOPHOLE CLOSURE: Ensure EVERY page in rawImages is represented in scriptMap!
-            const coveredPages = new Set<number>();
-            scriptMap.forEach((sm: any) => {
-              (sm.spanned_pages || []).forEach((p: number) => coveredPages.add(Number(p)));
-              if (typeof sm.start_page === 'number') coveredPages.add(Number(sm.start_page));
-              if (typeof sm.end_page === 'number') coveredPages.add(Number(sm.end_page));
-            });
-
-            rawImages.forEach((_, pIdx) => {
-              if (!coveredPages.has(pIdx)) {
-                console.log(`Loophole closed: Page ${pIdx} was omitted by indexer. Adding to scriptMap.`);
-                scriptMap.push({
-                  question_number: String(pIdx + 1),
-                  topic: "Science / Examination Script",
-                  start_page: pIdx,
-                  end_page: pIdx,
-                  spanned_pages: [pIdx],
-                  notes: `Auto-included page ${pIdx + 1}`
-                });
-              }
-            });
-          }
-
-          console.log(`Pass 1 completed (${indexRes.modelUsed}). Found ${scriptMap.length} question clusters:`, JSON.stringify(scriptMap));
-
-          // =========================================================================
-          // CANONICAL QUESTION & SUBPART ORDER REORDERING:
-          // Sort pages so that:
-          // 1. Question 1 starts first, Question 2 second, etc.
-          // 2. Within any multi-page question, subpart (a) starts first, (b) second, (c) third, etc.
-          // Even if students upload images in completely random order (e.g. Q3c before Q3a, Q2 before Q1),
-          // the marked papers are delivered and viewed in perfect chronological order!
-          // =========================================================================
-          scriptMap.sort((a: any, b: any) => {
-            const numA = parseInt(String(a.question_number || '').replace(/[^0-9]/g, ''), 10) || 999;
-            const numB = parseInt(String(b.question_number || '').replace(/[^0-9]/g, ''), 10) || 999;
-            if (numA !== numB) return numA - numB;
-            return getSubpartSortWeight(String(a.question_number || '')) - getSubpartSortWeight(String(b.question_number || ''));
-          });
-
-          // Helper to extract the earliest subpart weight for a specific page of a question
-          const getPageSubpartWeight = (entry: any, pNum: number): number => {
-            // 1. Check page_details array if returned by indexer
-            if (Array.isArray(entry.page_details)) {
-              const pd = entry.page_details.find((d: any) => Number(d.page) === pNum);
-              if (pd) {
-                const sub = pd.earliest_subpart || (Array.isArray(pd.subparts) && pd.subparts[0]);
-                if (sub) return getSubpartSortWeight(sub);
-              }
-            }
-            // 2. Parse notes string if mentions specific page e.g. "Page 4 shows part (a)"
-            const notesStr = String(entry.notes || '');
-            const pageMatch = notesStr.match(new RegExp(`(?:Page|P)\\s*${pNum}[^.]*?(?:part|parts|shows|contains)?\\s*\\(?([a-h])\\)?`, 'i'));
-            if (pageMatch && pageMatch[1]) {
-              return getSubpartSortWeight(pageMatch[1]);
-            }
-            return 9999;
           };
 
-          const canonicalPageOrder: number[] = [];
-          scriptMap.forEach((entry: any) => {
-            const rawPages = (Array.isArray(entry.spanned_pages) ? entry.spanned_pages : [entry.start_page ?? 0])
-              .map(Number)
-              .filter((p: number) => !isNaN(p) && p >= 0 && p < rawImages.length);
-
-            // Sort pages within this question by subpart sequence ('a' before 'b' before 'c')
-            const sortedPages = [...rawPages].sort((p1: number, p2: number) => {
-              const w1 = getPageSubpartWeight(entry, p1);
-              const w2 = getPageSubpartWeight(entry, p2);
-              if (w1 !== w2 && w1 !== 9999 && w2 !== 9999) {
-                return w1 - w2;
-              }
-              // If weights equal or unknown, preserve the order returned in spanned_pages
-              return rawPages.indexOf(p1) - rawPages.indexOf(p2);
+          // Prepare ChatCompletion caller for atomic subpart agents (temperature 0, seed 42)
+          const callSubpartChat = async (messages: any[], temperature = 0.0, seed = 42) => {
+            return await executeChatCompletion(openaiApiKey, pass2Candidates, {
+              messages,
+              temperature: 0.0,
+              seed: 42,
+              response_format: { type: "json_object" }
             });
-
-            // Update entry.spanned_pages to match the subpart-sorted order
-            entry.spanned_pages = sortedPages;
-
-            sortedPages.forEach((pNum: number) => {
-              if (!canonicalPageOrder.includes(pNum)) {
-                canonicalPageOrder.push(pNum);
-              }
-            });
-          });
-
-          // Append any unindexed pages at the end
-          rawImages.forEach((_, idx) => {
-            if (!canonicalPageOrder.includes(idx)) {
-              canonicalPageOrder.push(idx);
-            }
-          });
-
-          console.log("Canonical Question Page Reordering mapping (old -> new):", canonicalPageOrder);
-
-          // Reorder rawImages so Question 1 is page 0 and 3a comes before 3c!
-          rawImages = canonicalPageOrder.map((oldIdx) => rawImages[oldIdx]);
-
-          // Remap spanned_pages, start_page, end_page in scriptMap to new 0-based indices
-          scriptMap.forEach((sm: any) => {
-            const remapped = (sm.spanned_pages || [sm.start_page ?? 0])
-              .map((oldIdx: number) => canonicalPageOrder.indexOf(Number(oldIdx)))
-              .filter((p: number) => p >= 0);
-            sm.spanned_pages = remapped.length > 0 ? remapped : [0];
-            sm.start_page = Math.min(...sm.spanned_pages);
-            sm.end_page = Math.max(...sm.spanned_pages);
-          });
-
-          console.log("Reordered scriptMap after canonical sorting:", JSON.stringify(scriptMap));
-
-          // =========================================================================
-          // PASS 2: QUESTION-CENTRIC TARGETED GRADING (Isolated Prompt + Bound Mark Scheme)
-          // =========================================================================
-          const questionEvaluations = await Promise.all(
-            scriptMap.map(async (qEntry: any) => {
-              const qNum = String(qEntry.question_number || '1');
-              const spannedPages: number[] = Array.isArray(qEntry.spanned_pages) && qEntry.spanned_pages.length > 0
-                ? qEntry.spanned_pages
-                : [0];
-
-              // === STRICT TARGET-PAPER ENFORCEMENT (code-level, not model-level) ===
-              // Snap the cluster's question number to the official paper's question list.
-              const officialQ = officialPaperQuestions.find((oq: any) => {
-                const oNum = String(oq.question_number).trim();
-                const cNum = qNum.trim();
-                if (oNum === cNum) return true;
-                const leadingDigits = cNum.match(/^\d+/)?.[0];
-                return !!leadingDigits && oNum === leadingDigits;
-              });
-              const officialMarks = officialQ ? (Number(officialQ.marks) || 0) : 0;
-              const isUnmatchedQuestion = officialPaperQuestions.length > 0 && !officialQ;
-
-              // A cluster whose question number does not exist in the paper being marked
-              // is graded 0 with a note — it can never be marked against another paper.
-              if (isUnmatchedQuestion) {
-                console.log(`Strict enforcement: Question ${qNum} does not exist in the target paper. Awarding 0 with note.`);
-                return {
-                  identified_question_number: qNum,
-                  question_number: qNum,
-                  identified_topic: qEntry.topic || "Unmatched",
-                  total_score: 0,
-                  score: 0,
-                  total_max_score: 0,
-                  max_score: 0,
-                  percentage: 0,
-                  unmatched: true,
-                  subparts: [],
-                  annotations: [],
-                  layout_regions: [],
-                  spanned_pages: spannedPages,
-                  start_page: Math.min(...spannedPages),
-                  end_page: Math.max(...spannedPages),
-                  overall_feedback: `The pages assigned to Question ${qNum} do not correspond to any question in this paper, so they were graded 0.`,
-                  examiner_model_solution: "",
-                  recommended_next_step: "Upload the answer sheets corresponding to this specific question paper.",
-                  model_used: "code-enforcement"
-                };
-              }
-
-              // Tool Call: Retrieve official mark scheme for this specific question from DB or syllabus
-              const schemeData = await getQuestionMarkScheme(
-                supabaseClient,
-                paperId,
-                qNum,
-                context,
-                mark_scheme
-              );
-
-              // Note: Relevance is checked directly by Subagent 1 (Visual Perception Agent)
-              // which examines the student's handwritten script against Question qNum.
-              let relevanceBlocked = false;
-              let relevanceReason = "";
-
-              // Grade the whole cluster (all spanned pages) — wrapped in a local function so
-              // an under-graded result can be detected and retried (completeness check below).
-              const gradeCluster = async (): Promise<any> => {
-              // Evaluate EACH page of this question with dedicated focus so that NO subpart on ANY page is ever missed!
-              const pageEvals = await Promise.all(
-                spannedPages.map(async (pIdx: number) => {
-                  // PASS 1 FOR THIS PAGE: Pedagogical Examiner Agent (focused marking with gpt-6-luna)
-                  console.log(`Page ${pIdx}: Running Pass 1 (Examiner Agent with gpt-6-luna)...`);
-                  const targetedPrompt = buildTargetedQuestionGradingPrompt(
-                    qNum,
-                    schemeData,
-                    student_answer || document_text,
-                    spannedPages,
-                    pIdx,
-                    allQuestionsContext
-                  );
-
-                  const qUserParts: any[] = [{ type: "text", text: targetedPrompt }];
-                  // Primary target page image to evaluate
-                  if (rawImages[pIdx]) {
-                    qUserParts.push({
-                      type: "text",
-                      text: `--- PRIMARY BOOKLET PAGE TO GRADE: PAGE ${pIdx} (Target Question ${qNum}) ---`
-                    });
-                    qUserParts.push({
-                      type: "image_url",
-                      image_url: { url: rawImages[pIdx], detail: "high" }
-                    });
-                  }
-                  // Secondary reference pages (if any other pages in spannedPages)
-                  spannedPages.forEach((refIdx) => {
-                    if (refIdx !== pIdx && rawImages[refIdx]) {
-                      const relText = refIdx < pIdx ? "EARLIER COMPLETED SHEET" : "SUBSEQUENT CONTINUATION SHEET";
-                      qUserParts.push({
-                        type: "text",
-                        text: `--- REFERENCE CONTEXT ONLY (${relText}): BOOKLET PAGE ${refIdx} (DO NOT grade or output subparts from this reference sheet; only evaluate answers written on PRIMARY BOOKLET PAGE ${pIdx}) ---`
-                      });
-                      qUserParts.push({
-                        type: "image_url",
-                        image_url: { url: rawImages[refIdx], detail: "low" }
-                      });
-                    }
-                  });
-
-                  try {
-                    const isContinuationSheet = spannedPages.length > 1 && pIdx > Math.min(...spannedPages);
-                    const qRes = await executeChatCompletion(openaiApiKey, pass2Candidates, {
-                      messages: [
-                        { role: "system", content: `You are the Mentora Senior Chief Examiner. Evaluate and mark student handwriting on Page ${pIdx} strictly against Question ${qNum} of the TARGET PAPER.${isContinuationSheet ? ` CONTINUATION SHEET: Page ${pIdx} is a continuation of Question ${qNum}. Earlier parts were already completed on previous pages. ONLY output subparts that are visibly written on Page ${pIdx}. NEVER repeat or output subparts from earlier pages!` : ''} MANDATORY RELEVANCE: Marks are ONLY awarded for answers that genuinely attempt Question ${qNum}. If the student wrote an answer to a different question, or if this sheet belongs to a different exam paper/topic, you MUST award ZERO (0) marks for all subparts. Never award marks for coincidental words, standard units, or generic formulas. Output strictly valid JSON.` },
-                        { role: "user", content: qUserParts }
-                      ],
-                      response_format: { type: "json_object" },
-                      temperature: 0.0
-                    });
-
-                    if (qRes.ok && qRes.data?.choices?.[0]?.message?.content) {
-                      const cleanQJson = qRes.data.choices[0].message.content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-                      const parsed = JSON.parse(cleanQJson);
-                      parsed.model_used = qRes.modelUsed;
-
-                      // Enforce zero marks if question evaluation detected unrelated work or different paper
-                      if (parsed.is_attempting_target_question === false || parsed.is_unrelated_paper === true) {
-                        parsed.total_score = 0;
-                        parsed.score = 0;
-                        if (Array.isArray(parsed.subparts)) {
-                          parsed.subparts.forEach((sp: any) => {
-                            sp.score = 0;
-                            sp.marks_awarded = [];
-                            sp.deductions = [`Work belongs to a different question or paper; does not attempt Question ${qNum} (0 marks).`];
-                            sp.teacher_correction_note = "Unrelated question/paper — 0 marks";
-                            if (Array.isArray(sp.marking_points)) {
-                              sp.marking_points.forEach((mp: any) => { mp.is_earned = false; });
-                            }
-                          });
-                        }
-                      }
-
-                      if (Array.isArray(parsed.subparts)) {
-                        parsed.subparts.forEach((sp: any) => {
-                          sp.page_index = pIdx; // Enforce exact target page binding!
-                          const notesLower = `${sp.student_answer_detected || ''} ${sp.teacher_correction_note || ''} ${sp.deductions?.join(' ') || ''}`.toLowerCase();
-                          if (notesLower.includes('different paper') || notesLower.includes('unrelated paper') || notesLower.includes('different question') || notesLower.includes('unrelated question') || notesLower.includes('unrelated topic')) {
-                            sp.score = 0;
-                            sp.marks_awarded = [];
-                          }
-                        });
-                      }
-
-                      // PASS 2 FOR THIS PAGE: Visual Grounding & Positioning Agent (spatial localization with gpt-6-luna)
-                      let pageGrounding: VisualGroundingResult | null = null;
-                      if (rawImages[pIdx] && Array.isArray(parsed.subparts) && parsed.subparts.length > 0) {
-                        console.log(`Page ${pIdx}: Running Pass 2 (Visual Grounding Agent with gpt-6-luna)...`);
-                        pageGrounding = await groundEvaluatedMarks(
-                          openaiApiKey,
-                          pass1Candidates,
-                          rawImages[pIdx],
-                          parsed.subparts,
-                          qNum
-                        );
-                        if (pageGrounding) {
-                          console.log(`Page ${pIdx}: Pass 2 grounding detected ${pageGrounding.subpart_groundings.length} subparts and ${pageGrounding.diagram_regions.length} diagrams.`);
-                        }
-                      }
-
-                      // Master synthesis: apply grounded coordinates, synthesize point-by-point inline ticks, margin badges, and comments
-                      applyVisualGroundingToAssessment(parsed, pageGrounding, qNum, pIdx);
-
-                      return parsed;
-                    }
-                  } catch (pErr) {
-                    console.warn(`Error grading Question ${qNum} on Page ${pIdx}:`, pErr);
-                  }
-                  return null;
-                })
-              );
-
-              const validPageEvals = pageEvals.filter(Boolean);
-              if (validPageEvals.length === 0) return null;
-
-              // Aggregate all subparts and annotations across all pages of this question
-              let allQSubparts = validPageEvals.flatMap((pe: any) => pe.subparts || []);
-              const allQAnnotations = validPageEvals.flatMap((pe: any) => pe.annotations || []);
-
-              // Normalize subparts and enforce anti-hallucination / zero over-correction rules
-              allQSubparts.forEach((sp: any) => {
-                const spMax = Number(sp.max_score) || 1;
-                sp.score = Math.max(0, Math.min(Number(sp.score) || 0, spMax));
-
-                // Anti-overcorrection rule: full marks require no correction notes
-                if (sp.score === spMax) {
-                  sp.teacher_correction_note = "";
-                  sp.constructive_correction = "";
-                  sp.mistake_details = "";
-                  sp.misconception_analysis = "";
-                  sp.how_to_improve = "";
-                }
-
-                if (Array.isArray(sp.marking_points)) {
-                  sp.marking_points.forEach((mp: any) => {
-                    if (typeof mp.page_index !== 'number') {
-                      mp.page_index = sp.page_index;
-                    }
-                  });
-                }
-              });
-
-              // Strictly sort subparts in chronological order so 3(a) comes before 3(b) comes before 3(c)
-              allQSubparts.sort((a: any, b: any) => {
-                const wA = getSubpartSortWeight(a.part_label || '');
-                const wB = getSubpartSortWeight(b.part_label || '');
-                return wA - wB;
-              });
-
-              // Deduplicate subparts across pages for this question using canonical subpart keys.
-              // Under Cambridge/GCSE rules, repeated attempts at the same subpart do not award double marks:
-              // the student receives the score of their best attempt for each subpart.
-              const subpartsByCanonicalKey = new Map<string, any[]>();
-              allQSubparts.forEach((sp: any) => {
-                const key = getCanonicalSubpartKey(sp.part_label);
-                if (!subpartsByCanonicalKey.has(key)) {
-                  subpartsByCanonicalKey.set(key, []);
-                }
-                subpartsByCanonicalKey.get(key)!.push(sp);
-              });
-
-              let canonicalScoreSum = 0;
-              let canonicalMaxSum = 0;
-              const deduplicatedQSubparts: any[] = [];
-
-              subpartsByCanonicalKey.forEach((partsList) => {
-                const bestScore = Math.max(...partsList.map((p: any) => Number(p.score) || 0));
-                const partMax = Math.max(...partsList.map((p: any) => Number(p.max_score) || 1));
-                canonicalScoreSum += bestScore;
-                canonicalMaxSum += partMax;
-                const bestPart = partsList.reduce((best, curr) => (Number(curr.score) || 0) > (Number(best.score) || 0) ? curr : best, partsList[0]);
-                deduplicatedQSubparts.push(bestPart);
-              });
-              allQSubparts = deduplicatedQSubparts;
-
-              // Direct sum of all subparts for this question
-              const allEarnedSum = allQSubparts.reduce((sum: number, sp: any) => sum + (Number(sp.score) || 0), 0);
-              // STRICT: the question's max comes ONLY from the official paper (DB) —
-              // the model may never inflate it by inventing subpart max scores.
-              const maxPossible = officialMarks > 0
-                ? officialMarks
-                : (schemeData.found && schemeData.marks ? schemeData.marks : (canonicalMaxSum || validPageEvals[0]?.total_max_score || 10));
-              
-              // If all subparts are on a single page, or if all subparts are distinct, use the accurate earned sum
-              const resolvedScore = (spannedPages.length <= 1 && allEarnedSum > 0)
-                ? allEarnedSum
-                : Math.max(canonicalScoreSum, (subpartsByCanonicalKey.size === allQSubparts.length ? allEarnedSum : canonicalScoreSum));
-
-              const finalQScore = Math.min(maxPossible, resolvedScore);
-
-              return {
-                identified_question_number: qNum,
-                question_number: qNum,
-                identified_topic: validPageEvals[0]?.identified_topic || schemeData.topic || "Science",
-                total_score: finalQScore,
-                score: finalQScore,
-                total_max_score: maxPossible,
-                max_score: maxPossible,
-                percentage: maxPossible > 0 ? Math.round((finalQScore / maxPossible) * 100) : 0,
-                subparts: allQSubparts,
-                annotations: allQAnnotations,
-                layout_regions: validPageEvals.flatMap((pe: any) => pe.layout_regions || []),
-                spanned_pages: spannedPages,
-                start_page: Math.min(...spannedPages),
-                end_page: Math.max(...spannedPages),
-                overall_feedback: validPageEvals.map((pe: any) => pe.overall_feedback).filter(Boolean).join(' ') || "",
-                examiner_model_solution: validPageEvals[0]?.examiner_model_solution || "",
-                recommended_next_step: validPageEvals[0]?.recommended_next_step || "",
-                model_used: validPageEvals[0]?.model_used || "gpt-4o"
-              };
-              }; // end gradeCluster
-
-              let clusterResult = await gradeCluster();
-
-              // === SUBAGENT 1: VISUAL PERCEPTION AGENT (The Examiner's Eyes) ===
-              // Before judging any rubric criteria, Subagent 1 inventories the student's
-              // handwritten text, calculations, mathematical working, and drawn diagrams/graphs
-              // across the question's spanned pages. It strictly records what is physically
-              // present on the page without judging correctness or computing scores.
-              let questionPerception: QuestionPerceptionResult | null = null;
-              try {
-                if (Array.isArray(clusterResult?.subparts) && clusterResult.subparts.length > 0) {
-                  const expectedSubsForPerception = clusterResult.subparts.map((sp: any) => ({
-                    label: String(sp.part_label || '').replace(/^\(?|\)?$/g, ''),
-                    marks: Number(sp.max_score) || 1
-                  }));
-                  const perceptionPrompt = buildPerceptionPrompt(
-                    qNum,
-                    expectedSubsForPerception,
-                    schemeData.topic,
-                    schemeData.content_text
-                  );
-                  const perceptionUserParts: any[] = [{ type: "text", text: perceptionPrompt }];
-                  for (const fp of spannedPages) {
-                    if (rawImages[fp]) {
-                      perceptionUserParts.push({ type: "text", text: `--- STUDENT SCRIPT PAGE ${fp} (Question ${qNum}) ---` });
-                      perceptionUserParts.push({ type: "image_url", image_url: { url: rawImages[fp], detail: "high" } });
-                    }
-                  }
-
-                  const perceptionRes = await executeChatCompletion(openaiApiKey, pass2Candidates, {
-                    messages: [
-                      { role: "system", content: "You are the Senior Chief Examiner's Perception Specialist. Strictly record physical handwriting, math working, diagrams, and selections on the page. Do NOT score or judge correctness. Output strictly valid JSON." },
-                      { role: "user", content: perceptionUserParts }
-                    ],
-                    response_format: { type: "json_object" },
-                    temperature: 0.0,
-                    seed: 42
-                  });
-
-                  if (perceptionRes.ok && perceptionRes.data?.choices?.[0]?.message?.content) {
-                    const cleanPerception = perceptionRes.data.choices[0].message.content
-                      .replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-                    questionPerception = JSON.parse(cleanPerception) as QuestionPerceptionResult;
-                    console.log(`Q${qNum}: Subagent 1 (Visual Perception) inventoried ${questionPerception?.subparts?.length || 0} subparts.`);
-                    if (questionPerception && questionPerception.is_attempting_target_question === false) {
-                      console.log(`Q${qNum}: Subagent 1 determined student work is unrelated (${questionPerception.relevance_reason || 'unrelated'}).`);
-                      clusterResult.score = 0;
-                      clusterResult.total_score = 0;
-                      clusterResult.relevance_blocked = true;
-                      if (Array.isArray(clusterResult.subparts)) {
-                        clusterResult.subparts.forEach((sp: any) => {
-                          sp.score = 0;
-                          sp.marks_awarded = [];
-                          sp.deductions = [`Work does not attempt Question ${qNum}: ${questionPerception?.relevance_reason || 'unrelated'}`];
-                          sp.teacher_correction_note = "Unrelated question/paper — 0 marks";
-                        });
-                      }
-                    }
-                  }
-                }
-              } catch (perceptErr) {
-                console.warn(`Subagent 1 (Visual Perception) failed for Q${qNum} (falling back to cluster detected text):`, perceptErr);
-              }
-
-              // === SUBAGENT 2 & DETERMINISTIC ENGINE: PER-SUBPART EVALUATION ===
-              try {
-                if (schemeData.official_mark_scheme && Array.isArray(clusterResult?.subparts) && clusterResult.subparts.length > 0) {
-                  const refined = await Promise.all(clusterResult.subparts.map(async (sp: any) => {
-                    if (!sp?.part_label) return sp;
-                    const label = String(sp.part_label).replace(/^\(?|\)?$/g, '');
-                    // SINGLE PARSER: the rubric engine's own parseRubric is the sole
-                    // source of structural truth.
-                    const rubricCheck = parseRubric(label, schemeData.official_mark_scheme);
-                    const hasCriteria = rubricCheck.criteria.length >= 1 || rubricCheck.criteria.some((c: any) => c.isLevel);
-                    if (!hasCriteria) {
-                      if (rubricCheck.criteria.length === 0 && String(schemeData.official_mark_scheme || '').trim().length > 50) {
-                        console.warn(`⚠️ RUBRIC PARSE WARNING: Q${qNum}(${label}) — stored mark scheme has ${String(schemeData.official_mark_scheme).length} chars but parsed to 0 criteria. Unknown dialect? Engine skipped; cluster marks stand.`);
-                        sp.rubric_parse_warning = 'stored mark scheme could not be parsed (unknown format) — deterministic engine skipped';
-                      }
-                      return sp;
-                    }
-
-                    // Printed marks for this subpart: prefer the STORED part data from DB,
-                    // then rubric text, then cluster's own max.
-                    let printedMax: number | null = null;
-                    try {
-                      if (officialQ?.id && supabaseClient) {
-                        const labelClean = String(label).toLowerCase().replace(/[^a-z0-9]/g, '');
-                        const { data: dbParts } = await supabaseClient
-                          .from("question_parts")
-                          .select("part_label, marks")
-                          .eq("question_id", officialQ.id);
-                        const dbPart = (dbParts || []).find((p: any) =>
-                          String(p.part_label).toLowerCase().replace(/[^a-z0-9]/g, '') === labelClean);
-                        if (dbPart && Number(dbPart.marks) > 0) printedMax = Number(dbPart.marks);
-                      }
-                    } catch (dbPartErr) {
-                      console.warn(`Q${qNum}(${label}): stored part lookup failed:`, dbPartErr);
-                    }
-                    if (printedMax === null) printedMax = subpartMarksFromRubric(schemeData.official_mark_scheme, label);
-
-                    const clusterScore = Number(sp.score) || 0;
-                    const clusterMax = Number(sp.max_score) || 1;
-
-                    const focusPages = Array.from(new Set([
-                      ...(typeof sp.page_index === 'number' ? [sp.page_index] : []),
-                      ...spannedPages
-                    ])).filter((p: number) => rawImages[p]);
-
-                    // Match perceived work from Subagent 1
-                    const normLabel = (l: string) => String(l || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-                    const perceivedSubpart = questionPerception?.subparts?.find((p: ObservedSubpartWork) => {
-                      const pl = normLabel(p.part_label);
-                      const sl = normLabel(label);
-                      return pl === sl || pl.endsWith(sl) || sl.endsWith(pl);
-                    });
-
-                    const subpartPerception: SubpartPerceptionDetails = {
-                      written_text: perceivedSubpart?.written_text || String(sp.student_answer_detected || ''),
-                      math_steps: perceivedSubpart?.math_steps || [],
-                      diagram_features: perceivedSubpart?.diagram_features || [],
-                      selections: perceivedSubpart?.selections || []
-                    };
-
-                    if (perceivedSubpart?.written_text && !sp.student_answer_detected) {
-                      sp.student_answer_detected = perceivedSubpart.written_text;
-                    }
-
-                    // === DETERMINISTIC RUBRIC ENGINE (two-stage) ===
-                    // Stage A (LLM Subagent 2): judge each rubric criterion — satisfied? with concrete evidence.
-                    // Stage B (code): compute the score via overlap-aware, capped arithmetic.
-                    const rubricParsed = parseRubric(label, schemeData.official_mark_scheme);
-                    const overlapMemberGroups = new Map<number, number[]>();
-                    rubricParsed.criteria.forEach((c: any) => {
-                      const g = c.overlapGroup ?? c.index;
-                      if (!overlapMemberGroups.has(g)) overlapMemberGroups.set(g, []);
-                      overlapMemberGroups.get(g)!.push(c.index);
-                    });
-                    const overlapGroups = [...overlapMemberGroups.entries()]
-                      .filter(([, members]) => members.length > 1)
-                      .map(([group, members]) => ({ group, memberIndices: members }));
-
-                    const evalPrompt = buildCriterionEvaluationPrompt(
-                      qNum,
-                      label,
-                      rubricParsed.criteria.map((c: any) => ({ index: c.index, code: c.code, value: c.value, text: c.text, isLevel: c.isLevel, guidance: c.guidance || '' })),
-                      printedMax ?? clusterMax,
-                      overlapGroups,
-                      subpartPerception
-                    );
-
-                    const subUserParts: any[] = [{ type: "text", text: evalPrompt }];
-                    for (const fp of focusPages) {
-                      subUserParts.push({ type: "text", text: `--- STUDENT SCRIPT PAGE ${fp} (find part (${label}) of Question ${qNum}) ---` });
-                      subUserParts.push({ type: "image_url", image_url: { url: rawImages[fp], detail: "high" } });
-                    }
-
-                    try {
-                      console.log(`Q${qNum}(${label}): Subagent 2 (Rubric Judge) evaluating (${rubricParsed.criteria.length} criteria, ${overlapGroups.length} overlap groups)...`);
-
-                    // Evaluator function for Subagent 2
-                    const evalOnce = async (voteIdx: number): Promise<any[] | null> => {
-                      const subRes = await executeChatCompletion(openaiApiKey, pass2Candidates, {
-                        messages: [
-                          { role: "system", content: `You are the Mentora Senior Chief Examiner. Judge EACH criterion of subpart (${label}) of Question ${qNum} independently against the student's answer (handwriting, calculations, or drawn diagrams). Universal Benefit of the Doubt (BOD) and scientific equivalence apply. Concrete evidence (verbatim phrase, math calculation step, or drawn diagram feature) is MANDATORY for every satisfied verdict — if not demonstrated in the student's work, verdict is satisfied: false with evidence: "". Output strictly valid JSON.` },
-                          { role: "user", content: subUserParts }
-                        ],
-                        response_format: { type: "json_object" },
-                        temperature: 0.0,
-                        seed: 42 + voteIdx
-                      });
-                      if (!subRes.ok || !subRes.data?.choices?.[0]?.message?.content) return null;
-                      try {
-                        const cleanSub = subRes.data.choices[0].message.content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-                        const subParsed = JSON.parse(cleanSub);
-                        const rv: any[] = Array.isArray(subParsed.verdicts) ? subParsed.verdicts : [];
-                        return rv.map((v: any) => ({
-                          criterionIndex: Number(v.criterion_index),
-                          satisfied: !!v.satisfied && !!(String(v.evidence || '').trim().length > 0),
-                          evidence: String(v.evidence || '').trim()
-                        }));
-                      } catch (_) { return null; }
-                    };
-
-                    const voteRounds = rubricParsed.schemeType === 'levels' ? 3 : 1;
-                    const voteResults = (await Promise.all(
-                      Array.from({ length: voteRounds }, (_, vi) => evalOnce(vi))
-                    )).filter(Boolean) as any[][];
-
-                    if (voteResults.length > 0) {
-                      const allIndices = new Set<number>();
-                      voteResults.forEach(votes => votes.forEach(v => allIndices.add(v.criterionIndex)));
-                      const validatedVerdicts = [...allIndices].map((idx: number) => {
-                        const perCriterion = voteResults.map(votes => votes.find(v => v.criterionIndex === idx)).filter(Boolean) as any[];
-                        const yes = perCriterion.filter(v => v.satisfied).length;
-                        const satisfied = perCriterion.length > 0 && yes * 2 > perCriterion.length; // strict majority
-                        const firstYes = perCriterion.find(v => v.satisfied);
-                        return { criterionIndex: idx, satisfied, evidence: firstYes?.evidence || '' };
-                      });
-
-                      const studentAns = String(sp.student_answer_detected || subpartPerception?.written_text || '').trim();
-                      const criterionByIndex = new Map(rubricParsed.criteria.map((c: any) => [c.index, c]));
-
-                      // Deterministic algebraic & numerical pre-pass:
-                      // If student's answer text directly matches the criterion target (e.g. "(x+3)/(2y+5)" or "150"),
-                      // ensure satisfied is true so LLM stochasticity or formatting differences cannot deduct marks!
-                      validatedVerdicts.forEach((v: any) => {
-                        const c = criterionByIndex.get(v.criterionIndex);
-                        if (c && !v.satisfied && studentAns) {
-                          if (isAlgebraicMatch(studentAns, c.text)) {
-                            v.satisfied = true;
-                            v.evidence = studentAns;
-                          }
-                        }
-                      });
-
-                      // === DETERMINISTIC SCORE (overlap-aware, capped at printed max) ===
-                      const engineScore = computeSubpartScore(
-                        rubricParsed,
-                        validatedVerdicts.map(v => ({ criterionIndex: v.criterionIndex, satisfied: v.satisfied })),
-                        printedMax ?? Math.max(clusterMax, 1)
-                      );
-                      const subScore = engineScore.score;
-                      const subMax = printedMax ?? Math.max(clusterMax, 1);
-                      const isFullMarks = subScore >= subMax;
-                      const waivedSet = new Set(engineScore.waivedFallbacks || []);
-
-                      // Map verdicts back into marking_points for the annotation layer
-                      const engineMarkingPoints = validatedVerdicts.map((v: any) => {
-                        const c = criterionByIndex.get(v.criterionIndex) || {} as any;
-                        const isWaived = waivedSet.has(v.criterionIndex) || (isFullMarks && c.isFallback);
-                        return {
-                          point_number: v.criterionIndex + 1,
-                          criterion: c.text || '',
-                          mark_code: c.code || 'B1',
-                          is_earned: v.satisfied || isWaived,
-                          student_phrase: v.satisfied ? (v.evidence || '') : (isWaived ? 'Waived (primary criterion earned full marks)' : ''),
-                          flawed_phrase: '',
-                          page_index: typeof sp.page_index === 'number' ? sp.page_index : focusPages[0]
-                        };
-                      });
-
-                      const unearnedCriteria = validatedVerdicts
-                        .filter((v: any) => !v.satisfied && !waivedSet.has(v.criterionIndex))
-                        .map((v: any) => {
-                          const c = criterionByIndex.get(v.criterionIndex) as any;
-                          return c?.text ? `Missed [${c.code || 'Mark'}]: ${c.text}` : '';
-                        }).filter(Boolean);
-
-                      const resolvedDeductions = isFullMarks
-                        ? []
-                        : (Array.isArray(sp.deductions) && sp.deductions.length > 0
-                            ? sp.deductions
-                            : (unearnedCriteria.length > 0
-                                ? unearnedCriteria
-                                : [`Lost ${subMax - subScore} mark(s) on incomplete criteria or working.`]));
-
-                      console.log(`Q${qNum}(${label}): Subagent 2 score ${subScore}/${subMax} replaces cluster ${clusterScore}/${clusterMax}.`);
-                      return {
-                        ...sp,
-                        score: subScore,
-                        max_score: subMax,
-                        student_answer_detected: sp.student_answer_detected,
-                        marking_points: engineMarkingPoints,
-                        teacher_correction_note: isFullMarks ? '' : sp.teacher_correction_note,
-                        deductions: resolvedDeductions,
-                        mistake_details: isFullMarks ? '' : (sp.mistake_details || (unearnedCriteria.length > 0 ? unearnedCriteria.join('; ') : '')),
-                        misconception_analysis: isFullMarks ? '' : sp.misconception_analysis,
-                        constructive_correction: isFullMarks ? '' : sp.constructive_correction,
-                        marks_awarded: validatedVerdicts.filter((v: any) => v.satisfied).map((v: any) => {
-                          const c = criterionByIndex.get(v.criterionIndex) as any;
-                          return c?.text || '';
-                        }),
-                        focused_agent: true,
-                        rubric_engine: true,
-                        overlap_capped: engineScore.cappedByOverlap
-                      };
-                    }
-                  } catch (subErr) {
-                    console.warn(`Q${qNum}(${label}) criterion evaluation failed (keeping cluster result):`, subErr);
-                  }
-                  return sp;
-                }));
-                clusterResult.subparts = refined;
-
-                  // === BADGE & STAMP RESYNCHRONIZATION ===
-                  // The annotation layer (margin badges, inline ticks, Q-total stamps) was
-                  // synthesized from the CLUSTER scores before refinement. Update every
-                  // mark badge to the refined score and drop stale inline ticks whose
-                  // points no longer exist, so the rendered paper shows the actual marks.
-                  const refinedByLabel = new Map<string, any>();
-                  refined.forEach((x: any) => refinedByLabel.set(String(x.part_label || '').toLowerCase(), x));
-
-                  if (Array.isArray(clusterResult.annotations)) {
-                    clusterResult.annotations = clusterResult.annotations.map((ann: any) => {
-                      const target = refinedByLabel.get(String(ann.subpart_label || '').toLowerCase());
-                      if (!target) return ann;
-                      if (ann.type === 'mark_badge') {
-                        const newText = `(${target.score}/${target.max_score})`;
-                        if (ann.text !== newText) {
-                          return {
-                            ...ann,
-                            text: newText,
-                            comment: target.score > 0
-                              ? (target.marks_awarded?.[0] || `Part ${target.part_label}: ${target.score}/${target.max_score} marks`)
-                              : (target.deductions?.[0] || `Part ${target.part_label}: 0/${target.max_score} marks`)
-                          };
-                        }
-                        return ann;
-                      }
-                      if (ann.type === 'inline_tick' || ann.type === 'tick') {
-                        // Drop ticks that no longer correspond to an earned refined point
-                        const earnedPhrases = new Set(
-                          (target.marking_points || [])
-                            .filter((mp: any) => mp.is_earned)
-                            .map((mp: any) => String(mp.student_phrase || mp.criterion || '').toLowerCase().slice(0, 30))
-                        );
-                        const tickText = String(ann.comment || ann.text || '').toLowerCase().slice(0, 30);
-                        if (earnedPhrases.size > 0 && ![...earnedPhrases].some(p => tickText.includes(p.slice(0, 15)) || p.includes(tickText))) {
-                          return null; // stale tick — remove
-                        }
-                      }
-                      return ann;
-                    }).filter(Boolean);
-                  }
-
-                  // Deduplicate refined subparts across pages for this question using canonical subpart keys
-                  const deduplicatedRefinedMap = new Map<string, any>();
-                  refined.forEach((sp: any) => {
-                    const key = getCanonicalSubpartKey(sp.part_label);
-                    if (!deduplicatedRefinedMap.has(key) || (Number(sp.score) || 0) > (Number(deduplicatedRefinedMap.get(key)?.score) || 0)) {
-                      deduplicatedRefinedMap.set(key, sp);
-                    }
-                  });
-                  const deduplicatedRefined = Array.from(deduplicatedRefinedMap.values());
-                  clusterResult.subparts = deduplicatedRefined;
-
-                  // Recompute the cluster totals from the deduplicated refined subparts
-                  const refinedScore = deduplicatedRefined.reduce((s: number, x: any) => s + (Number(x.score) || 0), 0);
-                  const officialQMax = officialMarks > 0 ? officialMarks : (clusterResult.total_max_score || 10);
-                  const cappedScore = Math.min(officialQMax, refinedScore);
-
-                  clusterResult.total_score = cappedScore;
-                  clusterResult.score = cappedScore;
-                  clusterResult.total_max_score = officialQMax;
-                  clusterResult.max_score = officialQMax;
-                  clusterResult.percentage = officialQMax > 0 ? Math.round((cappedScore / officialQMax) * 100) : 0;
-                }
-              } catch (refineErr) {
-                console.warn(`Per-subpart refinement failed for Q${qNum} (keeping cluster result):`, refineErr);
-              }
-
-              return clusterResult;
-            })
-          );
-
-          const validQuestions = questionEvaluations.filter(Boolean);
-
-          // =========================================================================
-          // PASS 3: PAGE AGGREGATION & RECONCILED BOOKLET TOTALS
-          // =========================================================================
-          const allSubparts: any[] = [];
-          const allAnnotations: any[] = [];
-          const questionSummaries: any[] = [];
-          let grandTotalScore = 0;
-          // grandTotalMax is computed from the answer rules at the end of aggregation:
-          // "answer all" papers sum every question (legacy); sectioned papers sum the
-          // effective total (required sections + best-N of elective sections).
-          const hasAnswerRules = !!paperAnswerRules && (
-            (paperAnswerRules.sections && paperAnswerRules.sections.length > 0) ||
-            paperAnswerRules.default_rule === 'any'
-          );
-
-          // NOTE: `officialPaperQuestions` is fetched once at the top of assess_attempt
-          // (already sorted numerically). Do NOT re-declare it here — shadowing it with a
-          // second `let` puts the earlier uses in this block into the temporal dead zone.
-
-          // Build the official marks lookup — STRICT: totals come from the DB, never the model
-          const officialMarksMap = new Map<string, number>();
-          officialPaperQuestions.forEach((oq: any) => {
-            officialMarksMap.set(String(oq.question_number).trim(), Number(oq.marks) || 0);
-          });
-
-          // Build a set of question numbers the student actually attempted (snapped to official
-          // numbering). Gated/unmatched evaluations still leave their question "unattempted" so
-          // its official marks are added to the booklet total by the loop below.
-          const attemptedQNums = new Set(
-            validQuestions
-              .filter((q: any) => q.unmatched !== true && q.relevance_blocked !== true)
-              .map((q: any) => {
-                const qn = String(q.identified_question_number || q.question_number || "").trim();
-                return qn.match(/^\d+/)?.[0] || qn;
-              })
-          );
-
-          // Add zero-score entries for every unattempted official question
-          if (officialPaperQuestions.length > 0) {
-            for (const oq of officialPaperQuestions) {
-              const oqNum = String(oq.question_number);
-              if (!attemptedQNums.has(oqNum)) {
-                questionSummaries.push({
-                  question_number: oqNum,
-                  topic: oq.topic || "Exam Topic",
-                  score: 0,
-                  max_score: Number(oq.marks) || 0,
-                  percentage: 0,
-                  spanned_pages: [],
-                  subparts: [],
-                  unattempted: true
-                });
-              }
-            }
+          };
+
+          // Ensure officialPaperQuestions is not empty (fallback to detected questions if paper has no DB rows)
+          let activeQuestions = officialPaperQuestions;
+          if (!activeQuestions || activeQuestions.length === 0) {
+            activeQuestions = rawImages.map((_, i) => ({
+              id: `synthetic-${i + 1}`,
+              question_number: String(i + 1),
+              marks: 10,
+              topic: "Examination Question"
+            }));
           }
 
-          const seenOfficialQs = new Set<string>();
-          validQuestions.forEach((qEval: any) => {
-            const rawQNum = String(qEval.identified_question_number || qEval.question_number || "1").trim();
-            const snappedQNum = rawQNum.match(/^\d+/)?.[0] || rawQNum;
-            const officialMax = officialMarksMap.get(snappedQNum) ?? officialMarksMap.get(rawQNum);
-            const isUnmatched = qEval.unmatched === true || (officialPaperQuestions.length > 0 && officialMax === undefined);
+          // =========================================================================
+          // PHASE 1 & 2: ISOLATED 1-PAGE VISION FINGERPRINTING & DETERMINISTIC REORDERING
+          // =========================================================================
+          const layout = await fingerprintAndSortBooklet(
+            rawImages,
+            activeQuestions,
+            callFingerprintChat
+          );
 
-            // STRICT: per-question max comes ONLY from the official paper marks (DB) — never the model.
-            // Unmatched questions (not part of this paper) contribute 0/0 and never inflate the total.
-            const qMax = officialMax !== undefined
-              ? officialMax
-              : (isUnmatched ? 0 : Number(qEval.total_max_score ?? qEval.max_score ?? 10));
+          const canonicalImages = layout.canonical_images;
+          console.log(`[DeterministicSorter] Canonical layout established: ${canonicalImages.length} pages mapped across canonical order:`, layout.canonical_order);
 
-            // Deduplicate subparts by canonical key
-            const deduplicatedSubpartsMap = new Map<string, any>();
-            (qEval.subparts || []).forEach((sp: any) => {
-              const key = getCanonicalSubpartKey(sp.part_label);
-              if (!deduplicatedSubpartsMap.has(key) || (Number(sp.score) || 0) > (Number(deduplicatedSubpartsMap.get(key)?.score) || 0)) {
-                deduplicatedSubpartsMap.set(key, sp);
-              }
-            });
-            const deduplicatedSubparts = Array.from(deduplicatedSubpartsMap.values());
-            const subpartsSum = deduplicatedSubparts.reduce((s: number, sp: any) => s + (Number(sp.score) || 0), 0);
-            const safeQScore = isUnmatched ? 0 : Math.min(qMax, subpartsSum);
+          // =========================================================================
+          // PHASE 3 & 4: PARALLEL ATOMIC SUBPART EVALUATION & TYPESCRIPT RUBRIC SCORING
+          // =========================================================================
+          const evalResult = await evaluateBookletAtomically(
+            canonicalImages,
+            layout,
+            activeQuestions,
+            solMap,
+            dbPartsMap,
+            callSubpartChat
+          );
 
-            const wasGraded = !isUnmatched && qEval.relevance_blocked !== true;
-            grandTotalScore += wasGraded ? safeQScore : 0;
-            // NOTE: grandTotalMax is computed once after aggregation from the answer
-            // rules (see below) — never accumulated per-question here.
-
-            // Gated/unmatched evaluations merge into the unattempted summary the loop above created
-            const existingUnattempted = questionSummaries.find((qs: any) => {
-              const qsNum = String(qs.question_number).trim();
-              return qs.unattempted && (qsNum === snappedQNum || (qsNum.match(/^\d+/)?.[0] || qsNum) === snappedQNum);
-            });
-            if (existingUnattempted && (isUnmatched || qEval.relevance_blocked === true)) {
-              existingUnattempted.notes = existingUnattempted.notes || (isUnmatched
-                ? "Content does not correspond to any question in this paper. 0 marks awarded."
-                : ((qEval.overall_feedback || "").slice(0, 160) || "Answers did not correspond to this question. 0 marks awarded."));
-              existingUnattempted.spanned_pages = (qEval.spanned_pages && qEval.spanned_pages.length > 0) ? qEval.spanned_pages : existingUnattempted.spanned_pages;
-            } else {
-              // Merge duplicate summaries for the same official question (best attempt wins)
-              const existingSummary = questionSummaries.find((qs: any) => {
-                const qsNum = String(qs.question_number).trim();
-                return !qs.unattempted && (qsNum === snappedQNum || (qsNum.match(/^\d+/)?.[0] || qsNum) === snappedQNum);
-              });
-              if (existingSummary) {
-                // Merge subparts deduplicated
-                const mergedSubpartsMap = new Map<string, any>();
-                [...(existingSummary.subparts || []), ...deduplicatedSubparts].forEach((sp: any) => {
-                  const key = getCanonicalSubpartKey(sp.part_label);
-                  if (!mergedSubpartsMap.has(key) || (Number(sp.score) || 0) > (Number(mergedSubpartsMap.get(key)?.score) || 0)) {
-                    mergedSubpartsMap.set(key, sp);
-                  }
-                });
-                existingSummary.subparts = Array.from(mergedSubpartsMap.values());
-                const mergedSum = existingSummary.subparts.reduce((s: number, sp: any) => s + (Number(sp.score) || 0), 0);
-                existingSummary.score = Math.min(existingSummary.max_score, isUnmatched ? 0 : mergedSum);
-                existingSummary.spanned_pages = Array.from(new Set([...(existingSummary.spanned_pages || []), ...(qEval.spanned_pages || [])]));
-                existingSummary.percentage = existingSummary.max_score > 0 ? Math.round((existingSummary.score / existingSummary.max_score) * 100) : 0;
-              } else {
-                questionSummaries.push({
-                  question_number: rawQNum,
-                  topic: qEval.identified_topic || qEval.topic || "Exam Topic",
-                  score: safeQScore,
-                  max_score: qMax,
-                  percentage: qMax > 0 ? Math.round((safeQScore / qMax) * 100) : 0,
-                  spanned_pages: qEval.spanned_pages || [0],
-                  subparts: deduplicatedSubparts,
-                  unmatched: isUnmatched || undefined,
-                  notes: isUnmatched ? "Content does not correspond to any question in this paper. 0 marks awarded." : undefined
-                });
-              }
-            }
-
-            if (deduplicatedSubparts.length > 0) {
-              allSubparts.push(...deduplicatedSubparts);
-            }
-            if (Array.isArray(qEval.annotations)) {
-              allAnnotations.push(...qEval.annotations);
-            }
-          });
+          let grandTotalScore = evalResult.grandTotalScore;
+          let grandTotalMax = evalResult.grandTotalMax;
 
           // =========================================================================
           // BOOKLET TOTAL — ANSWER-RULES AWARE (effective total)
-          // "Answer all" papers: sum of all official questions (legacy, no regression).
-          // Sectioned / "any N" papers: required sections sum fully; elective sections
-          // contribute their best-N question marks. The student's earned score also
-          // keeps only the best N of over-answered elective questions.
           // =========================================================================
-          let grandTotalMax: number;
-          if (hasAnswerRules && officialPaperQuestions.length > 0) {
-            grandTotalMax = computeEffectiveBookletTotal(officialPaperQuestions, paperAnswerRules);
-            const rulesEarned = computeEffectiveEarnedScore(validQuestions, officialPaperQuestions, paperAnswerRules);
-            if (rulesEarned > grandTotalScore) grandTotalScore = rulesEarned;
-            grandTotalScore = Math.min(grandTotalScore, grandTotalMax);
-            console.log(`Answer rules applied: effective booklet total ${grandTotalMax} (full paper sum: ${officialPaperQuestions.reduce((s: number, q: any) => s + (Number(q.marks) || 0), 0)})`);
+          const hasAnswerRules = Boolean(paperAnswerRules && Array.isArray(paperAnswerRules?.sections) && paperAnswerRules.sections.length > 0);
+          if (hasAnswerRules && activeQuestions.length > 0) {
+            grandTotalMax = computeEffectiveBookletTotal(activeQuestions, paperAnswerRules);
+            const rulesEarned = computeEffectiveEarnedScore(evalResult.questionEvaluations, activeQuestions, paperAnswerRules);
+            grandTotalScore = Math.min(rulesEarned, grandTotalMax);
+            console.log(`Answer rules applied: effective booklet total ${grandTotalMax} (full paper sum: ${activeQuestions.reduce((s: number, q: any) => s + (Number(q.marks) || 0), 0)})`);
           } else {
-            grandTotalMax = officialPaperQuestions.length > 0
-              ? officialPaperQuestions.reduce((s: number, q: any) => s + (Number(q.marks) || 0), 0)
-              : validQuestions.reduce((s: number, q: any) => s + (Number(q.total_max_score ?? q.max_score ?? 0) || 10), 0);
+            grandTotalMax = activeQuestions.length > 0
+              ? activeQuestions.reduce((s: number, q: any) => s + (Number(q.marks) || 0), 0)
+              : evalResult.questionEvaluations.reduce((s: number, q: any) => s + (Number(q.total_max_score ?? q.max_score ?? 0) || 10), 0);
             grandTotalScore = Math.min(grandTotalMax, grandTotalScore);
           }
 
-          // Build per-page evaluations
-          const pages: any[] = rawImages.map((imgUrl, pIdx) => {
-            const isLastPage = pIdx === rawImages.length - 1;
-            const pageSubparts = allSubparts.filter((sp: any) => sp.page_index === pIdx);
+          // =========================================================================
+          // PHASE 5: DETERMINISTIC VISUAL ANNOTATION SYNTHESIZER
+          // =========================================================================
+          const allAnnotations = synthesizeBookletAnnotations(
+            evalResult.allSubparts,
+            canonicalImages,
+            grandTotalScore,
+            grandTotalMax
+          );
+
+          // Build per-page evaluations matching client schema
+          const pages: any[] = canonicalImages.map((imgUrl, pIdx) => {
+            const pageSubparts = evalResult.allSubparts.filter((sp: any) => sp.page_index === pIdx);
             const pageScore = pageSubparts.reduce((sum: number, sp: any) => sum + (Number(sp.score) || 0), 0);
             const pageMax = pageSubparts.reduce((sum: number, sp: any) => sum + (Number(sp.max_score) || 0), 0) || 5;
-
             const pageAnnotations = allAnnotations.filter((ann: any) => ann.page_index === pIdx);
 
-            // 1–2. Per-question "Q Total" badges and "Cont." labels are intentionally NOT
-            // generated anymore — they cluttered every page's top. Per-question scores live
-            // in the subpart margin badges (✓ 2/2) and the explanations panel.
-
-            // 3. Stamp the overall booklet total at the TOP-LEFT of the FIRST page.
-            // (Previously the bottom of the final page — it overlapped the last question's
-            // total badge, since all total stamps rendered in the same bottom-right spot.)
-            if (pIdx === 0) {
-              const finalBadgeText = `Booklet Total: ${grandTotalScore}/${grandTotalMax}`;
-              pageAnnotations.push({
-                type: 'total_header',
-                text: finalBadgeText,
-                comment: `Overall Booklet Total: ${grandTotalScore}/${grandTotalMax} marks`,
-                box_2d: [12, 20, 52, 420],
-                page_index: pIdx
-              });
-            }
-
             const questionsPresent = Array.from(new Set(
-              pageSubparts.map((sp: any) => sp.part_label?.split('(')?.[0]?.trim() || '')
-                .filter(Boolean)
-                .concat(
-                  scriptMap.filter((sm: any) => sm.spanned_pages?.includes(pIdx)).map((sm: any) => String(sm.question_number))
-                )
+              pageSubparts.map((sp: any) => String(sp.question_number)).filter(Boolean)
             ));
-
-            const pageLayoutRegions = validQuestions
-              .filter((q: any) => q.spanned_pages?.includes(pIdx))
-              .flatMap((q: any) => q.layout_regions || []);
 
             return {
               page_index: pIdx,
@@ -3086,27 +2073,27 @@ YOUR TASK:
               questions_present: questionsPresent.length > 0 ? questionsPresent : [`${pIdx + 1}`],
               annotations: pageAnnotations,
               subparts: pageSubparts,
-              layout_regions: pageLayoutRegions
+              layout_regions: []
             };
           });
 
           const multiPageAssessment: any = {
-            identified_question_number: questionSummaries.map(q => q.question_number).join(', '),
-            identified_topic: validQuestions[0]?.identified_topic || "Multi-Page Exam Script",
+            identified_question_number: evalResult.questionEvaluations.map((q: any) => q.question_number).join(', '),
+            identified_topic: evalResult.questionEvaluations[0]?.identified_topic || "Multi-Page Exam Script",
             total_score: grandTotalScore,
             total_max_score: grandTotalMax || 10,
             score: grandTotalScore,
             max_score: grandTotalMax || 10,
             percentage: grandTotalMax > 0 ? Math.round((grandTotalScore / grandTotalMax) * 100) : 0,
-            subparts: allSubparts,
-            layout_regions: validQuestions.flatMap((q: any) => q.layout_regions || []),
+            subparts: evalResult.allSubparts,
+            layout_regions: [],
             annotations: allAnnotations,
-            question_summaries: questionSummaries,
+            question_summaries: evalResult.questionEvaluations,
             pages: pages,
-            overall_feedback: validQuestions.map(q => q.overall_feedback).filter(Boolean).join(' ') || `Completed multi-page booklet evaluation across ${rawImages.length} pages. Scored ${grandTotalScore}/${grandTotalMax} marks.`,
-            examiner_model_solution: validQuestions.map(q => q.examiner_model_solution).filter(Boolean).join('\n\n'),
-            recommended_next_step: validQuestions[0]?.recommended_next_step || "Review teacher constructive corrections on the marked booklet pages.",
-            model_used: validQuestions[0]?.model_used || indexRes.modelUsed || "gpt-4o"
+            overall_feedback: evalResult.questionEvaluations.map((q: any) => q.overall_feedback).filter(Boolean).join(' ') || `Completed booklet evaluation across ${canonicalImages.length} pages. Scored ${grandTotalScore}/${grandTotalMax} marks.`,
+            examiner_model_solution: evalResult.questionEvaluations.map((q: any) => q.examiner_model_solution).filter(Boolean).join('\n\n'),
+            recommended_next_step: "Review teacher constructive corrections on the marked booklet pages.",
+            model_used: "atomic-subpart-engine"
           };
 
           // Concurrently generate authentic teacher red-ink marked images for ALL pages!
@@ -3114,11 +2101,10 @@ YOUR TASK:
           if (generate_marked_image !== false) {
             try {
               const topic = multiPageAssessment.identified_topic || "Science";
-              console.log(`Starting concurrent marked image generation for all ${rawImages.length} booklet pages...`);
+              console.log(`Starting concurrent marked image generation for all ${canonicalImages.length} booklet pages...`);
               await Promise.all(
-                rawImages.map(async (imgUrl, pIdx) => {
+                canonicalImages.map(async (imgUrl, pIdx) => {
                   try {
-                    // Stagger by 350ms to prevent burst rate-limiting on OpenAI
                     if (pIdx > 0) {
                       await new Promise((r) => setTimeout(r, pIdx * 350));
                     }
@@ -3159,7 +2145,6 @@ YOUR TASK:
               console.warn("Multi-page Sunburst generation failed:", bgErr);
             }
           }
-
           return new Response(JSON.stringify({
             assessment: multiPageAssessment,
             marked_image_url: multiPageAssessment.generated_marked_image_url || null
