@@ -806,15 +806,29 @@ async function groundEvaluatedMarks(
   if (!imageUrl || !evaluatedSubparts || evaluatedSubparts.length === 0) return null;
 
   const targets = evaluatedSubparts.map((sp: any) => {
-    const earnedPhrases = Array.isArray(sp.marking_points)
-      ? sp.marking_points
-          .filter((pt: any) => (pt.is_earned || pt.is_awarded || pt.tick_or_cross === 'tick') && pt.student_phrase)
-          .map((pt: any) => ({
-            point_number: pt.point_number || pt.point_index || 1,
-            student_phrase: pt.student_phrase,
-            mark_code: pt.mark_code || 'B1'
-          }))
-      : [];
+    let earnedPhrases: Array<{ point_number: number; student_phrase: string; mark_code: string }> = [];
+    if (Array.isArray(sp.marking_points)) {
+      earnedPhrases = sp.marking_points
+        .filter((pt: any) => (pt.is_earned || pt.is_awarded || pt.tick_or_cross === 'tick'))
+        .map((pt: any, ptIdx: number) => ({
+          point_number: pt.point_number || pt.point_index || (ptIdx + 1),
+          student_phrase: pt.student_phrase || pt.criterion || `Mark point ${ptIdx + 1}`,
+          mark_code: pt.mark_code || '✓'
+        }));
+    }
+    // Fallback if marking_points was empty but score > 0: ensure target phrases are available for every earned point
+    if (earnedPhrases.length === 0 && Number(sp.score) > 0) {
+      const phrasesFromAwarded = Array.isArray(sp.marks_awarded) ? sp.marks_awarded : [];
+      const scoreNum = Math.min(Number(sp.score), 6);
+      for (let s = 0; s < scoreNum; s++) {
+        earnedPhrases.push({
+          point_number: s + 1,
+          student_phrase: phrasesFromAwarded[s] || sp.student_answer_detected || `Earned answer step ${s + 1}`,
+          mark_code: '✓'
+        });
+      }
+    }
+
     const flawedPhrases = Array.isArray(sp.marking_points)
       ? sp.marking_points
           .filter((pt: any) => !(pt.is_earned || pt.is_awarded) && pt.flawed_phrase)
@@ -852,13 +866,15 @@ TASK:
    - "part_label": string matching the input (e.g. "(a)", "(b)(i)")
    - "label_box": [ymin, xmin, ymax, xmax] bounding the printed question subpart label.
    - "handwriting_box": [ymin, xmin, ymax, xmax] bounding the student's actual handwritten answer / calculation for this subpart. If blank: [0, 0, 0, 0].
-   - "answer_baseline_y": integer (0 to 1000) indicating the EXACT vertical level (baseline) where the student's handwritten answer text finishes.
-   - "earned_points": For each item in "earned_phrases", locate where that exact phrase or formula appears on the sheet:
+   - "last_line_y": integer (0 to 1000) indicating the EXACT vertical level (baseline) of the LAST LINE of this question/subpart.
+     * In British / Cambridge / ZIMSEC exam papers, this is the final written answer line or the pre-printed dotted answer rule "......." / "[Ans: _____]".
+     * CRITICAL: The teacher's subpart score badge (e.g. "(2/2)") will be placed in the right margin exactly aligned horizontally with this last line.
+   - "earned_points": For each item in "earned_phrases", locate where that EXACT formula, equation step, calculation, or phrase appears on the sheet:
      [
        {
          "point_number": number,
          "student_phrase": "string",
-         "box_2d": [ymin, xmin, ymax, xmax] // bounding the exact phrase so a red tick (✓) can be placed at it
+         "box_2d": [ymin, xmin, ymax, xmax] // tight bounding box around the exact formula, number, or keyword so a red tick (✓) is placed directly on that marking point
        }
      ]
    - "mistake_points": For each item in "flawed_phrases", locate where that flawed word appears on the sheet:
@@ -866,17 +882,19 @@ TASK:
        {
          "flawed_phrase": "string",
          "box_2d": [ymin, xmin, ymax, xmax] // bounding the flawed word so a neat underline or caret can be placed
-       }
-     ]
-   - "correction_box": If teacher_correction_note is not empty, specify [ymin, xmin, ymax, xmax] for a clear empty space directly below/beside the error where the teacher's red correction note can be written without overlapping diagrams or the next subpart.
+        }
+      ]
+    - "correction_box": If teacher_correction_note is not empty, specify [ymin, xmin, ymax, xmax] for a clear empty space directly below/beside the error where the teacher's red correction note can be written without overlapping diagrams or the next subpart.
+
+CONTINUATION / MULTI-PAGE ISOLATION (CRITICAL):
+- If this sheet is a continuation page, or if ANY of the evaluated subparts listed above were written on a DIFFERENT sheet and are NOT visible on this image:
+- You MUST indicate that the subpart is absent by setting:
+  "is_present_on_this_page": false, "handwriting_box": [0, 0, 0, 0], "label_box": [0, 0, 0, 0], "last_line_y": 0, "earned_points": [], "mistake_points": []
+- ONLY detect coordinates and set "is_present_on_this_page": true for subparts that are ACTUALLY AND VISIBLY WRITTEN ON THIS EXACT SHEET IMAGE!
 
 COORDINATE SYSTEM:
 All coordinates are normalized integers 0 to 1000 (0,0 is top-left, 1000,1000 is bottom-right).
-CRITICAL: The sheet spans 0 to 1000 from top to bottom:
-- 0 to 100: Top of page / question header
-- 500: Middle of page
-- 850 to 950: Bottom lines of handwritten calculations
-DO NOT compress coordinates to a 0-500 scale — use the full 0-1000 height of the image canvas!
+Output true observed coordinates — NEVER compress or scale coordinates.
 
 Return strictly valid JSON matching this schema:
 {
@@ -886,9 +904,10 @@ Return strictly valid JSON matching this schema:
   "subpart_groundings": [
     {
       "part_label": "string",
+      "is_present_on_this_page": boolean,
       "label_box": [ymin, xmin, ymax, xmax],
       "handwriting_box": [ymin, xmin, ymax, xmax],
-      "answer_baseline_y": number,
+      "last_line_y": number,
       "earned_points": [
         { "point_number": number, "student_phrase": "string", "box_2d": [ymin, xmin, ymax, xmax] }
       ],
@@ -1017,7 +1036,36 @@ function applyVisualGroundingToAssessment(
     assessment.layout_regions = formatLayoutRegions(grounding);
   }
 
-  const subparts: any[] = Array.isArray(assessment.subparts) ? assessment.subparts : [];
+  const rawSubparts: any[] = Array.isArray(assessment.subparts) ? assessment.subparts : [];
+  if (rawSubparts.length === 0) return;
+
+  // STRICT CONTINUATION & MULTI-PAGE ISOLATION:
+  // If visual grounding confirmed presence of specific subparts on this page image,
+  // filter out any subparts from previous or later sheets that are not on this sheet!
+  let subparts = rawSubparts;
+  if (grounding && Array.isArray(grounding.subpart_groundings) && grounding.subpart_groundings.length > 0) {
+    const validGroundings = grounding.subpart_groundings.filter((sg: any) => {
+      if (sg.is_present_on_this_page === false) return false;
+      const hasLineY = typeof sg.last_line_y === 'number' && sg.last_line_y >= 35 && sg.last_line_y <= 960;
+      const hasBaseY = typeof sg.answer_baseline_y === 'number' && sg.answer_baseline_y >= 35 && sg.answer_baseline_y <= 960;
+      const hasHw = Array.isArray(sg.handwriting_box) && (sg.handwriting_box[2] > 35 || sg.handwriting_box[0] > 0);
+      const hasEarned = Array.isArray(sg.earned_points) && sg.earned_points.some((ep: any) => Array.isArray(ep.box_2d) && ep.box_2d[2] > 35);
+      const hasLabelBox = Array.isArray(sg.label_box) && sg.label_box[2] > 35;
+      return hasLineY || hasBaseY || hasHw || hasEarned || hasLabelBox;
+    });
+
+    if (validGroundings.length > 0) {
+      subparts = rawSubparts.filter((sp: any) => {
+        const cleanPart = (sp.part_label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        return validGroundings.some((sg: any) => {
+          const gPart = (sg.part_label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          return gPart === cleanPart || gPart.endsWith(cleanPart) || cleanPart.endsWith(gPart);
+        });
+      });
+      assessment.subparts = subparts;
+    }
+  }
+
   if (subparts.length === 0) return;
 
   subparts.sort((a: any, b: any) => {
@@ -1042,21 +1090,6 @@ function applyVisualGroundingToAssessment(
 
   let prevBadgeY = 0;
 
-  // Auto-detect if LLM vision returned vertically compressed coordinates (0-500 scale)
-  const allGroundingY: number[] = [];
-  (grounding?.subpart_groundings || []).forEach((sg: any) => {
-    if (typeof sg.answer_baseline_y === 'number' && sg.answer_baseline_y > 40) allGroundingY.push(sg.answer_baseline_y);
-    if (Array.isArray(sg.handwriting_box) && sg.handwriting_box[2] > 40) allGroundingY.push(sg.handwriting_box[2]);
-  });
-  subparts.forEach((sp: any) => {
-    if (typeof sp.line_y === 'number' && sp.line_y > 40) allGroundingY.push(sp.line_y);
-  });
-  const maxDetectedY = allGroundingY.length > 0 ? Math.max(...allGroundingY) : 0;
-  const targetMaxY = totalParts >= 4 ? 920 : (totalParts === 3 ? 890 : 850);
-  const groundingScale = (totalParts >= 2 && maxDetectedY > 0 && maxDetectedY <= 680)
-    ? Math.min(2.1, targetMaxY / maxDetectedY)
-    : 1.0;
-
   subparts.forEach((sp: any, idx: number) => {
     const max = Number(sp.max_score) || 1;
     sp.score = Math.max(0, Math.min(Number(sp.score) || 0, max));
@@ -1074,34 +1107,32 @@ function applyVisualGroundingToAssessment(
       return gPart === cleanPart || gPart.endsWith(cleanPart) || cleanPart.endsWith(gPart);
     });
 
-    // 1. Determine answer baseline Y with coordinate scaling
+    // Skip absent subparts on this sheet
+    if (matchedGrounding && matchedGrounding.is_present_on_this_page === false) {
+      return;
+    }
+    // If other subparts were confirmed on this sheet, never synthesize fallback annotations for ungrounded subparts from other pages
+    if (!matchedGrounding && grounding && Array.isArray(grounding.subpart_groundings) && grounding.subpart_groundings.length > 0) {
+      return;
+    }
+
+    // 1. Determine the EXACT horizontal baseline of the LAST LINE for this question/subpart
     let detectedY: number | null = null;
-    if (matchedGrounding && typeof matchedGrounding.answer_baseline_y === 'number' && matchedGrounding.answer_baseline_y >= 40 && matchedGrounding.answer_baseline_y <= 950) {
-      detectedY = Math.min(940, Math.round(matchedGrounding.answer_baseline_y * groundingScale));
+    if (matchedGrounding && typeof matchedGrounding.last_line_y === 'number' && matchedGrounding.last_line_y >= 35 && matchedGrounding.last_line_y <= 960) {
+      detectedY = matchedGrounding.last_line_y;
       sp.line_y = detectedY;
-    } else if (matchedGrounding && Array.isArray(matchedGrounding.handwriting_box) && matchedGrounding.handwriting_box[2] > 40) {
-      detectedY = Math.min(940, Math.round(((matchedGrounding.handwriting_box[0] + matchedGrounding.handwriting_box[2]) / 2) * groundingScale));
+    } else if (matchedGrounding && typeof matchedGrounding.answer_baseline_y === 'number' && matchedGrounding.answer_baseline_y >= 35 && matchedGrounding.answer_baseline_y <= 960) {
+      detectedY = matchedGrounding.answer_baseline_y;
       sp.line_y = detectedY;
-    } else if (typeof sp.line_y === 'number' && sp.line_y >= 40 && sp.line_y <= 950) {
-      detectedY = Math.min(940, Math.round(sp.line_y * groundingScale));
+    } else if (matchedGrounding && Array.isArray(matchedGrounding.handwriting_box) && matchedGrounding.handwriting_box[2] > 35) {
+      detectedY = matchedGrounding.handwriting_box[2];
+      sp.line_y = detectedY;
+    } else if (typeof sp.line_y === 'number' && sp.line_y >= 35 && sp.line_y <= 960) {
+      detectedY = sp.line_y;
     }
 
-    // Scale earned_points box_2d if present
-    if (groundingScale > 1.0 && matchedGrounding && Array.isArray(matchedGrounding.earned_points)) {
-      matchedGrounding.earned_points.forEach((ep: any) => {
-        if (Array.isArray(ep.box_2d) && ep.box_2d.length === 4) {
-          const h = Math.max(15, ep.box_2d[2] - ep.box_2d[0]);
-          const newY = Math.min(935, Math.round(ep.box_2d[0] * groundingScale));
-          ep.box_2d[0] = newY;
-          ep.box_2d[2] = Math.min(960, newY + h);
-        }
-      });
-    }
-
-    const defaultY = Math.round(70 + idx * (800 / Math.max(1, totalParts - 1)));
-    const rawY = detectedY && detectedY >= 40 && detectedY <= 950 ? detectedY : defaultY;
-    // Align directly with student answer line (no artificial subtraction offset)
-    let yMid = Math.max(rawY, 35);
+    const defaultY = Math.round(80 + idx * (780 / Math.max(1, totalParts - 1)));
+    let yMid = detectedY && detectedY >= 35 && detectedY <= 960 ? detectedY : defaultY;
 
     // Collision prevention with diagrams
     if (grounding?.diagram_regions && grounding.diagram_regions.length > 0) {
@@ -1115,25 +1146,25 @@ function applyVisualGroundingToAssessment(
       }
     }
 
-    // Minimum 38 units separation between margin badges
-    if (prevBadgeY > 0 && yMid < prevBadgeY + 38) {
-      yMid = prevBadgeY + 38;
+    // Minimum visual separation between margin badges to avoid overlap
+    if (prevBadgeY > 0 && yMid < prevBadgeY + 30) {
+      yMid = prevBadgeY + 30;
     }
     prevBadgeY = yMid;
     sp.line_y = yMid;
 
-    // 2. Right Margin Score Badge: strictly in the right margin column
+    // 2. Right Margin Score Badge: aligned horizontally with the subpart's LAST LINE
     const badgeText = `(${sp.score}/${sp.max_score})`;
     synthesized.push({
       type: 'mark_badge',
       text: badgeText,
       comment: sp.score > 0 ? (sp.marks_awarded?.[0] || `Part ${sp.part_label}: ${sp.score}/${sp.max_score} marks`) : (sp.deductions?.[0] || `Part ${sp.part_label}: 0/${sp.max_score} marks`),
-      box_2d: [Math.max(yMid - 16, 40), 865, Math.min(yMid + 16, 940), 975],
+      box_2d: [Math.max(yMid - 14, 25), 865, Math.min(yMid + 14, 975), 975],
       subpart_label: sp.part_label,
       page_index: pIdx
     });
 
-    // 3. Point-by-point inline ticks (grounded to specific words/steps)
+    // 3. Point-by-point inline ticks (grounded directly on the student's marking points)
     let placedTicks = 0;
     const earnedPoints = Array.isArray(sp.marking_points)
       ? sp.marking_points.filter((pt: any) => pt.is_earned || pt.is_awarded || pt.tick_or_cross === 'tick')
@@ -1159,25 +1190,24 @@ function applyVisualGroundingToAssessment(
       let tickY: number;
       let tickX: number;
       if (ptBox) {
+        // Positioned directly at the marking point (end of handwritten formula or expression)
         const lineY = Math.round((ptBox[0] + ptBox[2]) / 2);
         tickY = Math.max(Math.min(lineY, 940), 30);
-        tickX = Math.min(Math.max(ptBox[3] + 6, 120), 760);
+        tickX = Math.min(Math.max(ptBox[3] + 6, 120), 780);
       } else {
-        // If subpart spans a tall handwriting box (e.g. graph + equations, span > 80 units),
-        // distribute ticks along that span rather than clustering at the very bottom!
+        // If ptBox was not resolved, anchor relative to student's handwriting box
         const hwBox = matchedGrounding?.handwriting_box;
-        const hasTallSpan = Array.isArray(hwBox) && hwBox.length === 4 && (hwBox[2] - hwBox[0] > 80);
-        if (hasTallSpan) {
-          const hwTop = Math.max(hwBox[0], 40);
-          const hwBottom = Math.min(hwBox[2], 930);
+        const hasHwBox = Array.isArray(hwBox) && hwBox.length === 4 && hwBox[2] > hwBox[0];
+        if (hasHwBox) {
+          const hwTop = Math.max(hwBox[0], 35);
+          const hwBottom = Math.min(hwBox[2], 940);
           const span = hwBottom - hwTop;
           const stepFrac = (ptIdx + 1) / (earnedPoints.length + 1);
           tickY = Math.round(hwTop + span * stepFrac);
-          tickX = ptIdx % 2 === 0 ? 560 : 720;
+          tickX = Math.min(Math.max(hwBox[3] + 6, 150), 760);
         } else {
-          const yOffset = earnedPoints.length === 1 ? 0 : Math.round((ptIdx - (earnedPoints.length - 1) / 2) * 22);
-          tickY = Math.max(yMid + yOffset, 40);
-          tickX = earnedPoints.length === 1 ? 720 : (ptIdx % 2 === 0 ? 580 : 720);
+          tickY = yMid;
+          tickX = Math.min(Math.max(260 + ptIdx * 80, 180), 760);
         }
       }
 
@@ -1188,26 +1218,27 @@ function applyVisualGroundingToAssessment(
         type: 'inline_tick',
         text: cleanMarkCode,
         comment: pt.criterion || pt.student_phrase || `Part ${sp.part_label} mark earned`,
-        box_2d: [Math.max(tickY - 14, 30), tickX, Math.min(tickY + 14, 940), Math.min(tickX + 40, 795)],
+        box_2d: [Math.max(tickY - 14, 25), tickX, Math.min(tickY + 14, 940), Math.min(tickX + 35, 820)],
         subpart_label: sp.part_label,
         page_index: pIdx
       });
       placedTicks++;
     });
 
-    // If earned marks > placedTicks, synthesize remaining ticks distributed along the answer line
+    // If earned score > placedTicks, synthesize remaining ticks beside the student's answer line
     if (placedTicks < sp.score) {
-      const remaining = Math.min(sp.score - placedTicks, 4);
+      const remaining = Math.min(sp.score - placedTicks, 5);
+      const hwBox = matchedGrounding?.handwriting_box;
+      const hwRight = (Array.isArray(hwBox) && hwBox.length === 4 && hwBox[3] > 100) ? hwBox[3] : 580;
       for (let k = 0; k < remaining; k++) {
         const tickIdx = placedTicks + k;
-        const yOffset = Math.round((tickIdx - (sp.score - 1) / 2) * 22);
-        const tickY = Math.max(yMid + yOffset, 40);
-        const tickX = sp.score === 1 ? 720 : (tickIdx % 2 === 0 ? 580 : 720);
+        const tickY = yMid;
+        const tickX = Math.min(Math.max(hwRight + 8 + k * 45, 180), 780);
         synthesized.push({
           type: 'inline_tick',
           text: '✓',
           comment: sp.marks_awarded?.[tickIdx] || `Part ${sp.part_label} mark ${tickIdx + 1} earned`,
-          box_2d: [Math.max(tickY - 14, 30), tickX, Math.min(tickY + 14, 940), Math.min(tickX + 35, 840)],
+          box_2d: [Math.max(tickY - 14, 25), tickX, Math.min(tickY + 14, 940), Math.min(tickX + 35, 820)],
           subpart_label: sp.part_label,
           page_index: pIdx
         });
@@ -1292,8 +1323,43 @@ function buildTargetedQuestionGradingPrompt(
   paperQuestionsContext?: string
 ): string {
   const isPageSpecific = typeof targetPageIndex === 'number';
+  const isMultiPage = Array.isArray(spannedPages) && spannedPages.length > 1;
+  const minPage = isMultiPage ? Math.min(...spannedPages) : (targetPageIndex ?? 0);
+  const maxPage = isMultiPage ? Math.max(...spannedPages) : (targetPageIndex ?? 0);
+  const isContinuationPage = isPageSpecific && isMultiPage && targetPageIndex > minPage;
+  const isStartOfMultiPage = isPageSpecific && isMultiPage && targetPageIndex === minPage;
+
+  const earlierPages = isMultiPage && isPageSpecific ? spannedPages.filter(p => p < targetPageIndex) : [];
+  const laterPages = isMultiPage && isPageSpecific ? spannedPages.filter(p => p > targetPageIndex) : [];
+
+  let continuationNotice = "";
+  if (isContinuationPage) {
+    continuationNotice = `
+======================================================================
+CONTINUATION PAGE NOTICE (CRITICAL — STRICT CONTINUATION ISOLATION):
+• Booklet Page ${targetPageIndex} is a CONTINUATION SHEET for Question ${qNum}.
+• The student started Question ${qNum} on earlier booklet page(s): ${earlierPages.join(', ')}.
+• Earlier subparts were ALREADY fully answered and evaluated on those earlier page(s).
+• YOU MUST ONLY EVALUATE AND OUTPUT SUBPARTS PHYSICALLY AND VISIBLY WRITTEN ON THIS CONTINUATION SHEET (Page ${targetPageIndex})!
+• ABSOLUTE BAN ON DUPLICATING PREVIOUS SUBPARTS:
+  - DO NOT output, repeat, re-grade, or include subparts completed on earlier pages (e.g. earlier subparts written on Page ${earlierPages.join(', ')}).
+  - Your "subparts" array for this sheet MUST ONLY contain the continuation subparts visible on Page ${targetPageIndex} (e.g. later subparts like (d), (e)).
+  - If a subpart was answered on an earlier page, OMIT IT ENTIRELY from this sheet's evaluation output!
+  - Never stamp annotations or mark badges for previous page subparts on this sheet!
+======================================================================`;
+  } else if (isStartOfMultiPage) {
+    continuationNotice = `
+======================================================================
+START OF MULTI-PAGE QUESTION NOTICE (CRITICAL — STRICT PAGE ISOLATION):
+• Booklet Page ${targetPageIndex} is the FIRST PAGE of Question ${qNum}.
+• This question continues onto later sheet(s): ${laterPages.join(', ')}.
+• YOU MUST ONLY EVALUATE AND OUTPUT SUBPARTS PHYSICALLY AND VISIBLY WRITTEN ON THIS SHEET (Page ${targetPageIndex})!
+• DO NOT output or invent subparts that only appear on subsequent continuation sheet(s) (${laterPages.join(', ')}).
+======================================================================`;
+  }
+
   const pagesText = isPageSpecific
-    ? `TARGET EVALUATION FOCUS: BOOKLET PAGE ${targetPageIndex}`
+    ? `TARGET EVALUATION FOCUS: BOOKLET PAGE ${targetPageIndex}${isContinuationPage ? ` (CONTINUATION SHEET of Question ${qNum})` : (isStartOfMultiPage ? ` (STARTING SHEET of Question ${qNum})` : '')}`
     : (spannedPages && spannedPages.length > 0
         ? `Target Booklet Page(s): ${spannedPages.join(', ')}`
         : `Single-Page Submission`);
@@ -1304,6 +1370,7 @@ function buildTargetedQuestionGradingPrompt(
 MANDATORY OFFICIAL SUBPART REFERENCE (QUESTION ${qNum}):
 ${expectedSubparts.map(sp => `• Part ${sp.label} [${sp.marks} mark(s)]`).join('\n')}
 ======================================================================
+${continuationNotice}
 CRITICAL MANDATORY INSTRUCTION — GRADE EVERY VISIBLE WRITTEN ANSWER ON THIS PAGE:
 1. Scan the student page completely from TOP TO BOTTOM.
 2. Identify and evaluate EVERY single written answer, formula, calculation, unit, or response visible on this sheet (e.g. (a), (b)(i), (b)(ii), (b)(iii), (c)(i), (c)(ii), etc.).
@@ -1311,10 +1378,12 @@ CRITICAL MANDATORY INSTRUCTION — GRADE EVERY VISIBLE WRITTEN ANSWER ON THIS PA
    - Marks are ONLY awarded for answers, formulas, or calculations that are directly and unambiguously attempting QUESTION ${qNum} of this target paper!
    - If a student's handwritten response answers a DIFFERENT question, addresses an UNRELATED topic, or belongs to a DIFFERENT examination paper, you MUST award ZERO (0) MARKS for that part.
    - Never award marks for formulas or calculations that belong to a different question or paper!
-4. In your "subparts" array, output an evaluation entry for EACH subpart present on this sheet.
+4. In your "subparts" array, output an evaluation entry ONLY for subparts visibly written on this sheet (Page ${isPageSpecific ? targetPageIndex : (spannedPages?.[0] ?? 0)}).
+   Never output or duplicate subparts from other sheets!
    Set "page_index": ${isPageSpecific ? targetPageIndex : (spannedPages?.[0] ?? 0)}.
 ======================================================================`
-    : `CRITICAL MANDATORY INSTRUCTION: Scan the student page from TOP TO BOTTOM. Grade EVERY subpart present on this sheet. Marks are ONLY awarded for answers directly attempting Question ${qNum} of this target paper. If answers are for a different question or paper, award 0 marks. Set "page_index": ${isPageSpecific ? targetPageIndex : (spannedPages?.[0] ?? 0)}.`;
+    : `${continuationNotice}
+CRITICAL MANDATORY INSTRUCTION: Scan the student page from TOP TO BOTTOM. Grade EVERY subpart present on this sheet. Marks are ONLY awarded for answers directly attempting Question ${qNum} of this target paper. If answers are for a different question or paper, award 0 marks. Output entries ONLY for subparts on this sheet. Set "page_index": ${isPageSpecific ? targetPageIndex : (spannedPages?.[0] ?? 0)}.`;
 
   const markSchemeSection = schemeData.found && schemeData.official_mark_scheme
     ? `======================================================================
@@ -2240,9 +2309,10 @@ YOUR TASK:
                   // Secondary reference pages (if any other pages in spannedPages)
                   spannedPages.forEach((refIdx) => {
                     if (refIdx !== pIdx && rawImages[refIdx]) {
+                      const relText = refIdx < pIdx ? "EARLIER COMPLETED SHEET" : "SUBSEQUENT CONTINUATION SHEET";
                       qUserParts.push({
                         type: "text",
-                        text: `--- REFERENCE CONTEXT: BOOKLET PAGE ${refIdx} ---`
+                        text: `--- REFERENCE CONTEXT ONLY (${relText}): BOOKLET PAGE ${refIdx} (DO NOT grade or output subparts from this reference sheet; only evaluate answers written on PRIMARY BOOKLET PAGE ${pIdx}) ---`
                       });
                       qUserParts.push({
                         type: "image_url",
@@ -2252,9 +2322,10 @@ YOUR TASK:
                   });
 
                   try {
+                    const isContinuationSheet = spannedPages.length > 1 && pIdx > Math.min(...spannedPages);
                     const qRes = await executeChatCompletion(openaiApiKey, pass2Candidates, {
                       messages: [
-                        { role: "system", content: `You are the Mentora Senior Chief Examiner. Evaluate and mark student handwriting on Page ${pIdx} strictly against Question ${qNum} of the TARGET PAPER. MANDATORY RELEVANCE: Marks are ONLY awarded for answers that genuinely attempt Question ${qNum}. If the student wrote an answer to a different question, or if this sheet belongs to a different exam paper/topic, you MUST award ZERO (0) marks for all subparts. Never award marks for coincidental words, standard units, or generic formulas. Output strictly valid JSON.` },
+                        { role: "system", content: `You are the Mentora Senior Chief Examiner. Evaluate and mark student handwriting on Page ${pIdx} strictly against Question ${qNum} of the TARGET PAPER.${isContinuationSheet ? ` CONTINUATION SHEET: Page ${pIdx} is a continuation of Question ${qNum}. Earlier parts were already completed on previous pages. ONLY output subparts that are visibly written on Page ${pIdx}. NEVER repeat or output subparts from earlier pages!` : ''} MANDATORY RELEVANCE: Marks are ONLY awarded for answers that genuinely attempt Question ${qNum}. If the student wrote an answer to a different question, or if this sheet belongs to a different exam paper/topic, you MUST award ZERO (0) marks for all subparts. Never award marks for coincidental words, standard units, or generic formulas. Output strictly valid JSON.` },
                         { role: "user", content: qUserParts }
                       ],
                       response_format: { type: "json_object" },

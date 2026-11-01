@@ -484,18 +484,20 @@ export function recalibrateAnnotationBox(
   } else if (rawType === 'mark_badge' || (text.includes('/') && !text.includes('total'))) {
     // 2. Right Margin Score Badges:
     // MUST always live in the right margin column (xmin: 865 to xmax: 975)
-    // Preserves the vision model's vertical level (ymin)!
+    // Preserves the horizontal baseline of the question's last line:
     xmin = 865;
     xmax = 975;
-    ymin = Math.max(35, Math.min(ymin, 910));
-    ymax = ymin + 30;
+    const midY = (ymin + ymax) / 2;
+    ymin = Math.max(25, Math.min(midY - 14, 940));
+    ymax = ymin + 28;
   } else if (rawType === 'tick' || rawType === 'inline_tick') {
     // 3. Inline Ticks:
-    // Placed directly at the end of the student's handwritten expression (bounded left of margin column)
-    ymin = Math.max(40, Math.min(ymin, 910));
+    // Placed directly at the marking point (bounded left of margin column)
+    const midY = (ymin + ymax) / 2;
+    ymin = Math.max(25, Math.min(midY - 14, 940));
     ymax = ymin + 28;
-    xmin = Math.max(80, Math.min(xmin, 760));
-    xmax = Math.min(xmin + 35, 795);
+    xmin = Math.max(60, Math.min(xmin, 780));
+    xmax = Math.min(xmin + 35, 815);
   } else if (rawType === 'cross' || rawType === 'comment' || rawType === 'underline') {
     // 4. Teacher Corrections:
     // Placed at the detected error position (bounded left of margin column)
@@ -537,8 +539,16 @@ export function buildNormalizedLayoutFromAssessment(
     return { regions: [], annotations: [], resolved: [] };
   }
 
+  const isMultiPage = (Array.isArray(assessment.pages) && assessment.pages.length > 1) || (Array.isArray(assessment.page_urls) && assessment.page_urls.length > 1);
   const targetPage = assessment.pages?.[pageIndex];
-  const subpartsList = targetPage?.subparts || assessment.subparts || [];
+  const rawSubpartsList = (targetPage?.subparts && targetPage.subparts.length > 0)
+    ? targetPage.subparts
+    : (isMultiPage && Array.isArray(assessment.subparts)
+        ? assessment.subparts.filter((sp: any) => sp.page_index === pageIndex)
+        : assessment.subparts || []);
+  const subpartsList = isMultiPage
+    ? rawSubpartsList.filter((sp: any) => sp.page_index === undefined || sp.page_index === pageIndex)
+    : rawSubpartsList;
   const regions: DetectedLayoutRegion[] = [];
   const annotations: AnchoredAnnotation[] = [];
 
@@ -568,6 +578,9 @@ export function buildNormalizedLayoutFromAssessment(
   const totalSubparts = subpartsList.length;
 
   subpartsList.forEach((sp: any, idx: number) => {
+    if (typeof sp.page_index === 'number' && sp.page_index !== pageIndex) {
+      return;
+    }
     const partLabel = sp.part_label || `part_${idx + 1}`;
     const cleanId = `ans_${partLabel.replace(/[^a-z0-9]/gi, '_').toLowerCase()}`;
 

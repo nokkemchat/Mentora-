@@ -214,9 +214,19 @@ export function ensureAssessmentAnnotations(assessment: AssessmentResult, pageIn
 
   const targetPageIndex = typeof pageIndex === 'number' ? pageIndex : 0;
   const pageData = assessment.pages?.[targetPageIndex];
+  const isMultiPageDoc = (Array.isArray(assessment.pages) && assessment.pages.length > 1) || (Array.isArray(assessment.page_urls) && assessment.page_urls.length > 1);
 
   // Helper map for subpart feedback (deductions, correction notes, constructive guidance)
-  const subpartsList: AssessmentSubpart[] = pageData?.subparts || assessment.subparts || [];
+  const rawSubparts: AssessmentSubpart[] = (pageData?.subparts && pageData.subparts.length > 0)
+    ? pageData.subparts
+    : (isMultiPageDoc && Array.isArray(assessment.subparts)
+        ? assessment.subparts.filter((sp: any) => sp.page_index === targetPageIndex)
+        : assessment.subparts || []);
+
+  const subpartsList: AssessmentSubpart[] = isMultiPageDoc
+    ? rawSubparts.filter((sp: any) => sp.page_index === undefined || sp.page_index === targetPageIndex)
+    : rawSubparts;
+
   const subpartFeedbackMap = new Map<string, { note: string; deduction: string }>();
   subpartsList.forEach((sp: any) => {
     if (sp.part_label) {
@@ -238,7 +248,10 @@ export function ensureAssessmentAnnotations(assessment: AssessmentResult, pageIn
     return null;
   };
 
-  const pageAnnotationsList = pageData?.annotations || [];
+  const rawPageAnnotationsList = pageData?.annotations || [];
+  const pageAnnotationsList = isMultiPageDoc
+    ? rawPageAnnotationsList.filter((a: any) => a.page_index === undefined || a.page_index === targetPageIndex)
+    : rawPageAnnotationsList;
   const hasPageAnnotations = Array.isArray(pageAnnotationsList) && pageAnnotationsList.length > 0;
   const pageMarks = hasPageAnnotations
     ? pageAnnotationsList.filter((a: any) =>
@@ -248,63 +261,8 @@ export function ensureAssessmentAnnotations(assessment: AssessmentResult, pageIn
 
   const layoutRegions = (pageData as any)?.layout_regions || (assessment as any)?.layout_regions || [];
 
-  // Auto-detect and recalibrate vertically compressed coordinates (e.g. 0-500 scale from vision models).
-  // Vision models frequently output coordinates constrained to the top ~45-55% of the page.
-  // We exclude 'total_header' stamps since they can sit at y ~ 840 independently.
+  // Keep true visual coordinates without artificial vertical scaling distortion
   const subpartAnns = (pageAnnotationsList || []).filter((a: any) => a.type !== 'total_header');
-  const annMaxY = Math.max(0, ...subpartAnns.map((a: any) => {
-    if (Array.isArray(a.box_2d) && a.box_2d.length === 4) return Math.max(a.box_2d[0], a.box_2d[2]);
-    if (a.bbox && typeof a.bbox.y === 'number') return Math.round((a.bbox.y + (a.bbox.height || 0)) * 1000);
-    return 0;
-  }));
-  const spMaxY = Math.max(0, ...(subpartsList || []).map((s: any) => typeof s.line_y === 'number' ? s.line_y : 0));
-  const effectiveMaxY = Math.max(annMaxY, spMaxY);
-  const numSubparts = Math.max(subpartsList.length, subpartAnns.filter((a: any) => a.type === 'mark_badge').length);
-  const targetMaxY = numSubparts >= 4 ? 920 : (numSubparts === 3 ? 890 : 850);
-
-  if (numSubparts >= 2 && effectiveMaxY > 0 && effectiveMaxY <= 680 && !(pageData as any)?._y_rescaled) {
-    const scaleFactor = Math.min(2.1, targetMaxY / effectiveMaxY);
-    (pageData as any)._y_rescaled = true;
-
-    subpartsList.forEach((sp: any) => {
-      if (typeof sp.line_y === 'number' && sp.line_y > 0) {
-        sp.line_y = Math.min(940, Math.round(sp.line_y * scaleFactor));
-      }
-      if (Array.isArray(sp.marking_points)) {
-        sp.marking_points.forEach((pt: any) => {
-          if (Array.isArray(pt.box_2d) && pt.box_2d.length === 4) {
-            const h = Math.max(15, pt.box_2d[2] - pt.box_2d[0]);
-            const newY = Math.min(935, Math.round(pt.box_2d[0] * scaleFactor));
-            pt.box_2d[0] = newY;
-            pt.box_2d[2] = Math.min(960, newY + h);
-          }
-        });
-      }
-    });
-
-    if (Array.isArray(pageData?.annotations)) {
-      pageData.annotations.forEach((ann: any) => {
-        if (ann.type === 'total_header') return;
-        if (Array.isArray(ann.box_2d) && ann.box_2d.length === 4) {
-          const h = Math.max(20, ann.box_2d[2] - ann.box_2d[0]);
-          const newYmin = Math.min(930, Math.round(ann.box_2d[0] * scaleFactor));
-          ann.box_2d[0] = newYmin;
-          ann.box_2d[2] = Math.min(960, newYmin + h);
-        }
-        if (ann.bbox && typeof ann.bbox.y === 'number') {
-          ann.bbox.y = Math.min(0.93, ann.bbox.y * scaleFactor);
-        }
-      });
-    }
-
-    if (Array.isArray(layoutRegions)) {
-      layoutRegions.forEach((lr: any) => {
-        if (lr.bbox && typeof lr.bbox.y === 'number') {
-          lr.bbox.y = Math.min(0.93, lr.bbox.y * scaleFactor);
-        }
-      });
-    }
-  }
 
   let finalResult: any[] = [];
 
@@ -434,15 +392,19 @@ function finalizeAnnotationsList(
       const spKey = (sp.part_label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
       return spKey === bKey || spKey.endsWith(bKey) || bKey.endsWith(spKey);
     });
-    if (matchedSp && typeof matchedSp.line_y === 'number' && matchedSp.line_y >= 40) {
-      const targetY = Math.max(35, Math.min(matchedSp.line_y - 12, 920));
+    if (matchedSp && typeof matchedSp.line_y === 'number' && matchedSp.line_y >= 35) {
+      const targetY = Math.max(25, Math.min(matchedSp.line_y, 940));
       if (b.box_2d) {
-        const h = Math.max(25, b.box_2d[2] - b.box_2d[0]);
-        b.box_2d[0] = targetY;
-        b.box_2d[2] = targetY + h;
+        b.box_2d[0] = targetY - 14;
+        b.box_2d[2] = targetY + 14;
+        b.box_2d[1] = 865;
+        b.box_2d[3] = 975;
       }
       if (b.bbox) {
-        b.bbox.y = targetY / 1000;
+        b.bbox.y = (targetY - 14) / 1000;
+        b.bbox.height = 0.028;
+        b.bbox.x = 0.865;
+        b.bbox.width = 0.11;
       }
     }
   });
@@ -455,6 +417,9 @@ function finalizeAnnotationsList(
   );
 
   subpartsList.forEach((sp: any, idx: number) => {
+    if (typeof sp.page_index === 'number' && sp.page_index !== targetPageIndex) {
+      return;
+    }
     const rawLabel = (sp.part_label || '').toLowerCase().trim();
     const cleanKey = rawLabel.replace(/[^a-z0-9]/g, '');
     if (cleanKey && !seenLabels.has(cleanKey)) {
@@ -471,24 +436,18 @@ function finalizeAnnotationsList(
 
       const yEstimate = (matchingRegion && matchingRegion.bbox?.y)
         ? Math.max(35, Math.round((matchingRegion.bbox.y + (matchingRegion.bbox.height || 0.02) / 2) * 1000))
-        : (typeof sp.line_y === 'number' && sp.line_y >= 40 && sp.line_y <= 950
+        : (typeof sp.line_y === 'number' && sp.line_y >= 35 && sp.line_y <= 960
             ? sp.line_y
-            : Math.round(70 + idx * (800 / Math.max(1, subpartsList.length - 1))));
+            : Math.round(80 + idx * (780 / Math.max(1, subpartsList.length - 1))));
 
-      const { box_2d, bbox } = recalibrateAnnotationBox({
-        type: 'mark_badge',
-        subpart_label: sp.part_label,
-        text: `(${score}/${maxScore})`,
-        comment: `Part ${sp.part_label}: ${score}/${maxScore}`,
-        box_2d: [yEstimate, 865, yEstimate + 30, 975],
-      });
+      const badgeBox: [number, number, number, number] = [Math.max(25, yEstimate - 14), 865, Math.min(975, yEstimate + 14), 975];
       badges.push({
         type: 'mark_badge',
         subpart_label: sp.part_label,
         text: `(${score}/${maxScore})`,
         comment: `Part ${sp.part_label}: ${score}/${maxScore}`,
-        box_2d,
-        bbox,
+        box_2d: badgeBox,
+        bbox: { x: 0.865, y: badgeBox[0] / 1000, width: 0.11, height: 0.028 },
         page_index: targetPageIndex,
       });
     }
@@ -601,12 +560,10 @@ function finalizeAnnotationsList(
 
         if (pt && Array.isArray(pt.box_2d) && pt.box_2d.length === 4 && (pt.box_2d[0] > 0 || pt.box_2d[2] > 0)) {
           tickY = Math.round((pt.box_2d[0] + pt.box_2d[2]) / 2);
-          tickX = Math.min(Math.max(pt.box_2d[3] + 8, 140), 760);
+          tickX = Math.min(Math.max(pt.box_2d[3] + 6, 120), 780);
         } else {
-          const stepFrac = (existingTicks.length + i + 1) / (score + 1);
-          tickY = Math.round(startY + totalSpan * stepFrac);
-          const xStops = [520, 680, 590, 740];
-          tickX = xStops[(existingTicks.length + i) % xStops.length];
+          tickY = badgeY;
+          tickX = Math.min(Math.max(260 + (existingTicks.length + i) * 60, 160), 760);
         }
 
         const isStrict = typeof pt?.mark_code === 'string' && /^[A-Z]\d{1,2}$/i.test(pt.mark_code.trim()) && pt.mark_code.trim().length <= 4;
@@ -618,8 +575,8 @@ function finalizeAnnotationsList(
           comment: pt?.criterion || pt?.student_phrase || `Part ${sp.part_label} mark earned`,
           subpart_label: sp.part_label,
           page_index: targetPageIndex,
-          box_2d: [tickY - 12, tickX, tickY + 12, tickX + 28],
-          bbox: { x: tickX / 1000, y: (tickY - 12) / 1000, width: 0.03, height: 0.024 },
+          box_2d: [Math.max(tickY - 14, 25), tickX, Math.min(tickY + 14, 940), Math.min(tickX + 35, 820)],
+          bbox: { x: tickX / 1000, y: Math.max(25, tickY - 14) / 1000, width: 0.035, height: 0.028 },
         });
       }
     }
