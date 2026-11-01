@@ -221,7 +221,9 @@ export function MarkedAnswerSheetViewer({
         {currentAnnotations.map((ann, idx) => {
           // 1. Pixel conversion strictly at render time from normalized coordinates [0.0, 1.0]
           const normX = ann.bbox ? ann.bbox.x : (ann.box_2d ? ann.box_2d[1] / 1000 : 0.85);
-          const normY = ann.bbox ? ann.bbox.y : (ann.box_2d ? ann.box_2d[0] / 1000 : 0.2);
+          const normY = ann.bbox && typeof ann.bbox.height === 'number'
+            ? (ann.bbox.y + ann.bbox.height / 2)
+            : (ann.box_2d ? (ann.box_2d[0] + ann.box_2d[2]) / 2000 : 0.2);
           const normW = ann.bbox ? ann.bbox.width : (ann.box_2d ? Math.max(0.04, (ann.box_2d[3] - ann.box_2d[1]) / 1000) : 0.08);
 
           const pixelLeft = Math.round(normX * overlayW);
@@ -256,7 +258,7 @@ export function MarkedAnswerSheetViewer({
                 style={[
                   styles.marginBadgeBox,
                   {
-                    top: Math.max(6, Math.round(safeTop - 22)),
+                    top: Math.max(6, Math.round(safeTop - 11)),
                     right: 10,
                   },
                 ]}

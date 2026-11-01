@@ -487,7 +487,7 @@ export function recalibrateAnnotationBox(
     // Preserves the vision model's vertical level (ymin)!
     xmin = 865;
     xmax = 975;
-    ymin = Math.max(35, Math.min(ymin - 15, 910));
+    ymin = Math.max(35, Math.min(ymin, 910));
     ymax = ymin + 30;
   } else if (rawType === 'tick' || rawType === 'inline_tick') {
     // 3. Inline Ticks:

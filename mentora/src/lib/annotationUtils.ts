@@ -297,9 +297,9 @@ function finalizeAnnotationsList(
       );
 
       const yEstimate = (matchingRegion && matchingRegion.bbox?.y)
-        ? Math.max(35, Math.round(matchingRegion.bbox.y * 1000) - 20)
+        ? Math.max(35, Math.round((matchingRegion.bbox.y + (matchingRegion.bbox.height || 0.02) / 2) * 1000))
         : (typeof sp.line_y === 'number' && sp.line_y >= 40 && sp.line_y <= 950
-            ? Math.max(35, sp.line_y - 20)
+            ? sp.line_y
             : Math.round(70 + idx * (800 / Math.max(1, subpartsList.length - 1))));
 
       const { box_2d, bbox } = recalibrateAnnotationBox({
