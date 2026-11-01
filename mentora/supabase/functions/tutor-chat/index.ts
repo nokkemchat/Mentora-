@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
-import { parseRubric, computeSubpartScore } from "./rubricEngine.ts";
+import { parseRubric, computeSubpartScore, isAlgebraicMatch } from "./rubricEngine.ts";
 import { buildCriterionEvaluationPrompt, SubpartPerceptionDetails } from "./criterionEvaluation.ts";
 import { buildPerceptionPrompt, QuestionPerceptionResult, ObservedSubpartWork } from "./perceptionAgent.ts";
 
@@ -2511,6 +2511,22 @@ YOUR TASK:
                         return { criterionIndex: idx, satisfied, evidence: firstYes?.evidence || '' };
                       });
 
+                      const studentAns = String(sp.student_answer_detected || subpartPerception?.written_text || '').trim();
+                      const criterionByIndex = new Map(rubricParsed.criteria.map((c: any) => [c.index, c]));
+
+                      // Deterministic algebraic & numerical pre-pass:
+                      // If student's answer text directly matches the criterion target (e.g. "(x+3)/(2y+5)" or "150"),
+                      // ensure satisfied is true so LLM stochasticity or formatting differences cannot deduct marks!
+                      validatedVerdicts.forEach((v: any) => {
+                        const c = criterionByIndex.get(v.criterionIndex);
+                        if (c && !v.satisfied && studentAns) {
+                          if (isAlgebraicMatch(studentAns, c.text)) {
+                            v.satisfied = true;
+                            v.evidence = studentAns;
+                          }
+                        }
+                      });
+
                       // === DETERMINISTIC SCORE (overlap-aware, capped at printed max) ===
                       const engineScore = computeSubpartScore(
                         rubricParsed,
@@ -2519,17 +2535,19 @@ YOUR TASK:
                       );
                       const subScore = engineScore.score;
                       const subMax = printedMax ?? Math.max(clusterMax, 1);
+                      const isFullMarks = subScore >= subMax;
+                      const waivedSet = new Set(engineScore.waivedFallbacks || []);
 
                       // Map verdicts back into marking_points for the annotation layer
-                      const criterionByIndex = new Map(rubricParsed.criteria.map((c: any) => [c.index, c]));
                       const engineMarkingPoints = validatedVerdicts.map((v: any) => {
                         const c = criterionByIndex.get(v.criterionIndex) || {} as any;
+                        const isWaived = waivedSet.has(v.criterionIndex) || (isFullMarks && c.isFallback);
                         return {
                           point_number: v.criterionIndex + 1,
                           criterion: c.text || '',
                           mark_code: c.code || 'B1',
-                          is_earned: v.satisfied,
-                          student_phrase: v.evidence || '',
+                          is_earned: v.satisfied || isWaived,
+                          student_phrase: v.satisfied ? (v.evidence || '') : (isWaived ? 'Waived (primary criterion earned full marks)' : ''),
                           flawed_phrase: '',
                           page_index: typeof sp.page_index === 'number' ? sp.page_index : focusPages[0]
                         };
@@ -2542,7 +2560,11 @@ YOUR TASK:
                         max_score: subMax,
                         student_answer_detected: sp.student_answer_detected,
                         marking_points: engineMarkingPoints,
-                        teacher_correction_note: sp.teacher_correction_note,
+                        teacher_correction_note: isFullMarks ? '' : sp.teacher_correction_note,
+                        deductions: isFullMarks ? [] : sp.deductions,
+                        mistake_details: isFullMarks ? '' : sp.mistake_details,
+                        misconception_analysis: isFullMarks ? '' : sp.misconception_analysis,
+                        constructive_correction: isFullMarks ? '' : sp.constructive_correction,
                         marks_awarded: validatedVerdicts.filter((v: any) => v.satisfied).map((v: any) => {
                           const c = criterionByIndex.get(v.criterionIndex) as any;
                           return c?.text || '';
