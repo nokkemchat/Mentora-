@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import type { VisualAnnotation } from '../lib/annotationUtils';
+import { cleanCorrectionNote } from '../lib/annotationUtils';
 
 interface MarkedPaperOverlayProps {
   imageUrl: string;
@@ -188,10 +189,10 @@ export default function MarkedPaperOverlay({
                 a => (a.type === 'comment' || a.type === 'underline') &&
                      (!!a.subpart_label && a.subpart_label === ann.subpart_label)
               );
-              const noteText = !hasDedicatedComment ? (ann.teacher_correction || ann.comment || '').replace(/^✍️\s*/, '').replace(/^\^\s*/, '').trim() : '';
-              const commentTopPct = Math.min(topPct + 2.5, 95);
-              const commentLeftPct = crossLeftPct;
-              const commentMaxW = '65%';
+              const rawNote = !hasDedicatedComment ? (ann.teacher_correction || ann.comment || '') : '';
+              const noteText = cleanCorrectionNote(rawNote);
+              const commentTopPct = Math.min(topPct + 3.0, 95);
+              const commentLeftPct = Math.min(Math.max(leftStartPct, 16), 45);
 
               return (
                 <React.Fragment key={annId}>
@@ -207,19 +208,19 @@ export default function MarkedPaperOverlay({
                     </svg>
                   </div>
 
-                  {/* Authentic Teacher Red-Ink Comment: Handwritten style with ^ in blank space (Zero Blocking Cards) */}
-                  {showComments && (ann.comment || ann.teacher_correction) && (
+                  {/* Authentic Teacher Red-Ink Comment: Legible semi-transparent frosted card to prevent ink collisions */}
+                  {showComments && noteText && (
                     <div
                       style={{
                         top: `${commentTopPct}%`,
                         left: `${commentLeftPct}%`,
-                        maxWidth: commentMaxW
+                        maxWidth: '55%'
                       }}
-                      className="absolute pointer-events-auto z-20 flex items-start gap-1 select-none pointer-events-none sm:pointer-events-auto"
+                      className="absolute pointer-events-auto z-25 flex items-start gap-1 select-none bg-white/95 backdrop-blur-[2px] px-2 py-0.5 rounded shadow-[0_1px_2px_rgba(0,0,0,0.1)] border border-red-200/80"
                     >
                       <span className="font-bold text-[10px] sm:text-[11px] text-[#dc2626] leading-none shrink-0 select-none">^</span>
                       <span className="font-serif italic font-medium text-[10px] sm:text-[11px] text-[#dc2626] leading-tight drop-shadow-[0_1px_1px_rgba(255,255,255,0.95)]">
-                        {ann.teacher_correction || ann.comment}
+                        {noteText}
                       </span>
                     </div>
                   )}
@@ -244,23 +245,24 @@ export default function MarkedPaperOverlay({
               );
             }
 
-            // 4. Inline Tick (Placed AFTER the student's formula / working step)
+            // 4. Inline Tick (Placed AFTER or SUPERSCRIPT above the student's formula / working step)
             if (ann.type === 'tick' || ann.type === 'inline_tick') {
-              // Position tick directly after the student's mathematical expression
-              const leftPct = Math.min(leftEndPct + 1.2, 82);
+              // Position tick slightly superscript above the baseline so it never collides with numbers
+              const leftPct = Math.min(Math.max(leftEndPct + 1.2, leftStartPct + 6), 84);
+              const elevatedTopPct = Math.max(topPct - 1.8, 1.5);
 
               return (
                 <div
                   key={annId}
-                  style={{ top: `${topPct}%`, left: `${leftPct}%` }}
-                  className="absolute pointer-events-auto group -translate-y-1/2 flex items-center gap-1.5 z-10 select-none cursor-pointer"
+                  style={{ top: `${elevatedTopPct}%`, left: `${leftPct}%` }}
+                  className="absolute pointer-events-auto group -translate-y-[80%] flex items-center gap-1 z-10 select-none cursor-pointer"
                   onMouseEnter={() => setActiveTooltip(annId)}
                   onMouseLeave={() => setActiveTooltip(null)}
                 >
                   {/* SVG Authentic Teacher Checkmark */}
                   <svg
                     viewBox="0 0 32 32"
-                    className="w-4 h-4 sm:w-5 sm:h-5 text-[#dc2626] filter drop-shadow-[0_1px_1px_rgba(255,255,255,0.9)] transition-transform group-hover:scale-110 shrink-0"
+                    className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#dc2626] filter drop-shadow-[0_1px_1px_rgba(255,255,255,0.9)] transition-transform group-hover:scale-110 shrink-0"
                   >
                     <path
                       d="M5 16.5 L12 23.5 L27 8.5"
@@ -274,7 +276,7 @@ export default function MarkedPaperOverlay({
 
                   {/* Mark code badge if not just ✓ (e.g. M1, A1, B1) */}
                   {ann.text && ann.text !== '✓' && (
-                    <span className="text-[11px] font-extrabold text-[#dc2626] font-mono">
+                    <span className="text-[10px] sm:text-[11px] font-extrabold text-[#dc2626] font-mono leading-none">
                       {ann.text}
                     </span>
                   )}
@@ -295,26 +297,27 @@ export default function MarkedPaperOverlay({
 
             // 5. Underline / Standalone Teacher Note with ^
             if (ann.type === 'underline' || ann.type === 'comment') {
-              const leftPct = Math.max(leftStartPct, 15);
-              const maxWPct = Math.min(Math.max(((xmax - xmin) / scaleX) * 100, 30), 65);
+              const noteText = cleanCorrectionNote(ann.teacher_correction || ann.text || ann.comment);
+              const leftPct = Math.min(Math.max(leftStartPct, 15), 45);
+              const topAdjusted = Math.min(topPct + 2.0, 95);
 
               return (
                 <div
                   key={annId}
                   style={{
-                    top: `${topPct}%`,
+                    top: `${topAdjusted}%`,
                     left: `${leftPct}%`,
-                    maxWidth: `${Math.max(maxWPct, 25)}%`
+                    maxWidth: '55%'
                   }}
-                  className="absolute pointer-events-auto group z-15"
+                  className="absolute pointer-events-auto group z-25 bg-white/95 backdrop-blur-[2px] px-2 py-0.5 rounded shadow-[0_1px_2px_rgba(0,0,0,0.1)] border border-red-200/80"
                 >
                   {ann.type === 'underline' && (
                     <div className="border-b-[1.5px] border-[#dc2626] w-full h-0.5 mb-1" />
                   )}
-                  {showComments && (ann.text || ann.comment) && (
-                    <div className="flex items-start gap-1 text-[#dc2626] font-serif italic text-xs leading-tight drop-shadow-[0_1px_1px_rgba(255,255,255,0.95)]">
+                  {showComments && noteText && (
+                    <div className="flex items-start gap-1 text-[#dc2626] font-serif italic text-[10px] sm:text-[11px] leading-tight drop-shadow-[0_1px_1px_rgba(255,255,255,0.95)]">
                       <span className="font-bold not-italic">^</span>
-                      <span>{(ann.teacher_correction || ann.text || ann.comment || '').replace(/^✍️\s*/, '')}</span>
+                      <span>{noteText}</span>
                     </div>
                   )}
                 </div>

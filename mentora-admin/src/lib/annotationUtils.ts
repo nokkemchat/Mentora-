@@ -12,6 +12,17 @@ import type {
 import type { VisualAnnotation, AssessmentResult, AssessmentSubpart } from './tutorAgent';
 export type { VisualAnnotation, AssessmentResult, AssessmentSubpart };
 
+export function cleanCorrectionNote(raw?: string): string {
+  if (!raw) return '';
+  let note = raw.replace(/^✍️\s*/, '').replace(/^✎\s*/, '').replace(/^\^\s*/, '').trim();
+  note = note.replace(/correct completion after [A-Z0-9]+ with the fraction seen removed with no errors or omissions seen/gi, '');
+  note = note.replace(/with no errors or omissions seen/gi, '');
+  note = note.replace(/\b(?:oe|nfww|cao|soi|dep)\b/gi, '');
+  note = note.replace(/^Missed\s*\[([A-Z0-9]+)\]:\s*/i, '[$1] ');
+  note = note.replace(/\s*;\s*$/, '').trim();
+  return note;
+}
+
 /**
  * Normalizes and guards bounding boxes so coordinates are always valid integers strictly
  * within page bounds (15-985), ensuring NO annotations ever spill outside the image borders.
@@ -248,63 +259,8 @@ export function ensureAssessmentAnnotations(assessment: AssessmentResult, pageIn
 
   const layoutRegions = (pageData as any)?.layout_regions || (assessment as any)?.layout_regions || [];
 
-  // Auto-detect and recalibrate vertically compressed coordinates (e.g. 0-500 scale from vision models).
-  // Vision models frequently output coordinates constrained to the top ~45-55% of the page.
-  // We exclude 'total_header' stamps since they can sit at y ~ 840 independently.
+  // Keep true visual coordinates without artificial vertical scaling distortion
   const subpartAnns = (pageAnnotationsList || []).filter((a: any) => a.type !== 'total_header');
-  const annMaxY = Math.max(0, ...subpartAnns.map((a: any) => {
-    if (Array.isArray(a.box_2d) && a.box_2d.length === 4) return Math.max(a.box_2d[0], a.box_2d[2]);
-    if (a.bbox && typeof a.bbox.y === 'number') return Math.round((a.bbox.y + (a.bbox.height || 0)) * 1000);
-    return 0;
-  }));
-  const spMaxY = Math.max(0, ...(subpartsList || []).map((s: any) => typeof s.line_y === 'number' ? s.line_y : 0));
-  const effectiveMaxY = Math.max(annMaxY, spMaxY);
-  const numSubparts = Math.max(subpartsList.length, subpartAnns.filter((a: any) => a.type === 'mark_badge').length);
-  const targetMaxY = numSubparts >= 4 ? 920 : (numSubparts === 3 ? 890 : 850);
-
-  if (numSubparts >= 2 && effectiveMaxY > 0 && effectiveMaxY <= 680 && !(pageData as any)?._y_rescaled) {
-    const scaleFactor = Math.min(2.1, targetMaxY / effectiveMaxY);
-    (pageData as any)._y_rescaled = true;
-
-    subpartsList.forEach((sp: any) => {
-      if (typeof sp.line_y === 'number' && sp.line_y > 0) {
-        sp.line_y = Math.min(940, Math.round(sp.line_y * scaleFactor));
-      }
-      if (Array.isArray(sp.marking_points)) {
-        sp.marking_points.forEach((pt: any) => {
-          if (Array.isArray(pt.box_2d) && pt.box_2d.length === 4) {
-            const h = Math.max(15, pt.box_2d[2] - pt.box_2d[0]);
-            const newY = Math.min(935, Math.round(pt.box_2d[0] * scaleFactor));
-            pt.box_2d[0] = newY;
-            pt.box_2d[2] = Math.min(960, newY + h);
-          }
-        });
-      }
-    });
-
-    if (Array.isArray(pageData?.annotations)) {
-      pageData.annotations.forEach((ann: any) => {
-        if (ann.type === 'total_header') return;
-        if (Array.isArray(ann.box_2d) && ann.box_2d.length === 4) {
-          const h = Math.max(20, ann.box_2d[2] - ann.box_2d[0]);
-          const newYmin = Math.min(930, Math.round(ann.box_2d[0] * scaleFactor));
-          ann.box_2d[0] = newYmin;
-          ann.box_2d[2] = Math.min(960, newYmin + h);
-        }
-        if (ann.bbox && typeof ann.bbox.y === 'number') {
-          ann.bbox.y = Math.min(0.93, ann.bbox.y * scaleFactor);
-        }
-      });
-    }
-
-    if (Array.isArray(layoutRegions)) {
-      layoutRegions.forEach((lr: any) => {
-        if (lr.bbox && typeof lr.bbox.y === 'number') {
-          lr.bbox.y = Math.min(0.93, lr.bbox.y * scaleFactor);
-        }
-      });
-    }
-  }
 
   let finalResult: any[] = [];
 

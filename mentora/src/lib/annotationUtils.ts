@@ -12,6 +12,17 @@ import type {
 import type { VisualAnnotation, AssessmentResult, AssessmentSubpart } from './tutorAgent';
 export type { VisualAnnotation, AssessmentResult, AssessmentSubpart };
 
+export function cleanCorrectionNote(raw?: string): string {
+  if (!raw) return '';
+  let note = raw.replace(/^✍️\s*/, '').replace(/^✎\s*/, '').replace(/^\^\s*/, '').trim();
+  note = note.replace(/correct completion after [A-Z0-9]+ with the fraction seen removed with no errors or omissions seen/gi, '');
+  note = note.replace(/with no errors or omissions seen/gi, '');
+  note = note.replace(/\b(?:oe|nfww|cao|soi|dep)\b/gi, '');
+  note = note.replace(/^Missed\s*\[([A-Z0-9]+)\]:\s*/i, '[$1] ');
+  note = note.replace(/\s*;\s*$/, '').trim();
+  return note;
+}
+
 /**
  * Normalizes and guards bounding boxes so coordinates are always valid integers strictly
  * within page bounds (15-985), ensuring NO annotations ever spill outside the image borders.

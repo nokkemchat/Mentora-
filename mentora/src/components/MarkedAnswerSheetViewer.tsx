@@ -17,7 +17,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Line, Circle, G } from 'react-native-svg';
 import { AssessmentResult, VisualAnnotation, TutorAgentTools } from '@/lib/tutorAgent';
-import { reconcileAssessment, ensureAssessmentAnnotations } from '@/lib/annotationUtils';
+import { reconcileAssessment, ensureAssessmentAnnotations, cleanCorrectionNote } from '@/lib/annotationUtils';
 
 interface MarkedAnswerSheetViewerProps {
   imageUri: string;
@@ -308,7 +308,7 @@ export function MarkedAnswerSheetViewer({
             const markCode = isStrictMarkCode ? textStr.toUpperCase() : null;
 
             return (
-              <View key={key} style={[styles.inlineTickOverlayBox, { top: Math.round(safeTop - 6), left: safeLeft }]}>
+              <View key={key} style={[styles.inlineTickOverlayBox, { top: Math.round(safeTop - 12), left: safeLeft }]}>
                 <Text style={styles.redPenInlineTick}>✓</Text>
                 {markCode && (
                   <View style={styles.markCodeBadge}>
@@ -322,13 +322,10 @@ export function MarkedAnswerSheetViewer({
           // 5. Underline / Standalone Teacher Note with caret ^
           if (rawType === 'underline' || rawType === 'comment' || rawType === 'teacher_note') {
             const w = Math.min(overlayW * 0.72, Math.max(pixelWidth || 180, 160));
-            const noteText = (ann.teacher_correction || ann.text || ann.comment || '')
-              .replace(/^✍️\s*/, '')
-              .replace(/^\^\s*/, '')
-              .trim();
+            const noteText = cleanCorrectionNote(ann.teacher_correction || ann.text || ann.comment || '');
 
             return (
-              <View key={key} style={[styles.underlineOverlayBox, { top: Math.round(safeTop), left: safeLeft, width: w }]}>
+              <View key={key} style={[styles.underlineOverlayBox, { top: Math.round(safeTop + 4), left: safeLeft, width: w }]}>
                 {rawType === 'underline' && <View style={styles.redWavyLine} />}
                 {noteText ? (
                   <View style={styles.correctionNotePill}>

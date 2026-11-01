@@ -1813,14 +1813,15 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
       * When a student's answers or repeated attempts appear in multiple places, ALWAYS ground marks and comments to the PRIMARY answer line, not to scratch or duplicate attempts.
       * Where possible, keep scratch space and unrelated working clean and unmarked.
    a) "detected_regions": Identify semantic layout regions on the student sheet:
-      - individual written answer lines (e.g. id: "answer_3b_line_1", type: "answer_line", bbox: { x: 0.21, y: 0.43, width: 0.62, height: 0.035 }, confidence: 0.95)
+      - individual written answer lines and calculation steps (e.g. id: "answer_3b_step_1", type: "answer_line", bbox: { x: 0.21, y: 0.43, width: 0.62, height: 0.035 }, confidence: 0.95)
+      - final answer lines / question conclusion lines (type: "last_line")
       - question numbers (type: "question_number")
       - diagrams (type: "diagram")
       - margins (type: "margin")
    b) "annotations": Return structured annotations anchored to a target region ID:
-      - "tick" / "inline_tick": target_id of the earned step, anchor: "right_of_target", text: "✓" or mark code (e.g. "C1", "M1", "A1").
+      - "tick" / "inline_tick": target_id of the earned step/formula, anchor: "right_of_target", placed DIRECTLY on the marking point at the end of that specific handwritten equation or keyword, text: "✓" or mark code (e.g. "B1", "M1", "A1").
       - "cross": target_id of the mistake line, anchor: "under_target" or "right_of_target", text: "✗", with teacher_correction on how to answer correctly.
-      - "mark_badge": target_id of the answer line, anchor: "right_margin", text: "✓ (score/max)" or "✗ (0/max)".
+      - "mark_badge": target_id of the subpart's LAST LINE, anchor: "right_margin", placed in the right margin HORIZONTALLY LEVEL with the last line of that question/subpart, text: "(score/max)".
       - "comment": target_id of the mistake, anchor: "right_margin" or "under_target", text: constructive examiner note.
       - "total_header": anchor: "bottom_right_stamp", text: "Total: score/max".
       Allowed annotation targets MUST be limited to detected region IDs.

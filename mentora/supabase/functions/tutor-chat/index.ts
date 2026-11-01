@@ -1018,6 +1018,17 @@ function sanitizeAndMergeSubparts(subparts: any[], annotations?: any[]): any[] {
   return cleaned;
 }
 
+function cleanCorrectionNote(raw?: string): string {
+  if (!raw) return '';
+  let note = raw.replace(/^✍️\s*/, '').replace(/^✎\s*/, '').replace(/^\^\s*/, '').trim();
+  note = note.replace(/correct completion after [A-Z0-9]+ with the fraction seen removed with no errors or omissions seen/gi, '');
+  note = note.replace(/with no errors or omissions seen/gi, '');
+  note = note.replace(/\b(?:oe|nfww|cao|soi|dep)\b/gi, '');
+  note = note.replace(/^Missed\s*\[([A-Z0-9]+)\]:\s*/i, '[$1] ');
+  note = note.replace(/\s*;\s*$/, '').trim();
+  return note;
+}
+
 // Master synthesizer: merges Pass 1 pedagogical assessment with Pass 2 visual grounding
 function applyVisualGroundingToAssessment(
   assessment: any,
@@ -1190,10 +1201,9 @@ function applyVisualGroundingToAssessment(
       let tickY: number;
       let tickX: number;
       if (ptBox) {
-        // Positioned directly at the marking point (end of handwritten formula or expression)
-        const lineY = Math.round((ptBox[0] + ptBox[2]) / 2);
-        tickY = Math.max(Math.min(lineY, 940), 30);
-        tickX = Math.min(Math.max(ptBox[3] + 6, 120), 780);
+        // Elevate to superscript level so the tick mark hovers above the formula/digit rather than cutting through it:
+        tickY = Math.max(ptBox[0] - 8, 25);
+        tickX = Math.min(Math.max(ptBox[3] + 8, 140), 800);
       } else {
         // If ptBox was not resolved, anchor relative to student's handwriting box
         const hwBox = matchedGrounding?.handwriting_box;
@@ -1203,11 +1213,11 @@ function applyVisualGroundingToAssessment(
           const hwBottom = Math.min(hwBox[2], 940);
           const span = hwBottom - hwTop;
           const stepFrac = (ptIdx + 1) / (earnedPoints.length + 1);
-          tickY = Math.round(hwTop + span * stepFrac);
-          tickX = Math.min(Math.max(hwBox[3] + 6, 150), 760);
+          tickY = Math.max(Math.round(hwTop + span * stepFrac) - 10, 25);
+          tickX = Math.min(Math.max(hwBox[3] + 8, 150), 780);
         } else {
-          tickY = yMid;
-          tickX = Math.min(Math.max(260 + ptIdx * 80, 180), 760);
+          tickY = Math.max(yMid - 10, 25);
+          tickX = Math.min(Math.max(260 + ptIdx * 80, 180), 780);
         }
       }
 
@@ -1232,7 +1242,7 @@ function applyVisualGroundingToAssessment(
       const hwRight = (Array.isArray(hwBox) && hwBox.length === 4 && hwBox[3] > 100) ? hwBox[3] : 580;
       for (let k = 0; k < remaining; k++) {
         const tickIdx = placedTicks + k;
-        const tickY = yMid;
+        const tickY = Math.max(yMid - 10, 25);
         const tickX = Math.min(Math.max(hwRight + 8 + k * 45, 180), 780);
         synthesized.push({
           type: 'inline_tick',
@@ -1245,19 +1255,38 @@ function applyVisualGroundingToAssessment(
       }
     }
 
-    // 4. Teacher correction note: positioned safely in blank space, NEVER overlapping the next subpart
+    // 4. Teacher correction note: positioned safely in blank space, NEVER overlapping student handwriting or next subpart
     if (sp.score < sp.max_score) {
-      const note = (sp.teacher_correction_note || sp.constructive_correction || sp.teacher_correction || sp.deductions?.[0] || sp.feedback || '').replace(/^✎\s*/, '').replace(/^\^\s*/, '').trim();
+      const rawNote = (sp.teacher_correction_note || sp.constructive_correction || sp.teacher_correction || sp.deductions?.[0] || sp.feedback || '').replace(/^✎\s*/, '').replace(/^\^\s*/, '').trim();
+      const note = cleanCorrectionNote(rawNote);
       if (note) {
+        sp.teacher_correction_note = note;
         let corrBox: [number, number, number, number];
+        const hwBox = matchedGrounding?.handwriting_box;
+        const hasHwBox = Array.isArray(hwBox) && hwBox.length === 4 && hwBox[2] > hwBox[0];
+        const nextSubpartDefaultY = idx + 1 < totalParts ? Math.round(70 + (idx + 1) * (800 / Math.max(1, totalParts - 1))) : 940;
+
         if (matchedGrounding && Array.isArray(matchedGrounding.correction_box) && matchedGrounding.correction_box.length === 4 && matchedGrounding.correction_box[0] > 0) {
           corrBox = matchedGrounding.correction_box;
+        } else if (hasHwBox) {
+          // Anchor safely below the student's work if space permits, or to the right margin
+          const hwBottom = hwBox[2];
+          const hwRight = hwBox[3];
+          if (nextSubpartDefaultY - hwBottom >= 40) {
+            const corrY = Math.min(hwBottom + 8, nextSubpartDefaultY - 24);
+            const corrX = Math.max(140, Math.min(hwBox[1] || 150, 400));
+            corrBox = [corrY, corrX, Math.min(corrY + 26, 940), Math.min(corrX + 360, 840)];
+          } else {
+            // Place in the right blank column
+            const corrY = Math.max(hwBox[0], 40);
+            const corrX = Math.min(Math.max((hwRight || 550) + 14, 460), 640);
+            corrBox = [corrY, corrX, Math.min(corrY + 26, 940), Math.min(corrX + 340, 880)];
+          }
         } else {
-          const nextSubpartDefaultY = idx + 1 < totalParts ? Math.round(70 + (idx + 1) * (800 / Math.max(1, totalParts - 1))) : 940;
           const availableGap = nextSubpartDefaultY - yMid;
-          const corrY = availableGap >= 45 ? Math.min(yMid + 20, nextSubpartDefaultY - 20) : Math.max(yMid - 20, 45);
+          const corrY = availableGap >= 45 ? Math.min(yMid + 18, nextSubpartDefaultY - 20) : Math.max(yMid - 20, 45);
           const corrX = availableGap >= 45 ? 160 : 120;
-          corrBox = [corrY, corrX, Math.min(corrY + 28, 940), Math.min(corrX + 340, 840)];
+          corrBox = [corrY, corrX, Math.min(corrY + 26, 940), Math.min(corrX + 340, 840)];
         }
 
         synthesized.push({

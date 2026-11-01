@@ -3,6 +3,7 @@
 // drawn on top (same rendering rules as MarkedPaperOverlay), assembled with jsPDF.
 
 import { jsPDF } from 'jspdf';
+import { cleanCorrectionNote } from './annotationUtils';
 
 export interface PdfAnnotation {
   type?: string;
@@ -150,12 +151,19 @@ function drawAnnotations(
           !!a.subpart_label &&
           a.subpart_label === ann.subpart_label
       );
-      const note = !hasDedicatedComment
-        ? (ann.teacher_correction || ann.comment || '')
-            .replace(/^✍️\s*/, '')
-            .replace(/^\^\s*/, '')
-            .trim()
-        : '';
+function cleanCorrectionNote(raw?: string): string {
+  if (!raw) return '';
+  let note = raw.replace(/^✍️\s*/, '').replace(/^\^\s*/, '').trim();
+  note = note.replace(/correct completion after [A-Z0-9]+ with the fraction seen removed with no errors or omissions seen/gi, '');
+  note = note.replace(/with no errors or omissions seen/gi, '');
+  note = note.replace(/\b(?:oe|nfww|cao|soi|dep)\b/gi, '');
+  note = note.replace(/^Missed\s*\[([A-Z0-9]+)\]:\s*/i, '[$1] ');
+  note = note.replace(/\s*;\s*$/, '').trim();
+  return note;
+}
+
+      const rawNote = !hasDedicatedComment ? (ann.teacher_correction || ann.comment || '') : '';
+      const note = cleanCorrectionNote(rawNote);
       if (note) {
         ctx.font = `italic ${Math.round(fontSize * 0.85)}px Georgia, serif`;
         ctx.textAlign = 'left';
@@ -164,29 +172,30 @@ function drawAnnotations(
       return;
     }
 
-    // 4. Inline tick ✓ after the student's working, with mark code badge
+    // 4. Inline tick ✓ after the student's working, with mark code badge (elevated superscript)
     if (ann.type === 'tick' || ann.type === 'inline_tick') {
       const x = clamp(leftEnd + W * 0.012, 0, W * 0.82);
-      const s = fontSize * 0.55;
-      ctx.lineWidth = Math.max(3, fontSize * 0.16);
+      const s = fontSize * 0.52;
+      const tickY = y - s * 0.45; // Superscript elevation to avoid colliding with numbers/formulas
+      ctx.lineWidth = Math.max(2.5, fontSize * 0.15);
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       ctx.beginPath();
-      ctx.moveTo(x - s, y);
-      ctx.lineTo(x - s * 0.1, y + s * 0.55);
-      ctx.lineTo(x + s, y - s * 0.6);
+      ctx.moveTo(x - s, tickY);
+      ctx.lineTo(x - s * 0.1, tickY + s * 0.55);
+      ctx.lineTo(x + s, tickY - s * 0.6);
       ctx.stroke();
       if (ann.text && ann.text !== '✓') {
         ctx.font = `bold ${Math.round(fontSize * 0.8)}px monospace`;
         ctx.textAlign = 'left';
-        haloText(ann.text, x + s * 1.25, y);
+        haloText(ann.text, x + s * 1.25, tickY);
       }
       return;
     }
 
     // 5. Standalone comment / underline notes
     if (ann.type === 'comment' || ann.type === 'underline') {
-      const note = (ann.teacher_correction || ann.comment || '').replace(/^✍️\s*/, '').trim();
+      const note = cleanCorrectionNote(ann.teacher_correction || ann.comment || ann.text);
       if (note) {
         ctx.font = `italic ${Math.round(fontSize * 0.85)}px Georgia, serif`;
         ctx.textAlign = 'left';
