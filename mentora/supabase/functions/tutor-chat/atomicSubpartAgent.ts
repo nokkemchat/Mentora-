@@ -113,10 +113,26 @@ export function extractQuestionSubparts(
     }
   }
 
-  // 2. Incorporate database question_parts if available
+  // 2. Incorporate database question_parts if available with parent/container awareness
   if (Array.isArray(dbQuestionParts) && dbQuestionParts.length > 0) {
+    const byId = new Map<string, any>();
+    const parentIds = new Set<string>();
+    dbQuestionParts.forEach((p: any) => {
+      if (p.id) byId.set(p.id, p);
+      if (p.parent_part_id) parentIds.add(p.parent_part_id);
+    });
+
     for (const p of dbQuestionParts) {
-      const canon = canonicalLabel(p.part_label);
+      // If this part is a parent container for other subparts, skip it!
+      if (p.id && parentIds.has(p.id)) continue;
+
+      let fullLabel = p.part_label || "";
+      if (p.parent_part_id && byId.has(p.parent_part_id)) {
+        const parent = byId.get(p.parent_part_id);
+        fullLabel = `${parent.part_label}.${p.part_label}`;
+      }
+
+      const canon = canonicalLabel(fullLabel);
       if (!canon) continue;
 
       const pMarks = Number(p.marks);
@@ -132,6 +148,27 @@ export function extractQuestionSubparts(
           canonical_label: canon,
           marks: !isNaN(pMarks) && pMarks > 0 ? pMarks : 1
         });
+      }
+    }
+  }
+
+  // 3. Hierarchical container pruning:
+  // If "a.i" exists, "a" is a container and must NOT be marked separately!
+  const allKeys = Array.from(subpartsMap.keys());
+  for (const k of allKeys) {
+    const isPrefixOfOther = allKeys.some(other => other !== k && other.startsWith(k + "."));
+    if (isPrefixOfOther) {
+      subpartsMap.delete(k);
+    }
+  }
+
+  // 4. Detached child merging:
+  // If "i" exists without parent prefix, but "a.i" exists, merge/delete "i"
+  for (const k of Array.from(subpartsMap.keys())) {
+    if (!k.includes(".")) {
+      const parentWithChild = Array.from(subpartsMap.keys()).find(other => other.endsWith("." + k));
+      if (parentWithChild) {
+        subpartsMap.delete(k);
       }
     }
   }
@@ -349,6 +386,7 @@ OUTPUT STRICTLY VALID JSON:
     { type: "image_url", image_url: { url: pageImageUrl, detail: "high" } }
   ];
 
+  let evalError = "";
   try {
     const res = await callChatCompletion(
       [
@@ -447,9 +485,28 @@ OUTPUT STRICTLY VALID JSON:
         rubric_engine: hasStructuredCriteria,
         verdicts: parsed.verdicts
       };
+    } else {
+      evalError = res?.error || (res ? JSON.stringify(res).substring(0, 200) : "No response from callChatCompletion");
+      console.warn(`[AtomicEvaluation] Failed for Q${questionNumber}${partLabel}: ${evalError}`);
     }
-  } catch (err) {
+  } catch (err: any) {
     console.warn(`Atomic evaluation failed for Q${questionNumber}${partLabel}:`, err);
+    return {
+      question_number: questionNumber,
+      part_label: partLabel,
+      canonical_label: canonLabel,
+      score: 0,
+      max_score: marksAvailable,
+      line_y: defaultAnswerLineY || 500,
+      page_index: canonicalPageIndex,
+      student_answer_detected: "",
+      marks_awarded: [],
+      deductions: [`Subpart evaluation error: ${err?.message || err}`],
+      teacher_correction_note: `Part ${partLabel}: 0/${marksAvailable} marks`,
+      marking_points: [],
+      focused_agent: true,
+      rubric_engine: false
+    };
   }
 
   // Graceful fallback if call failed
@@ -463,7 +520,7 @@ OUTPUT STRICTLY VALID JSON:
     page_index: canonicalPageIndex,
     student_answer_detected: "",
     marks_awarded: [],
-    deductions: [`Subpart evaluation incomplete`],
+    deductions: [`Subpart evaluation incomplete: ${evalError || 'unknown'}`],
     teacher_correction_note: `Part ${partLabel}: 0/${marksAvailable} marks`,
     marking_points: [],
     focused_agent: true,
@@ -487,8 +544,24 @@ export async function runWithConcurrencyLimit<T, R>(
       const idx = currentIndex++;
       try {
         results[idx] = await taskFn(items[idx], idx);
-      } catch (err) {
+      } catch (err: any) {
         console.error(`Worker error at index ${idx}:`, err);
+        results[idx] = {
+          question_number: (items[idx] as any)?.qNum || "unknown",
+          part_label: (items[idx] as any)?.input?.partLabel || "unknown",
+          canonical_label: (items[idx] as any)?.input?.canonicalLabel || "unknown",
+          score: 0,
+          max_score: (items[idx] as any)?.input?.marksAvailable || 1,
+          line_y: 500,
+          page_index: (items[idx] as any)?.input?.canonicalPageIndex || 0,
+          student_answer_detected: "",
+          marks_awarded: [],
+          deductions: [`Fatal worker error: ${err?.message || err}`],
+          teacher_correction_note: `Worker crash: ${err?.message || err}`,
+          marking_points: [],
+          focused_agent: true,
+          rubric_engine: false
+        } as any;
       }
     }
   }
@@ -581,12 +654,12 @@ export async function evaluateBookletAtomically(
     });
   });
 
-  console.log(`[AtomicBookletEvaluator] Dispatched ${tasks.length} atomic subquestions across ${canonicalImages.length} canonical pages (concurrency 6)...`);
+  console.log(`[AtomicBookletEvaluator] Dispatched ${tasks.length} atomic subquestions across ${canonicalImages.length} canonical pages (concurrency 10)...`);
   const t0 = Date.now();
 
   const evaluatedSubparts = await runWithConcurrencyLimit(
     tasks,
-    6,
+    10,
     async (t) => evaluateSubpartAtomically(t.input, callChatCompletion)
   );
 
@@ -723,48 +796,20 @@ export function synthesizeBookletAnnotations(
       });
 
       // 2. Inline ticks for earned marking points
-      const earned = (sp.marking_points || []).filter(pt => pt.is_earned);
-      let placedTicks = 0;
-
-      earned.forEach((pt, ptIdx) => {
-        let tickY = Math.max(yMid - 10, 25);
-        let tickX = Math.min(Math.max(260 + ptIdx * 80, 180), 780);
-
-        if (Array.isArray(pt.box_2d) && pt.box_2d.length === 4 && (pt.box_2d[0] > 0 || pt.box_2d[2] > 0)) {
-          tickY = Math.max(pt.box_2d[0] - 8, 25);
-          tickX = Math.min(Math.max(pt.box_2d[3] + 8, 140), 800);
-        }
-
-        const isStrictMarkCode = typeof pt.mark_code === 'string' && /^[A-Z]\d{1,2}$/i.test(pt.mark_code.trim()) && pt.mark_code.trim().length <= 4;
-        const markText = isStrictMarkCode ? pt.mark_code.trim().toUpperCase() : '✓';
-
+      // Exactly sp.score neat ticks placed neatly to the right, preceding the margin badge
+      const earnedCount = Math.min(Math.max(0, sp.score), sp.max_score);
+      for (let k = 0; k < earnedCount; k++) {
+        const tickY = Math.max(yMid - 10, 25);
+        // Position ticks to the right preceding the margin badge
+        const tickX = Math.min(740 + k * 35, 835);
         annotations.push({
           type: 'inline_tick',
-          text: markText,
-          comment: pt.criterion || pt.student_phrase || `Part ${sp.part_label} mark earned`,
-          box_2d: [Math.max(tickY - 14, 25), tickX, Math.min(tickY + 14, 940), Math.min(tickX + 35, 820)],
+          text: '✓',
+          comment: sp.marks_awarded?.[k] || `Part ${sp.part_label} mark ${k + 1} earned`,
+          box_2d: [Math.max(tickY - 14, 25), tickX, Math.min(tickY + 14, 940), Math.min(tickX + 28, 855)],
           subpart_label: sp.part_label,
           page_index: pIdx
         });
-        placedTicks++;
-      });
-
-      // If earned score > placedTicks, synthesize ticks beside the answer line
-      if (placedTicks < sp.score) {
-        const remaining = Math.min(sp.score - placedTicks, 5);
-        for (let k = 0; k < remaining; k++) {
-          const tickIdx = placedTicks + k;
-          const tickY = Math.max(yMid - 10, 25);
-          const tickX = Math.min(580 + k * 45, 780);
-          annotations.push({
-            type: 'inline_tick',
-            text: '✓',
-            comment: sp.marks_awarded?.[tickIdx] || `Part ${sp.part_label} mark ${tickIdx + 1} earned`,
-            box_2d: [Math.max(tickY - 14, 25), tickX, Math.min(tickY + 14, 940), Math.min(tickX + 35, 820)],
-            subpart_label: sp.part_label,
-            page_index: pIdx
-          });
-        }
       }
 
       // 3. Teacher correction note if marks were lost

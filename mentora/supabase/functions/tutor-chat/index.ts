@@ -70,23 +70,10 @@ function buildSunburstEditPrompt(
 
   // Helper to ensure question score is mathematically consistent with the subparts on this page
   const getReconciledQScore = (qs: any) => {
-    const qNum = String(qs.question_number || '1');
-    let score = Number(qs.score) || 0;
-    const maxScore = Number(qs.max_score) || 1;
-    if (partsToMark.length > 0) {
-      const partsForQ = partsToMark.filter((sp: any) => {
-        const spClean = String(sp.part_label || '').toLowerCase();
-        const prefixMatch = spClean.match(/^(?:question|q)?\s*(\d+)/i);
-        return !prefixMatch || prefixMatch[1] === qNum;
-      });
-      if (partsForQ.length > 0) {
-        const pageEarned = partsForQ.reduce((sum: number, sp: any) => sum + (Number(sp.score) || 0), 0);
-        if (pageEarned > score) {
-          score = pageEarned;
-        }
-      }
-    }
-    return { score, maxScore };
+    return {
+      score: Number(qs.score) || 0,
+      maxScore: Number(qs.max_score) || 1
+    };
   };
 
   // Build the prominent teacher stamps for this page:
@@ -103,9 +90,7 @@ function buildSunburstEditPrompt(
     });
   } else if (!isMultiPage || questionSummaries.length === 0) {
     const qNum = assessment.identified_question_number || '1';
-    const computedSum = partsToMark.reduce((sum: number, sp: any) => sum + (Number(sp.score) || 0), 0);
-    const scoreToUse = Math.max(totalScore, computedSum);
-    questionStamps.push(`Question ${qNum} Total: ${scoreToUse}/${totalMax}`);
+    questionStamps.push(`Question ${qNum} Total: ${totalScore}/${totalMax}`);
   }
 
   const continuationStamps: string[] = [];
@@ -136,24 +121,9 @@ function buildSunburstEditPrompt(
 
     let section = `${idx + 1}. Part ${label} [${loc}]${detected}:\n`;
 
-    // 1. INLINE POINT-BY-POINT TICKS (Put a tick at EACH and EVERY valid point)
-    if (markingPoints.length > 0) {
-      section += `   - IN-SITU POINT-BY-POINT TICKS (CRITICAL: DO NOT JUST PUT TICKS AT FAR MARGIN END!):\n`;
-      let earnedCount = 0;
-      markingPoints.forEach((pt: any, ptIdx: number) => {
-        if (pt.is_earned || pt.tick_or_cross === 'tick') {
-          earnedCount++;
-          const phrase = pt.student_phrase ? ` over/beside "${pt.student_phrase}"` : '';
-          const pos = pt.inline_location ? ` at ${pt.inline_location}` : '';
-          section += `     * Point ${earnedCount} (${pt.mark_code || 'Point'}: ${pt.criterion || 'Earned mark'}): Draw a neat, small red ballpoint pen tick "✓"${phrase}${pos}.\n`;
-        }
-      });
-      if (earnedCount === 0 && score > 0) {
-        section += `     * Draw ${score} small red ballpoint ticks "✓" directly beside the correct key phrases/values in the student's text.\n`;
-      }
-    } else if (score > 0) {
-      section += `   - IN-SITU POINT-BY-POINT TICKS (CRITICAL: DO NOT JUST PUT TICKS AT FAR MARGIN END!):\n`;
-      section += `     * Place a small, distinct red ballpoint pen tick "✓" directly above or beside EACH correct keyword, formula, step, numerical value, or unit in the student's handwritten response (award ${score} separate ticks for ${score} earned marks).\n`;
+    // 1. INLINE POINT-BY-POINT TICKS (Clean red tick symbol only, no text letters across equations)
+    if (score > 0) {
+      section += `   - IN-SITU TICKS: Draw exactly ${score} small, neat red ballpoint pen checkmark(s) "✓" (draw ONLY the symbol "✓", DO NOT write code letters like M1, A1, B1 across equations) neatly to the right of the student's correct working or beside the answer line.\n`;
     }
 
     // 2. CONSTRUCTIVE CORRECTIONS FOR MISSED POINTS (HOW IT SHOULD HAVE BEEN DONE)
@@ -1961,6 +1931,27 @@ ${ms}
           ? payload.answer_files.map((f: any) => f.base64 || f.uri).filter(Boolean)
           : (image_url ? [image_url] : []));
 
+      const originalRemoteUrls = [...rawImages];
+      // Pre-fetch remote images to in-memory base64 data URIs so local/firewalled gateways (like Caimex) can inspect them directly
+      rawImages = await Promise.all(
+        rawImages.map(async (img) => {
+          if (typeof img === 'string' && (img.startsWith("http://") || img.startsWith("https://"))) {
+            try {
+              const resp = await fetch(img);
+              if (resp.ok) {
+                const mime = resp.headers.get("content-type") || "image/jpeg";
+                const buf = await resp.arrayBuffer();
+                const b64 = uint8ArrayToBase64(new Uint8Array(buf));
+                return `data:${mime};base64,${b64}`;
+              }
+            } catch (err) {
+              console.warn("Failed to fetch remote image for dataUri conversion:", err);
+            }
+          }
+          return img;
+        })
+      );
+
       const requestedModel = model_override || "gpt-4o";
       const pass1Candidates = [requestedModel, "gpt-4o-mini", "gpt-4o"];
       const pass2Candidates = [requestedModel, "gpt-4o", "gpt-4o-mini"];
@@ -2056,6 +2047,8 @@ ${ms}
 
           // Build per-page evaluations matching client schema
           const pages: any[] = canonicalImages.map((imgUrl, pIdx) => {
+            const rawIdx = layout.canonical_order?.[pIdx] ?? pIdx;
+            const remoteUrl = originalRemoteUrls[rawIdx] || imgUrl;
             const pageSubparts = evalResult.allSubparts.filter((sp: any) => sp.page_index === pIdx);
             const pageScore = pageSubparts.reduce((sum: number, sp: any) => sum + (Number(sp.score) || 0), 0);
             const pageMax = pageSubparts.reduce((sum: number, sp: any) => sum + (Number(sp.max_score) || 0), 0) || 5;
@@ -2067,7 +2060,7 @@ ${ms}
 
             return {
               page_index: pIdx,
-              original_image_url: imgUrl,
+              original_image_url: remoteUrl,
               page_score: pageScore,
               page_max_score: pageMax,
               questions_present: questionsPresent.length > 0 ? questionsPresent : [`${pIdx + 1}`],

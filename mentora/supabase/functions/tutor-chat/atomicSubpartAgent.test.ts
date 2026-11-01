@@ -51,8 +51,45 @@ assert(partA1?.marks === 1, `Part 4(a)(i) has 1 mark (got ${partA1?.marks})`);
 const partA2 = subparts.find(s => s.canonical_label === 'a.ii');
 assert(partA2?.marks === 4, `Part 4(a)(ii) has 4 marks (got ${partA2?.marks})`);
 
+console.log('\n[2] Question 8 hierarchical deduplication verification:');
+const Q8_SCHEME = `
+(8(a)(i)) [M1] Correct expansion of a pair of brackets
+(8(a)(i)) [A1] leading to and stating y = x³ - 5x² + 2x + 8
+(8(a)(ii)) [B1] for positive cubic
+(8(a)(ii)) [B2] for three intercepts
+(8(a)(ii)) [B1] for single intercept on y-axis
+(8(b)) [B2] for derivative = 3x² - 10x + 2
+(8(b)) [M1] dep on B1 for derivative = 10
+(8(b)) [B1] for x = 4 and x = -2/3
+(8(b)) [B1] for (4, 0) and (-2/3, 112/27)
+(8(b)) [B2] for y = 10x - 40 and y = 10x + 292/27
+`;
+
+const Q8_DB_PARTS = [
+  { id: "p-b", parent_part_id: null, part_label: "b", marks: 7 },
+  { id: "p-a", parent_part_id: null, part_label: "a", marks: 2 },
+  { id: "p-i", parent_part_id: "p-a", part_label: "i", marks: 2 },
+  { id: "p-ii", parent_part_id: "p-a", part_label: "ii", marks: 4 }
+];
+
+const q8Subparts = extractQuestionSubparts("8", 13, Q8_SCHEME, Q8_DB_PARTS);
+assert(q8Subparts.length === 3, `Q8 has exactly 3 leaf subparts (got ${q8Subparts.length})`);
+assert(q8Subparts.map(s => s.canonical_label).join(',') === 'a.i,a.ii,b', `Q8 canonical labels are a.i, a.ii, b (got ${q8Subparts.map(s => s.canonical_label).join(',')})`);
+
+const q8_a1 = q8Subparts.find(s => s.canonical_label === 'a.i');
+assert(q8_a1?.marks === 2, `Q8(a)(i) has 2 marks (got ${q8_a1?.marks})`);
+
+const q8_a2 = q8Subparts.find(s => s.canonical_label === 'a.ii');
+assert(q8_a2?.marks === 4, `Q8(a)(ii) has 4 marks (got ${q8_a2?.marks})`);
+
+const q8_b = q8Subparts.find(s => s.canonical_label === 'b');
+assert(q8_b?.marks === 7, `Q8(b) has 7 marks (got ${q8_b?.marks})`);
+
+const totalQ8Marks = q8Subparts.reduce((sum, s) => sum + s.marks, 0);
+assert(totalQ8Marks === 13, `Q8 sum of subpart marks is 13 (got ${totalQ8Marks})`);
+
 async function main() {
-  console.log('\n[2] Concurrency limiter verification:');
+  console.log('\n[3] Concurrency limiter verification:');
   let peakActive = 0;
   let currentActive = 0;
   const tasks = Array.from({ length: 15 }, (_, i) => i);
