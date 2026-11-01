@@ -930,6 +930,75 @@ Return only JSON.`;
   return null;
 }
 
+// Detects whether a subpart label is a hallucinated math fragment (like "(5)", "5", "5x", "2x")
+// rather than a valid British / Cambridge / ZIMSEC exam subpart identifier.
+function isLikelyHallucinatedSubpart(label?: string): boolean {
+  if (!label) return false;
+  const clean = String(label).trim().replace(/[()[\]\s]/g, '').toLowerCase();
+  if (/^\d{1,2}$/.test(clean)) return true;
+  if (/^\d+[a-z]?[\-+*/=]/i.test(clean)) return true;
+  return false;
+}
+
+function sanitizeAndMergeSubparts(subparts: any[], annotations?: any[]): any[] {
+  if (!Array.isArray(subparts) || subparts.length === 0) return subparts || [];
+
+  const cleaned: any[] = [];
+  const removedLabels: string[] = [];
+
+  subparts.forEach((sp) => {
+    if (isLikelyHallucinatedSubpart(sp.part_label) && cleaned.length > 0) {
+      const prev = cleaned[cleaned.length - 1];
+      removedLabels.push(sp.part_label);
+      // Merge score and max score into parent subpart
+      prev.score = (Number(prev.score) || 0) + (Number(sp.score) || 0);
+      prev.max_score = Math.max(Number(prev.max_score) || 0, prev.score, (Number(prev.max_score) || 0) + (Number(sp.max_score) || 0));
+      prev.marks_awarded = [...(prev.marks_awarded || []), ...(sp.marks_awarded || [])];
+      prev.marking_points = [...(prev.marking_points || []), ...(sp.marking_points || [])];
+      // Update answer line to the lower/final answer line of the working
+      if (typeof sp.line_y === 'number' && sp.line_y > (prev.line_y || 0)) {
+        prev.line_y = sp.line_y;
+      }
+      if (sp.student_answer_detected) {
+        prev.student_answer_detected = sp.student_answer_detected;
+      }
+    } else {
+      cleaned.push(sp);
+    }
+  });
+
+  // Also clean up annotations if present
+  if (Array.isArray(annotations) && removedLabels.length > 0) {
+    const parentLabel = cleaned[cleaned.length - 1]?.part_label;
+    for (let i = annotations.length - 1; i >= 0; i--) {
+      const ann = annotations[i];
+      if (removedLabels.includes(ann.subpart_label)) {
+        if (ann.type === 'mark_badge' || (ann.text || '').includes('/')) {
+          // Remove duplicate/hallucinated badge
+          annotations.splice(i, 1);
+        } else {
+          // Relabel inline ticks / comments to the parent subpart
+          ann.subpart_label = parentLabel;
+        }
+      }
+    }
+    // Update parent subpart badge text & position
+    const parentBadge = annotations.find(
+      (a: any) => (a.type === 'mark_badge' || (a.text || '').includes('/')) && a.subpart_label === parentLabel
+    );
+    const parentSp = cleaned[cleaned.length - 1];
+    if (parentBadge && parentSp) {
+      parentBadge.text = `(${parentSp.score}/${parentSp.max_score})`;
+      if (typeof parentSp.line_y === 'number' && parentBadge.box_2d) {
+        parentBadge.box_2d[0] = Math.max(35, parentSp.line_y - 15);
+        parentBadge.box_2d[2] = parentSp.line_y + 15;
+      }
+    }
+  }
+
+  return cleaned;
+}
+
 // Master synthesizer: merges Pass 1 pedagogical assessment with Pass 2 visual grounding
 function applyVisualGroundingToAssessment(
   assessment: any,
@@ -939,6 +1008,10 @@ function applyVisualGroundingToAssessment(
 ): void {
   const pIdx = typeof targetPageIndex === 'number' ? targetPageIndex : 0;
   if (!assessment) return;
+
+  if (Array.isArray(assessment.subparts)) {
+    assessment.subparts = sanitizeAndMergeSubparts(assessment.subparts, assessment.annotations);
+  }
 
   if (grounding) {
     assessment.layout_regions = formatLayoutRegions(grounding);
@@ -1359,9 +1432,10 @@ PROFESSIONAL EXAMINER & PEDAGOGICAL TEACHER PROTOCOL:
      * "student_phrase": the EXACT word, phrase, equation, or number from the student's handwritten response that earned this mark (e.g. 'distillation', 'Q = mcΔT', '2.5 A'). If not earned, leave empty "".
      * "flawed_phrase": if missed due to an incorrect response, the specific flawed word or value written by the student (e.g. 'conduction', 'inverted', 'real'). If omitted entirely, leave empty "".
    - NOTE: You do not need to guess pixel coordinates; the Visual Grounding Agent will localize them in Pass 2 using these target phrases!
-2. CONSTRUCTIVE CORRECTIONS FOR MISSED POINTS:
-   - If a student makes an error, write a concise correction note (MAXIMUM 10-12 words, e.g. 'Max current = 7.5/30 = 0.25 A as 30 Ω resistor remains in circuit'). Keep it very short so it fits on one line and never overlaps student writing!
-   - If full marks: teacher_correction_note: "", constructive_correction: "", mistake_details: "".
+2. CONSTRUCTIVE CORRECTIONS & DEDUCTION TRANSPARENCY (CRITICAL):
+   - NO SILENT DEDUCTIONS: If score < max_score, you MUST explicitly state each lost point and reason in "deductions" (e.g. ["Missed [A1]: Final answer was 48.7 instead of 48.69", "Missed [B1]: Incomplete reason for cyclic quadrilateral"]). NEVER deduct marks silently without specifying the exact lost mark in "deductions"!
+   - If full marks (score == max_score): teacher_correction_note: "", constructive_correction: "", mistake_details: "", deductions: [].
+   - If a student makes an error, write a concise correction note (MAXIMUM 10-12 words). Keep it very short so it fits on one line and never overlaps student writing!
 
 REQUIRED JSON OUTPUT SCHEMA:
 {
@@ -2585,6 +2659,21 @@ YOUR TASK:
                         };
                       });
 
+                      const unearnedCriteria = validatedVerdicts
+                        .filter((v: any) => !v.satisfied && !waivedSet.has(v.criterionIndex))
+                        .map((v: any) => {
+                          const c = criterionByIndex.get(v.criterionIndex) as any;
+                          return c?.text ? `Missed [${c.code || 'Mark'}]: ${c.text}` : '';
+                        }).filter(Boolean);
+
+                      const resolvedDeductions = isFullMarks
+                        ? []
+                        : (Array.isArray(sp.deductions) && sp.deductions.length > 0
+                            ? sp.deductions
+                            : (unearnedCriteria.length > 0
+                                ? unearnedCriteria
+                                : [`Lost ${subMax - subScore} mark(s) on incomplete criteria or working.`]));
+
                       console.log(`Q${qNum}(${label}): Subagent 2 score ${subScore}/${subMax} replaces cluster ${clusterScore}/${clusterMax}.`);
                       return {
                         ...sp,
@@ -2593,8 +2682,8 @@ YOUR TASK:
                         student_answer_detected: sp.student_answer_detected,
                         marking_points: engineMarkingPoints,
                         teacher_correction_note: isFullMarks ? '' : sp.teacher_correction_note,
-                        deductions: isFullMarks ? [] : sp.deductions,
-                        mistake_details: isFullMarks ? '' : sp.mistake_details,
+                        deductions: resolvedDeductions,
+                        mistake_details: isFullMarks ? '' : (sp.mistake_details || (unearnedCriteria.length > 0 ? unearnedCriteria.join('; ') : '')),
                         misconception_analysis: isFullMarks ? '' : sp.misconception_analysis,
                         constructive_correction: isFullMarks ? '' : sp.constructive_correction,
                         marks_awarded: validatedVerdicts.filter((v: any) => v.satisfied).map((v: any) => {

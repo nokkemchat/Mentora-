@@ -2927,21 +2927,35 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                                       )}
 
                                       {/* Deductions & Mistakes Explanation */}
-                                      {Array.isArray(sp.deductions) && sp.deductions.length > 0 && (
-                                        <div className="space-y-1">
-                                          <span className="text-[10px] font-bold uppercase tracking-wider text-error flex items-center gap-1">
-                                            <X className="w-3 h-3 text-error" />
-                                            <span>Lost Marks / Reason for Deduction:</span>
-                                          </span>
-                                          <div className="space-y-1 pl-1">
-                                            {sp.deductions.map((d: string, di: number) => (
-                                              <p key={di} className="text-error/90 leading-relaxed text-[11px]">
-                                                {d}
-                                              </p>
-                                            ))}
+                                      {(() => {
+                                        const isLoss = typeof sp.score === 'number' && typeof sp.max_score === 'number' && sp.score < sp.max_score;
+                                        const deductionsList: string[] = (Array.isArray(sp.deductions) && sp.deductions.length > 0)
+                                          ? sp.deductions
+                                          : (Array.isArray(sp.marking_points)
+                                              ? sp.marking_points
+                                                  .filter((mp: any) => !mp.is_earned && !mp.is_alternative)
+                                                  .map((mp: any) => `Missed [${mp.mark_code || 'Mark'}]: ${mp.criterion}`)
+                                              : []);
+                                        if (!isLoss && deductionsList.length === 0) return null;
+                                        const items = deductionsList.length > 0
+                                          ? deductionsList
+                                          : [`Lost ${sp.max_score - sp.score} mark(s) on incomplete criteria or working.`];
+                                        return (
+                                          <div className="space-y-1">
+                                            <span className="text-[10px] font-bold uppercase tracking-wider text-error flex items-center gap-1">
+                                              <X className="w-3 h-3 text-error" />
+                                              <span>Lost Marks / Reason for Deduction:</span>
+                                            </span>
+                                            <div className="space-y-1 pl-1">
+                                              {items.map((d: string, di: number) => (
+                                                <p key={di} className="text-error/90 leading-relaxed text-[11px]">
+                                                  {d}
+                                                </p>
+                                              ))}
+                                            </div>
                                           </div>
-                                        </div>
-                                      )}
+                                        );
+                                      })()}
 
                                       {/* Teacher Constructive Correction Note */}
                                       {sp.teacher_correction_note && (
@@ -3079,19 +3093,33 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                                   )}
 
                                   {/* Deductions / Mistakes */}
-                                  {Array.isArray(sp.deductions) && sp.deductions.length > 0 && (
-                                    <div className="space-y-1">
-                                      <span className="text-[11px] font-semibold text-error block">
-                                        Lost Marks & Deductions:
-                                      </span>
-                                      {sp.deductions.map((d: string, di: number) => (
-                                        <div key={di} className="flex items-start gap-1.5 text-textMuted">
-                                          <X className="w-3.5 h-3.5 text-error shrink-0 mt-0.5" />
-                                          <span>{d}</span>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  )}
+                                  {(() => {
+                                    const isLoss = typeof sp.score === 'number' && typeof sp.max_score === 'number' && sp.score < sp.max_score;
+                                    const deductionsList: string[] = (Array.isArray(sp.deductions) && sp.deductions.length > 0)
+                                      ? sp.deductions
+                                      : (Array.isArray(sp.marking_points)
+                                          ? sp.marking_points
+                                              .filter((mp: any) => !mp.is_earned && !mp.is_alternative)
+                                              .map((mp: any) => `Missed [${mp.mark_code || 'Mark'}]: ${mp.criterion}`)
+                                          : []);
+                                    if (!isLoss && deductionsList.length === 0) return null;
+                                    const items = deductionsList.length > 0
+                                      ? deductionsList
+                                      : [`Lost ${sp.max_score - sp.score} mark(s) on incomplete criteria or working.`];
+                                    return (
+                                      <div className="space-y-1">
+                                        <span className="text-[11px] font-semibold text-error block">
+                                          Lost Marks & Deductions:
+                                        </span>
+                                        {items.map((d: string, di: number) => (
+                                          <div key={di} className="flex items-start gap-1.5 text-textMuted">
+                                            <X className="w-3.5 h-3.5 text-error shrink-0 mt-0.5" />
+                                            <span>{d}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    );
+                                  })()}
 
                                   {/* Constructive Teacher Correction */}
                                   {sp.teacher_correction_note && (
