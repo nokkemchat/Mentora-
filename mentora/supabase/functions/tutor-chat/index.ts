@@ -2373,13 +2373,17 @@ YOUR TASK:
 
               let canonicalScoreSum = 0;
               let canonicalMaxSum = 0;
+              const deduplicatedQSubparts: any[] = [];
 
               subpartsByCanonicalKey.forEach((partsList) => {
                 const bestScore = Math.max(...partsList.map((p: any) => Number(p.score) || 0));
                 const partMax = Math.max(...partsList.map((p: any) => Number(p.max_score) || 1));
                 canonicalScoreSum += bestScore;
                 canonicalMaxSum += partMax;
+                const bestPart = partsList.reduce((best, curr) => (Number(curr.score) || 0) > (Number(best.score) || 0) ? curr : best, partsList[0]);
+                deduplicatedQSubparts.push(bestPart);
               });
+              allQSubparts = deduplicatedQSubparts;
 
               // Direct sum of all subparts for this question
               const allEarnedSum = allQSubparts.reduce((sum: number, sp: any) => sum + (Number(sp.score) || 0), 0);
@@ -2743,16 +2747,27 @@ YOUR TASK:
                     }).filter(Boolean);
                   }
 
-                  // Recompute the cluster totals from the refined subparts
-                  const refinedScore = refined.reduce((s: number, x: any) => s + (Number(x.score) || 0), 0);
-                  const refinedMax = refined.reduce((s: number, x: any) => s + (Number(x.max_score) || 0), 0);
-                  if (refinedMax > 0) {
-                    clusterResult.total_score = refinedScore;
-                    clusterResult.score = refinedScore;
-                    clusterResult.total_max_score = refinedMax;
-                    clusterResult.max_score = refinedMax;
-                    clusterResult.percentage = Math.round((refinedScore / refinedMax) * 100);
-                  }
+                  // Deduplicate refined subparts across pages for this question using canonical subpart keys
+                  const deduplicatedRefinedMap = new Map<string, any>();
+                  refined.forEach((sp: any) => {
+                    const key = getCanonicalSubpartKey(sp.part_label);
+                    if (!deduplicatedRefinedMap.has(key) || (Number(sp.score) || 0) > (Number(deduplicatedRefinedMap.get(key)?.score) || 0)) {
+                      deduplicatedRefinedMap.set(key, sp);
+                    }
+                  });
+                  const deduplicatedRefined = Array.from(deduplicatedRefinedMap.values());
+                  clusterResult.subparts = deduplicatedRefined;
+
+                  // Recompute the cluster totals from the deduplicated refined subparts
+                  const refinedScore = deduplicatedRefined.reduce((s: number, x: any) => s + (Number(x.score) || 0), 0);
+                  const officialQMax = officialMarks > 0 ? officialMarks : (clusterResult.total_max_score || 10);
+                  const cappedScore = Math.min(officialQMax, refinedScore);
+
+                  clusterResult.total_score = cappedScore;
+                  clusterResult.score = cappedScore;
+                  clusterResult.total_max_score = officialQMax;
+                  clusterResult.max_score = officialQMax;
+                  clusterResult.percentage = officialQMax > 0 ? Math.round((cappedScore / officialQMax) * 100) : 0;
                 }
               } catch (refineErr) {
                 console.warn(`Per-subpart refinement failed for Q${qNum} (keeping cluster result):`, refineErr);
@@ -2825,7 +2840,6 @@ YOUR TASK:
             const rawQNum = String(qEval.identified_question_number || qEval.question_number || "1").trim();
             const snappedQNum = rawQNum.match(/^\d+/)?.[0] || rawQNum;
             const officialMax = officialMarksMap.get(snappedQNum) ?? officialMarksMap.get(rawQNum);
-            const qScore = Number(qEval.total_score ?? qEval.score ?? 0);
             const isUnmatched = qEval.unmatched === true || (officialPaperQuestions.length > 0 && officialMax === undefined);
 
             // STRICT: per-question max comes ONLY from the official paper marks (DB) — never the model.
@@ -2834,8 +2848,20 @@ YOUR TASK:
               ? officialMax
               : (isUnmatched ? 0 : Number(qEval.total_max_score ?? qEval.max_score ?? 10));
 
+            // Deduplicate subparts by canonical key
+            const deduplicatedSubpartsMap = new Map<string, any>();
+            (qEval.subparts || []).forEach((sp: any) => {
+              const key = getCanonicalSubpartKey(sp.part_label);
+              if (!deduplicatedSubpartsMap.has(key) || (Number(sp.score) || 0) > (Number(deduplicatedSubpartsMap.get(key)?.score) || 0)) {
+                deduplicatedSubpartsMap.set(key, sp);
+              }
+            });
+            const deduplicatedSubparts = Array.from(deduplicatedSubpartsMap.values());
+            const subpartsSum = deduplicatedSubparts.reduce((s: number, sp: any) => s + (Number(sp.score) || 0), 0);
+            const safeQScore = isUnmatched ? 0 : Math.min(qMax, subpartsSum);
+
             const wasGraded = !isUnmatched && qEval.relevance_blocked !== true;
-            grandTotalScore += wasGraded ? qScore : 0;
+            grandTotalScore += wasGraded ? safeQScore : 0;
             // NOTE: grandTotalMax is computed once after aggregation from the answer
             // rules (see below) — never accumulated per-question here.
 
@@ -2850,33 +2876,42 @@ YOUR TASK:
                 : ((qEval.overall_feedback || "").slice(0, 160) || "Answers did not correspond to this question. 0 marks awarded."));
               existingUnattempted.spanned_pages = (qEval.spanned_pages && qEval.spanned_pages.length > 0) ? qEval.spanned_pages : existingUnattempted.spanned_pages;
             } else {
-            // Merge duplicate summaries for the same official question (best attempt wins)
-            const existingSummary = questionSummaries.find((qs: any) => {
-              const qsNum = String(qs.question_number).trim();
-              return !qs.unattempted && (qsNum === snappedQNum || (qsNum.match(/^\d+/)?.[0] || qsNum) === snappedQNum);
-            });
-            if (existingSummary) {
-              existingSummary.score = Math.max(Number(existingSummary.score) || 0, isUnmatched ? 0 : qScore);
-              existingSummary.subparts = [...(existingSummary.subparts || []), ...(qEval.subparts || [])];
-              existingSummary.spanned_pages = Array.from(new Set([...(existingSummary.spanned_pages || []), ...(qEval.spanned_pages || [])]));
-              existingSummary.percentage = existingSummary.max_score > 0 ? Math.round((existingSummary.score / existingSummary.max_score) * 100) : 0;
-            } else {
-              questionSummaries.push({
-                question_number: rawQNum,
-                topic: qEval.identified_topic || qEval.topic || "Exam Topic",
-                score: isUnmatched ? 0 : qScore,
-                max_score: qMax,
-                percentage: qMax > 0 ? Math.round((isUnmatched ? 0 : qScore) / qMax * 100) : 0,
-                spanned_pages: qEval.spanned_pages || [0],
-                subparts: qEval.subparts || [],
-                unmatched: isUnmatched || undefined,
-                notes: isUnmatched ? "Content does not correspond to any question in this paper. 0 marks awarded." : undefined
+              // Merge duplicate summaries for the same official question (best attempt wins)
+              const existingSummary = questionSummaries.find((qs: any) => {
+                const qsNum = String(qs.question_number).trim();
+                return !qs.unattempted && (qsNum === snappedQNum || (qsNum.match(/^\d+/)?.[0] || qsNum) === snappedQNum);
               });
-            }
+              if (existingSummary) {
+                // Merge subparts deduplicated
+                const mergedSubpartsMap = new Map<string, any>();
+                [...(existingSummary.subparts || []), ...deduplicatedSubparts].forEach((sp: any) => {
+                  const key = getCanonicalSubpartKey(sp.part_label);
+                  if (!mergedSubpartsMap.has(key) || (Number(sp.score) || 0) > (Number(mergedSubpartsMap.get(key)?.score) || 0)) {
+                    mergedSubpartsMap.set(key, sp);
+                  }
+                });
+                existingSummary.subparts = Array.from(mergedSubpartsMap.values());
+                const mergedSum = existingSummary.subparts.reduce((s: number, sp: any) => s + (Number(sp.score) || 0), 0);
+                existingSummary.score = Math.min(existingSummary.max_score, isUnmatched ? 0 : mergedSum);
+                existingSummary.spanned_pages = Array.from(new Set([...(existingSummary.spanned_pages || []), ...(qEval.spanned_pages || [])]));
+                existingSummary.percentage = existingSummary.max_score > 0 ? Math.round((existingSummary.score / existingSummary.max_score) * 100) : 0;
+              } else {
+                questionSummaries.push({
+                  question_number: rawQNum,
+                  topic: qEval.identified_topic || qEval.topic || "Exam Topic",
+                  score: safeQScore,
+                  max_score: qMax,
+                  percentage: qMax > 0 ? Math.round((safeQScore / qMax) * 100) : 0,
+                  spanned_pages: qEval.spanned_pages || [0],
+                  subparts: deduplicatedSubparts,
+                  unmatched: isUnmatched || undefined,
+                  notes: isUnmatched ? "Content does not correspond to any question in this paper. 0 marks awarded." : undefined
+                });
+              }
             }
 
-            if (Array.isArray(qEval.subparts)) {
-              allSubparts.push(...qEval.subparts);
+            if (deduplicatedSubparts.length > 0) {
+              allSubparts.push(...deduplicatedSubparts);
             }
             if (Array.isArray(qEval.annotations)) {
               allAnnotations.push(...qEval.annotations);
@@ -2901,6 +2936,7 @@ YOUR TASK:
             grandTotalMax = officialPaperQuestions.length > 0
               ? officialPaperQuestions.reduce((s: number, q: any) => s + (Number(q.marks) || 0), 0)
               : validQuestions.reduce((s: number, q: any) => s + (Number(q.total_max_score ?? q.max_score ?? 0) || 10), 0);
+            grandTotalScore = Math.min(grandTotalMax, grandTotalScore);
           }
 
           // Build per-page evaluations
