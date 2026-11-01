@@ -11,7 +11,7 @@ export interface PdfAnnotation {
   teacher_correction?: string;
   subpart_label?: string;
   box_2d?: [number, number, number, number];
-  bbox?: { y: number; x?: number; ymax?: number; xmax?: number };
+  bbox?: { y: number; x?: number; ymax?: number; xmax?: number; width?: number; height?: number };
 }
 
 export interface MarkedPdfPage {
@@ -75,7 +75,9 @@ function drawAnnotations(
   renderable.forEach(ann => {
     const [ymin, xmin, ymax, xmax] = ann.box_2d || [0, 0, 0, 0];
     const yMid = (ymin + ymax) / 2;
-    const topPct = ann.bbox ? ann.bbox.y * 100 : (yMid / scaleY) * 100;
+    const topPct = ann.bbox && typeof ann.bbox.height === 'number'
+      ? (ann.bbox.y + ann.bbox.height / 2) * 100
+      : (yMid / scaleY) * 100;
     const y = (topPct / 100) * H;
     const leftStart = (xmin / scaleX) * W;
     const leftEnd = (xmax / scaleX) * W;

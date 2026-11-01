@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import type { VisualAnnotation } from '../lib/annotationUtils';
 
 interface MarkedPaperOverlayProps {
@@ -18,6 +18,11 @@ export default function MarkedPaperOverlay({
 }: MarkedPaperOverlayProps) {
   const [activeTooltip, setActiveTooltip] = useState<string | null>(null);
   const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(null);
+
+  // Reset image dimensions when imageUrl changes to prevent stale aspect ratio shift across pages
+  useEffect(() => {
+    setImageDimensions(null);
+  }, [imageUrl]);
 
   // Legacy declutter: hide per-question "Q Total" / "Cont." page stamps — only the
   // booklet total (top-left of the first page) renders as a page-level stamp.
@@ -54,36 +59,37 @@ export default function MarkedPaperOverlay({
   }, [annotations, imageDimensions]);
 
   return (
-    <div
-      className="relative flex items-center justify-center select-none rounded-xl"
-      style={{
-        height: '100%',
-        maxHeight: '100%',
-        maxWidth: '100%',
-        aspectRatio: imageDimensions ? `${imageDimensions.width} / ${imageDimensions.height}` : undefined,
-        width: imageDimensions ? 'auto' : '100%'
-      }}
-    >
-      {/* Pristine Student Photo Scan - 100% Contained */}
-      <img
-        src={imageUrl}
-        alt={altText}
-        onLoad={(e) => {
-          const img = e.currentTarget;
-          if (img.naturalWidth && img.naturalHeight) {
-            setImageDimensions({ width: img.naturalWidth, height: img.naturalHeight });
-          }
+    <div className="relative w-full h-full flex items-center justify-center select-none overflow-hidden">
+      {/* Inner wrapper tightly conforms to image dimensions so overlay matches bitmap with zero letterbox offset */}
+      <div
+        className="relative inline-flex items-center justify-center max-w-full max-h-full rounded-xl shadow-2xl bg-white border border-gray-300 overflow-hidden"
+        style={{
+          aspectRatio: imageDimensions ? `${imageDimensions.width} / ${imageDimensions.height}` : undefined,
         }}
-        className="w-full h-full max-w-full max-h-full object-contain rounded-xl shadow-2xl bg-white border border-gray-300 block select-none pointer-events-none"
-      />
+      >
+        {/* Pristine Student Photo Scan - 100% Contained */}
+        <img
+          src={imageUrl}
+          alt={altText}
+          onLoad={(e) => {
+            const img = e.currentTarget;
+            if (img.naturalWidth && img.naturalHeight) {
+              setImageDimensions({ width: img.naturalWidth, height: img.naturalHeight });
+            }
+          }}
+          className="block max-w-full max-h-full w-auto h-auto object-contain select-none pointer-events-none"
+        />
 
-      {/* Vector Red Ink Teacher Annotation Layer */}
-      {showAnnotations && renderableAnnotations.length > 0 && (
-        <div className="absolute inset-0 overflow-hidden pointer-events-none rounded-xl">
-          {renderableAnnotations.map((ann, idx) => {
-            const [ymin, xmin, ymax, xmax] = ann.box_2d || [0, 0, 0, 0];
-            const yMid = (ymin + ymax) / 2;
-            const topPct = ann.bbox ? (ann.bbox.y * 100) : ((yMid / scaleY) * 100);
+        {/* Vector Red Ink Teacher Annotation Layer */}
+        {showAnnotations && renderableAnnotations.length > 0 && (
+          <div className="absolute inset-0 overflow-hidden pointer-events-none">
+            {renderableAnnotations.map((ann, idx) => {
+              const [ymin, xmin, ymax, xmax] = ann.box_2d || [0, 0, 0, 0];
+              const yMid = (ymin + ymax) / 2;
+              // Use the box's true vertical center so -translate-y-1/2 centers annotations directly on student writing
+              const topPct = ann.bbox && typeof ann.bbox.height === 'number'
+                ? (ann.bbox.y + ann.bbox.height / 2) * 100
+                : ((yMid / scaleY) * 100);
             const leftEndPct = (xmax / scaleX) * 100;
             const leftStartPct = (xmin / scaleX) * 100;
             const annId = `ann-${idx}-${ann.type}`;
@@ -319,6 +325,7 @@ export default function MarkedPaperOverlay({
           })}
         </div>
       )}
+      </div>
     </div>
   );
 }
