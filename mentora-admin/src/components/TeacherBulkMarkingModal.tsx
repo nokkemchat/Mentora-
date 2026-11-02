@@ -191,12 +191,10 @@ export default function TeacherBulkMarkingModal({ paper, onClose, onPaperUpdated
   const queueRef = useRef<MarkingQueueItem[]>([]);
   queueRef.current = queue;
   
-  const [concurrency, setConcurrency] = useState<number>(2); // Default to stable 2x concurrency to prevent Edge Function 150s timeouts
+  const [concurrency, setConcurrency] = useState<number>(isStudent ? 1 : 2); // Default to stable 2x concurrency for teachers, 1 for students
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const isPausedRef = useRef(false);
-  isPausedRef.current = isPaused;
-
   // Live Batch Marking Stopwatch & Performance Timer
   const [batchStartTime, setBatchStartTime] = useState<number | null>(null);
   const [batchEndTime, setBatchEndTime] = useState<number | null>(null);
@@ -221,8 +219,15 @@ export default function TeacherBulkMarkingModal({ paper, onClose, onPaperUpdated
   const activeWorkerIdsRef = useRef<Set<string>>(new Set());
   const cachedPaperContextRef = useRef<{ manifestOverview: string; submissionQuestionsContext: string } | null>(null);
 
-  // Upload Modal State (Single vs Batch Class)
-  const [uploadTab, setUploadTab] = useState<'single' | 'batch'>('batch');
+  // Upload Modal State (Single vs Batch Class) — Students are strictly locked to single paper mode
+  const [uploadTab, setUploadTab] = useState<'single' | 'batch'>(isStudent ? 'single' : 'batch');
+
+  useEffect(() => {
+    if (isStudent) {
+      setUploadTab('single');
+      setConcurrency(1);
+    }
+  }, [isStudent]);
   const [batchEntries, setBatchEntries] = useState<BatchStudentEntry[]>([]);
   const [isParsingBatchPdfs, setIsParsingBatchPdfs] = useState(false);
   const [batchParsingProgress, setBatchParsingProgress] = useState('');
@@ -503,6 +508,10 @@ export default function TeacherBulkMarkingModal({ paper, onClose, onPaperUpdated
   // Batch Multi-PDF / Class Upload Handlers (Handles files and folder inputs)
   const handleBatchFilesSelected = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
+    if (isStudent) {
+      alert('Students can only mark one paper at a time.');
+      return;
+    }
     const fileList = Array.from(files);
     setIsParsingBatchPdfs(true);
     setBatchParsingProgress('Analyzing files...');
@@ -589,6 +598,10 @@ export default function TeacherBulkMarkingModal({ paper, onClose, onPaperUpdated
   const handleBatchDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
+    if (isStudent) {
+      alert('Students can only mark one paper at a time.');
+      return;
+    }
 
     // CRITICAL: Extract ALL DataTransferItem entries synchronously BEFORE any await!
     // Chromium invalidates DataTransferItems on the next event loop tick if await is called.
@@ -699,6 +712,10 @@ export default function TeacherBulkMarkingModal({ paper, onClose, onPaperUpdated
   };
 
   const handleQueueBatchStudents = () => {
+    if (isStudent) {
+      alert('Students can only mark one paper at a time.');
+      return;
+    }
     const selected = batchEntries.filter(b => b.selected);
     if (selected.length === 0) {
       alert('Please select at least one student paper to queue.');
@@ -859,12 +876,16 @@ export default function TeacherBulkMarkingModal({ paper, onClose, onPaperUpdated
 
   const handleQueueStudentPaper = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isStudent && queue.some(item => item.status === 'queued' || item.status === 'uploading' || item.status === 'marking')) {
+      alert('You already have a paper currently being marked. Students can only mark one paper at a time. Please wait for your active marking to complete.');
+      return;
+    }
     if (!studentName.trim()) {
-      alert('Please enter the student’s name.');
+      alert(isStudent ? 'Please enter your name.' : 'Please enter the student’s name.');
       return;
     }
     if (selectedFiles.length === 0) {
-      alert('Please upload at least one image of the student’s handwritten answer script.');
+      alert(isStudent ? 'Please upload your handwritten answer booklet or photos.' : 'Please upload at least one image of the student’s handwritten answer script.');
       return;
     }
 
@@ -967,7 +988,7 @@ export default function TeacherBulkMarkingModal({ paper, onClose, onPaperUpdated
       const subject = paper.subject;
       const curriculum = paper.curriculum || 'Cambridge / ZIMSEC';
 
-      const contextualizedMessage = `You are the Mentora Senior Chief Examiner for "${paperTitle}" (${subject} - ${curriculum}).
+      const contextualizedMessage = `You are the Ziviso Senior Chief Examiner for "${paperTitle}" (${subject} - ${curriculum}).
 The student has uploaded an exam answer sheet / booklet for marking.
 
 EXAM PAPER — ALL QUESTIONS & OFFICIAL MARK SCHEMES:
@@ -1343,10 +1364,20 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
             <div className="flex items-center gap-2">
               <button
                 onClick={() => {
+                  if (isStudent && queue.some(it => it.status === 'queued' || it.status === 'uploading' || it.status === 'marking')) {
+                    alert('Your paper is currently being marked. Please wait until marking is complete before submitting another paper.');
+                    return;
+                  }
                   resetUploadForm();
                   setShowUploadModal(true);
                 }}
-                className="flex items-center gap-1.5 bg-primary hover:bg-primaryHover text-white px-3 sm:px-4 py-2 sm:py-2.5 rounded-2xl font-semibold text-xs sm:text-sm transition-all shadow-lg shadow-primary/20 cursor-pointer"
+                disabled={isStudent && queue.some(it => it.status === 'queued' || it.status === 'uploading' || it.status === 'marking')}
+                className={`flex items-center gap-1.5 bg-primary hover:bg-primaryHover text-white px-3 sm:px-4 py-2 sm:py-2.5 rounded-2xl font-semibold text-xs sm:text-sm transition-all shadow-lg shadow-primary/20 cursor-pointer ${
+                  (isStudent && queue.some(it => it.status === 'queued' || it.status === 'uploading' || it.status === 'marking'))
+                    ? 'opacity-50 cursor-not-allowed'
+                    : ''
+                }`}
+                title={isStudent && queue.some(it => it.status === 'queued' || it.status === 'uploading' || it.status === 'marking') ? 'Marking in progress. Please wait for completion.' : undefined}
               >
                 <Plus className="w-4 h-4" />
                 <span>{isStudent ? 'Submit My Paper' : 'Mark Paper'}</span>
@@ -1472,48 +1503,55 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                         </span>
                       </h4>
                       <p className="text-[11px] text-textMuted mt-0.5">
-                        Grading multi-student batches concurrently with OpenAI prompt caching and collision-free grounding.
+                        {isStudent 
+                          ? 'Grading your answer script with Senior Examiner rubrics and collision-free annotations.' 
+                          : 'Grading multi-student batches concurrently with OpenAI prompt caching and collision-free grounding.'}
                       </p>
                     </div>
                   </div>
 
-                  {/* Worker Concurrency & Action Controls */}
+                  {/* Action Controls */}
                   <div className="flex items-center gap-2 flex-wrap self-start lg:self-auto">
-                    {/* Concurrency Selector */}
-                    <div className="flex items-center bg-background border border-border rounded-xl p-0.5 text-xs">
-                      <span className="px-2 text-[10px] text-textMuted font-semibold flex items-center gap-1">
-                        <SlidersHorizontal className="w-3 h-3" />
-                        Workers:
-                      </span>
-                      {[1, 2, 4, 6, 8, 10].map((num) => (
-                        <button
-                          key={num}
-                          onClick={() => setConcurrency(num)}
-                          className={`px-2 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                            concurrency === num
-                              ? 'bg-primary text-white shadow-sm'
-                              : 'text-textMuted hover:text-text hover:bg-border/40'
-                          }`}
-                          title={`Run ${num} student papers concurrently (Maximum 10x)`}
-                        >
-                          {num}x{num === 10 ? ' Max' : num === 4 ? ' ★' : ''}
-                        </button>
-                      ))}
-                    </div>
+                    {/* Worker Concurrency & Action Controls (Teachers Only) */}
+                    {!isStudent && (
+                      <>
+                        {/* Concurrency Selector */}
+                        <div className="flex items-center bg-background border border-border rounded-xl p-0.5 text-xs">
+                          <span className="px-2 text-[10px] text-textMuted font-semibold flex items-center gap-1">
+                            <SlidersHorizontal className="w-3 h-3" />
+                            Workers:
+                          </span>
+                          {[1, 2, 4, 6, 8, 10].map((num) => (
+                            <button
+                              key={num}
+                              onClick={() => setConcurrency(num)}
+                              className={`px-2 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                concurrency === num
+                                  ? 'bg-primary text-white shadow-sm'
+                                  : 'text-textMuted hover:text-text hover:bg-border/40'
+                              }`}
+                              title={`Run ${num} student papers concurrently (Maximum 10x)`}
+                            >
+                              {num}x{num === 10 ? ' Max' : num === 4 ? ' ★' : ''}
+                            </button>
+                          ))}
+                        </div>
 
-                    {/* Pause / Resume Button */}
-                    <button
-                      onClick={() => setIsPaused(prev => !prev)}
-                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
-                        isPaused
-                          ? 'bg-amber-500/15 border-amber-500/30 text-amber-400 hover:bg-amber-500/25'
-                          : 'bg-background hover:bg-border/50 border-border text-textMuted hover:text-text'
-                      }`}
-                      title={isPaused ? 'Resume marking queue' : 'Pause queue after active papers'}
-                    >
-                      {isPaused ? <Play className="w-3.5 h-3.5 fill-current" /> : <Pause className="w-3.5 h-3.5" />}
-                      <span>{isPaused ? 'Resume' : 'Pause'}</span>
-                    </button>
+                        {/* Pause / Resume Button */}
+                        <button
+                          onClick={() => setIsPaused(prev => !prev)}
+                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
+                            isPaused
+                              ? 'bg-amber-500/15 border-amber-500/30 text-amber-400 hover:bg-amber-500/25'
+                              : 'bg-background hover:bg-border/50 border-border text-textMuted hover:text-text'
+                          }`}
+                          title={isPaused ? 'Resume marking queue' : 'Pause queue after active papers'}
+                        >
+                          {isPaused ? <Play className="w-3.5 h-3.5 fill-current" /> : <Pause className="w-3.5 h-3.5" />}
+                          <span>{isPaused ? 'Resume' : 'Pause'}</span>
+                        </button>
+                      </>
+                    )}
 
                     {/* Clear / Cancel Controls */}
                     {completedItems.length > 0 && (
@@ -1538,13 +1576,18 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
 
                     <button
                       onClick={() => {
+                        if (isStudent && queue.some(it => it.status === 'queued' || it.status === 'uploading' || it.status === 'marking')) {
+                          alert('Your paper is currently being marked. Please wait until marking is complete before submitting another paper.');
+                          return;
+                        }
                         resetUploadForm();
                         setShowUploadModal(true);
                       }}
-                      className="inline-flex items-center gap-1.5 bg-primary/15 hover:bg-primary/25 text-primary border border-primary/30 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ml-auto sm:ml-0"
+                      disabled={isStudent && queue.some(it => it.status === 'queued' || it.status === 'uploading' || it.status === 'marking')}
+                      className={`inline-flex items-center gap-1.5 bg-primary/15 hover:bg-primary/25 disabled:opacity-50 disabled:cursor-not-allowed text-primary border border-primary/30 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ml-auto sm:ml-0`}
                     >
                       <Plus className="w-3.5 h-3.5" />
-                      <span>Add Papers</span>
+                      <span>{isStudent ? 'Mark Another Paper' : 'Add Papers'}</span>
                     </button>
                   </div>
                 </div>
@@ -1933,7 +1976,7 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                   <Sparkles className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-lg font-bold text-text">Mark Student Papers</h3>
+                  <h3 className="text-lg font-bold text-text">{isStudent ? 'Mark My Paper' : 'Mark Student Papers'}</h3>
                   <p className="text-xs text-textMuted">
                     {paper?.subject} Paper {paper?.paper_number} • {paper?.curriculum} ({paper?.year})
                   </p>
@@ -1948,37 +1991,39 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
               </button>
             </div>
 
-            {/* Mode Switcher Tabs */}
-            <div className="px-6 pt-4 pb-1 border-b border-border/80 bg-background/30 flex items-center gap-2">
-              <button
-                onClick={() => setUploadTab('batch')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-2xl text-xs font-bold transition-all cursor-pointer ${
-                  uploadTab === 'batch'
-                    ? 'bg-primary text-white shadow-md shadow-primary/20'
-                    : 'text-textMuted hover:text-text hover:bg-surface border border-transparent'
-                }`}
-              >
-                <FolderUp className="w-4 h-4" />
-                <span>Batch Upload Class (Multi-PDF / Folder)</span>
-                <span className={`text-[10px] px-2 py-0.2 rounded-full ${
-                  uploadTab === 'batch' ? 'bg-white/20 text-white' : 'bg-primary/10 text-primary'
-                }`}>
-                  High-Throughput
-                </span>
-              </button>
+            {/* Mode Switcher Tabs (Teachers only) */}
+            {!isStudent && (
+              <div className="px-6 pt-4 pb-1 border-b border-border/80 bg-background/30 flex items-center gap-2">
+                <button
+                  onClick={() => setUploadTab('batch')}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-2xl text-xs font-bold transition-all cursor-pointer ${
+                    uploadTab === 'batch'
+                      ? 'bg-primary text-white shadow-md shadow-primary/20'
+                      : 'text-textMuted hover:text-text hover:bg-surface border border-transparent'
+                  }`}
+                >
+                  <FolderUp className="w-4 h-4" />
+                  <span>Batch Upload Class (Multi-PDF / Folder)</span>
+                  <span className={`text-[10px] px-2 py-0.2 rounded-full ${
+                    uploadTab === 'batch' ? 'bg-white/20 text-white' : 'bg-primary/10 text-primary'
+                  }`}>
+                    High-Throughput
+                  </span>
+                </button>
 
-              <button
-                onClick={() => setUploadTab('single')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-2xl text-xs font-bold transition-all cursor-pointer ${
-                  uploadTab === 'single'
-                    ? 'bg-primary text-white shadow-md shadow-primary/20'
-                    : 'text-textMuted hover:text-text hover:bg-surface border border-transparent'
-                }`}
-              >
-                <FileCheck className="w-4 h-4" />
-                <span>Single Student Paper</span>
-              </button>
-            </div>
+                <button
+                  onClick={() => setUploadTab('single')}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-2xl text-xs font-bold transition-all cursor-pointer ${
+                    uploadTab === 'single'
+                      ? 'bg-primary text-white shadow-md shadow-primary/20'
+                      : 'text-textMuted hover:text-text hover:bg-surface border border-transparent'
+                  }`}
+                >
+                  <FileCheck className="w-4 h-4" />
+                  <span>Single Student Paper</span>
+                </button>
+              </div>
+            )}
 
             {/* Modal Body */}
             <div className="flex-1 overflow-y-auto p-6 space-y-5">
@@ -2031,8 +2076,8 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                 </div>
               </div>
 
-              {/* TAB 1: BATCH CLASS UPLOAD */}
-              {uploadTab === 'batch' && (
+              {/* TAB 1: BATCH CLASS UPLOAD (Teachers only) */}
+              {!isStudent && uploadTab === 'batch' && (
                 <div className="space-y-4">
                   {/* Batch Drop Zone */}
                   <div>
@@ -2202,7 +2247,7 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
               )}
 
               {/* TAB 2: SINGLE STUDENT PAPER FORM */}
-              {uploadTab === 'single' && (
+              {(isStudent || uploadTab === 'single') && (
                 <form onSubmit={handleQueueStudentPaper} className="space-y-4">
                   {/* Student Details */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -2386,11 +2431,11 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                     </button>
                     <button
                       type="submit"
-                      disabled={!studentName.trim() || selectedFiles.length === 0}
-                      className="flex items-center gap-2 bg-primary hover:bg-primaryHover disabled:opacity-50 text-white px-5 py-2.5 rounded-2xl text-sm font-semibold transition-all shadow-md cursor-pointer"
+                      disabled={!studentName.trim() || selectedFiles.length === 0 || (isStudent && queue.some(item => item.status === 'queued' || item.status === 'uploading' || item.status === 'marking'))}
+                      className="flex items-center gap-2 bg-primary hover:bg-primaryHover disabled:opacity-50 disabled:cursor-not-allowed text-white px-5 py-2.5 rounded-2xl text-sm font-semibold transition-all shadow-md cursor-pointer"
                     >
                       <Sparkles className="w-4 h-4" />
-                      <span>Add to Marking Queue</span>
+                      <span>{isStudent ? 'Start Marking My Paper' : 'Add to Marking Queue'}</span>
                     </button>
                   </div>
                 </form>
