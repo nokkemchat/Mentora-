@@ -82,132 +82,127 @@
 }
 
 /* ============================================================
-   LIQUID GLASS COMPONENTS (Inspired by polidario/liquid-glass-vue)
-   Features:
-   - True optical liquid displacement via SVG feDisplacementMap
-   - Frosted blur & specular brightness transmission
-   - Realistic beveled refractive rim via ::before dual-inset box-shadows
-   - Clean tactile elevation without excessive glowing hover outlines
+   FROSTED GLASS (Glassmorphism)
+   Why previous attempts looked flat:
+   - fills were 70-85% opaque, so the blur was hidden
+   - url(#filter) inside backdrop-filter invalidates the whole
+     declaration in browsers that don't support it (no blur at all)
+   Recipe: low-opacity tint + strong backdrop blur + saturation,
+   fine grain for the "frosted" texture, and a light-catching rim.
    ============================================================ */
 .liquid-glass {
   position: relative;
-  background: linear-gradient(135deg, rgba(28, 36, 68, 0.82) 0%, rgba(16, 22, 45, 0.72) 50%, rgba(22, 28, 56, 0.78) 100%);
-  backdrop-filter: brightness(1.1) blur(24px) saturate(180%) url(#displacementFilter);
-  -webkit-backdrop-filter: brightness(1.1) blur(24px) saturate(180%);
-  border: 1px solid var(--border);
-  box-shadow: 
-    0 16px 40px -10px rgba(0, 0, 0, 0.38),
-    0 2px 6px -1px rgba(0, 0, 0, 0.20);
+  isolation: isolate; /* keeps ::before/::after behind content without touching children */
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.10) 0%, rgba(255, 255, 255, 0.03) 100%),
+    rgba(17, 22, 46, 0.38);
+  -webkit-backdrop-filter: blur(22px) saturate(170%);
+  backdrop-filter: blur(22px) saturate(170%);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow:
+    0 12px 32px -8px rgba(0, 0, 0, 0.45),
+    0 2px 6px -1px rgba(0, 0, 0, 0.25);
   transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* Beveled specular glass rim pseudo-element */
+/* Light-catching rim (top-left specular edge + soft inner glow) */
 .liquid-glass::before {
   content: '';
   position: absolute;
   inset: 0;
-  z-index: 0;
+  z-index: -1;
   pointer-events: none;
   border-radius: inherit;
-  overflow: hidden;
-  -webkit-box-shadow: 
-    inset 2px 2px 0px -2px rgba(255, 255, 255, 0.55), 
-    inset 0 0 3px 1px rgba(255, 255, 255, 0.35);
-  box-shadow: 
-    inset 6px 6px 0px -6px rgba(255, 255, 255, 0.55), 
-    inset 0 0 8px 1px rgba(255, 255, 255, 0.35);
+  box-shadow:
+    inset 1px 1px 0 0 rgba(255, 255, 255, 0.22),
+    inset 0 0 12px 0 rgba(255, 255, 255, 0.05);
 }
 
-/* Content inside liquid glass stays above the specular rim */
-.liquid-glass > * {
-  position: relative;
-  z-index: 1;
+/* Frosted grain texture */
+.liquid-glass::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: inherit;
+  opacity: 0.07;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
 [data-theme='light'] .liquid-glass {
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.82) 0%, rgba(255, 255, 255, 0.68) 50%, rgba(245, 248, 255, 0.76) 100%);
-  backdrop-filter: brightness(1.08) blur(24px) saturate(180%) url(#displacementFilter);
-  -webkit-backdrop-filter: brightness(1.08) blur(24px) saturate(180%);
-  border: 1px solid rgba(255, 255, 255, 0.75);
-  box-shadow: 
-    0 18px 42px -10px rgba(80, 86, 232, 0.12),
-    0 2px 8px -1px rgba(0, 0, 0, 0.04);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0.25) 100%),
+    rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  box-shadow:
+    0 12px 32px -8px rgba(60, 66, 160, 0.18),
+    0 2px 6px -1px rgba(0, 0, 0, 0.05);
 }
 
 [data-theme='light'] .liquid-glass::before {
-  -webkit-box-shadow: 
-    inset 2px 2px 0px -2px rgba(255, 255, 255, 0.90), 
-    inset 0 0 3px 1px rgba(255, 255, 255, 0.70);
-  box-shadow: 
-    inset 6px 6px 0px -6px rgba(255, 255, 255, 0.90), 
-    inset 0 0 8px 1px rgba(255, 255, 255, 0.60);
+  box-shadow:
+    inset 1px 1px 0 0 rgba(255, 255, 255, 0.95),
+    inset 0 0 14px 0 rgba(255, 255, 255, 0.35);
+}
+
+[data-theme='light'] .liquid-glass::after {
+  opacity: 0.05;
 }
 
 .liquid-glass:hover {
   transform: translateY(-2px);
-  box-shadow: 
-    0 22px 48px -10px rgba(0, 0, 0, 0.45),
-    0 4px 12px -2px rgba(0, 0, 0, 0.22);
+  box-shadow:
+    0 18px 40px -10px rgba(0, 0, 0, 0.5),
+    0 4px 10px -2px rgba(0, 0, 0, 0.25);
 }
 
 [data-theme='light'] .liquid-glass:hover {
-  transform: translateY(-2px);
-  box-shadow: 
-    0 22px 48px -10px rgba(80, 86, 232, 0.16),
-    0 4px 12px -2px rgba(0, 0, 0, 0.05);
+  box-shadow:
+    0 18px 40px -10px rgba(60, 66, 160, 0.22),
+    0 4px 10px -2px rgba(0, 0, 0, 0.06);
 }
 
-/* Sunken Liquid Well (Inner indented containers, album frames, input wells) */
+/* Fallback for browsers without backdrop-filter: keep text readable */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .liquid-glass { background: rgba(17, 22, 46, 0.92); }
+  [data-theme='light'] .liquid-glass { background: rgba(255, 255, 255, 0.92); }
+}
+/* Inner frosted well (nested inside a glass card). No backdrop-filter here:
+   the parent card already blurs, and nested backdrop filters only see the
+   parent's own pixels, so a light tint reads cleaner and is cheaper. */
 .liquid-glass-well {
   position: relative;
-  background: rgba(255, 255, 255, 0.35);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.50);
-  box-shadow: 
-    inset 0 1.5px 3px 0 rgba(0, 0, 0, 0.04),
-    inset 0 0 8px 0 rgba(255, 255, 255, 0.30);
+  background: rgba(255, 255, 255, 0.40);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  box-shadow: inset 0 1px 2px 0 rgba(0, 0, 0, 0.04);
 }
 
 [data-theme='dark'] .liquid-glass-well {
-  background: rgba(10, 14, 30, 0.55);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  box-shadow: 
-    inset 0 2px 4px 0 rgba(0, 0, 0, 0.35),
-    inset 0 0 8px 0 rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  box-shadow: inset 0 1px 2px 0 rgba(0, 0, 0, 0.25);
 }
 
 .liquid-glass-subtle {
   position: relative;
-  background: var(--surface);
-  backdrop-filter: blur(20px) saturate(180%) url(#displacementFilter);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
-  border: 1px solid var(--border);
-  box-shadow: 
-    0 10px 24px -6px rgba(0, 0, 0, 0.22);
-}
-
-.liquid-glass-subtle::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  border-radius: inherit;
-  box-shadow: inset 4px 4px 0px -4px rgba(255, 255, 255, 0.35);
+  isolation: isolate;
+  background: rgba(17, 22, 46, 0.32);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  backdrop-filter: blur(16px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow:
+    inset 1px 1px 0 0 rgba(255, 255, 255, 0.15),
+    0 8px 20px -6px rgba(0, 0, 0, 0.3);
 }
 
 [data-theme='light'] .liquid-glass-subtle {
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.80) 0%, rgba(255, 255, 255, 0.65) 100%);
-  border: 1px solid rgba(255, 255, 255, 0.75);
-  box-shadow: 
-    0 10px 24px -6px rgba(80, 86, 232, 0.08);
+  background: rgba(255, 255, 255, 0.40);
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  box-shadow:
+    inset 1px 1px 0 0 rgba(255, 255, 255, 0.9),
+    0 8px 20px -6px rgba(60, 66, 160, 0.12);
 }
-
-[data-theme='light'] .liquid-glass-subtle::before {
-  box-shadow: inset 4px 4px 0px -4px rgba(255, 255, 255, 0.60);
-}
-
 /* ============================================================
    SMOOTH 3D TACTILE BUTTONS
    ============================================================ */

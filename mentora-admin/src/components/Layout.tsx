@@ -232,10 +232,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
       {/* Main Content Area */}
       <main className="flex-1 overflow-y-auto relative bg-transparent flex flex-col">
-        {/* Modern Ambient Lilac Glow Spheres */}
-        <div className="pointer-events-none fixed -top-32 -right-32 w-96 h-96 rounded-full bg-primary/15 blur-[120px] z-0" />
-        <div className="pointer-events-none fixed top-1/2 -left-32 w-96 h-96 rounded-full bg-indigo-500/10 blur-[130px] z-0" />
-        <div className="pointer-events-none fixed -bottom-32 right-1/4 w-80 h-80 rounded-full bg-purple-500/10 blur-[120px] z-0" />
+        {/* Ambient colour orbs: give the frosted glass cards something to blur */}
+        <div className="pointer-events-none fixed -top-24 right-[8%] w-[28rem] h-[28rem] rounded-full bg-primary/40 blur-[100px] z-0" />
+        <div className="pointer-events-none fixed top-[38%] left-[18%] w-[24rem] h-[24rem] rounded-full bg-fuchsia-400/30 blur-[110px] z-0" />
+        <div className="pointer-events-none fixed -bottom-24 right-[22%] w-[26rem] h-[26rem] rounded-full bg-cyan-400/30 blur-[110px] z-0" />
 
         {/* Artistic Scattered & Falling Z-I-V-I-S-O Letters Background */}
         <ZivisoArtisticBackground />
