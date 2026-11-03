@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Filter, Plus, Edit, Trash2, Eye, BarChart2, BookOpen, ChevronDown, ChevronUp, UploadCloud, FileText, ExternalLink, FileCheck, Sparkles, RefreshCw, CheckCircle2, GraduationCap, Calendar, ArrowUpDown, SlidersHorizontal, X as CloseIcon } from 'lucide-react';
+import { Search, Filter, Plus, Edit, Trash2, Eye, BarChart2, BookOpen, ChevronDown, ChevronUp, UploadCloud, FileText, ExternalLink, FileCheck, Sparkles, RefreshCw, CheckCircle2, GraduationCap, Calendar, ArrowUpDown, SlidersHorizontal, LayoutGrid, List, X as CloseIcon } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import PaperFormModal from '../components/PaperFormModal';
 import BulkUploadModal from '../components/BulkUploadModal';
@@ -19,6 +19,7 @@ export default function Papers() {
   const [extractingPaperId, setExtractingPaperId] = useState<string | null>(null);
   const [processingMsPaperId, setProcessingMsPaperId] = useState<string | null>(null);
   const [selectedPaperForMarking, setSelectedPaperForMarking] = useState<any | null>(null);
+  const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
 
   const handleExtractPaper = async (paperId: string) => {
     try {
@@ -342,7 +343,7 @@ export default function Papers() {
   return (
     <div className="max-w-7xl mx-auto space-y-4">
       {/* Clean, Compact Header */}
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center gap-2.5">
           <h1 className="text-xl sm:text-2xl font-bold text-text tracking-tight">
             Past Papers
@@ -352,24 +353,56 @@ export default function Papers() {
           </span>
         </div>
 
-        {!isStudent && (
-          <div className="flex items-center gap-2">
-            <button 
-              onClick={() => setShowBulkModal(true)}
-              className="btn-3d-glass flex items-center gap-2 px-4 py-2 rounded-2xl text-xs font-semibold text-text cursor-pointer"
+        <div className="flex items-center gap-2 self-end sm:self-auto flex-wrap">
+          {/* View Mode Toggle: Grid Cards vs Table */}
+          <div className="flex items-center bg-surface/80 border border-border rounded-2xl p-1 gap-1 shadow-xs">
+            <button
+              type="button"
+              onClick={() => setViewMode('grid')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                viewMode === 'grid'
+                  ? 'btn-3d-primary'
+                  : 'text-textMuted hover:text-text'
+              }`}
+              title="Card Grid View"
             >
-              <UploadCloud className="w-3.5 h-3.5 text-primary" />
-              <span className="hidden sm:inline">Bulk Upload</span>
+              <LayoutGrid className="w-3.5 h-3.5" />
+              <span>Cards</span>
             </button>
-            <button 
-              onClick={() => setShowFormModal(true)}
-              className="btn-3d-primary flex items-center gap-2 px-4 py-2 rounded-2xl text-xs font-bold cursor-pointer"
+            <button
+              type="button"
+              onClick={() => setViewMode('table')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                viewMode === 'table'
+                  ? 'btn-3d-primary'
+                  : 'text-textMuted hover:text-text'
+              }`}
+              title="Table View"
             >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Add Paper</span>
+              <List className="w-3.5 h-3.5" />
+              <span>Table</span>
             </button>
           </div>
-        )}
+
+          {!isStudent && (
+            <>
+              <button 
+                onClick={() => setShowBulkModal(true)}
+                className="btn-3d-glass flex items-center gap-2 px-3.5 py-2 rounded-2xl text-xs font-semibold text-text cursor-pointer"
+              >
+                <UploadCloud className="w-3.5 h-3.5 text-primary" />
+                <span className="hidden sm:inline">Bulk Upload</span>
+              </button>
+              <button 
+                onClick={() => setShowFormModal(true)}
+                className="btn-3d-primary flex items-center gap-2 px-3.5 py-2 rounded-2xl text-xs font-bold cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add Paper</span>
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       {/* Sleek, Compact Filter Bar */}
@@ -508,26 +541,42 @@ export default function Papers() {
           </span>
         </div>
 
-      {/* Mobile Card List (Visible on mobile/tablet < lg) */}
-      <div className="block lg:hidden space-y-5">
-        {loading ? (
-          <div className="bg-surface border border-border rounded-3xl p-8 text-center text-textMuted text-sm">
-            Loading papers...
+      {/* Main Papers Content: Grid Cards (default) or Streamlined Table */}
+      {loading ? (
+        <div className="liquid-glass rounded-3xl p-12 text-center text-textMuted text-sm border border-border/80 flex flex-col items-center justify-center gap-3">
+          <RefreshCw className="w-8 h-8 text-primary animate-spin" />
+          <p className="font-semibold text-text">Loading question papers...</p>
+        </div>
+      ) : filteredPapers.length === 0 ? (
+        <div className="liquid-glass rounded-3xl p-12 text-center text-textMuted text-sm space-y-3 border border-border/80 flex flex-col items-center justify-center">
+          <div className="w-14 h-14 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shadow-inner">
+            <BookOpen className="w-7 h-7" />
           </div>
-        ) : filteredPapers.length === 0 ? (
-          <div className="bg-surface border border-border rounded-3xl p-8 text-center text-textMuted text-sm space-y-2">
-            <BookOpen className="w-8 h-8 text-textMuted mx-auto opacity-40" />
-            <p className="font-semibold text-text">No papers found</p>
-            <p className="text-xs">Try adjusting your search terms, year, or curriculum filter.</p>
+          <div>
+            <p className="font-bold text-text text-base">No examination papers found</p>
+            <p className="text-xs text-textMuted mt-1">Try adjusting your search keywords, exam year, or board filters.</p>
           </div>
-        ) : (
-          groupedPapers.map((group) => (
-            <div key={group.title} className="space-y-3">
-              {/* Group Section Header */}
+          {hasActiveFilters && (
+            <button
+              onClick={resetFilters}
+              className="btn-3d-glass px-4 py-2 rounded-xl text-xs font-semibold text-primary cursor-pointer mt-2"
+            >
+              Clear All Filters
+            </button>
+          )}
+        </div>
+      ) : viewMode === 'grid' ? (
+        /* ========================================================================= */
+        /* RESPONSIVE GRID CARDS VIEW (Orderly, Beautiful, Zero Overlap)             */
+        /* ========================================================================= */
+        <div className="space-y-6">
+          {groupedPapers.map((group) => (
+            <div key={group.title} className="space-y-3.5">
+              {/* Group Header */}
               {groupBy !== 'none' && (
-                <div className="flex items-center justify-between px-1.5 pt-1">
+                <div className="flex items-center justify-between px-2 pt-1">
                   <div className="flex items-center gap-2">
-                    <span className="font-bold text-sm sm:text-base text-text flex items-center gap-1.5">
+                    <span className="font-bold text-base sm:text-lg text-text flex items-center gap-2">
                       {groupBy === 'year' ? (
                         <Calendar className="w-4 h-4 text-primary" />
                       ) : (
@@ -535,105 +584,158 @@ export default function Papers() {
                       )}
                       <span>{group.title}</span>
                     </span>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-primary/10 text-primary border border-primary/20">
+                    <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-primary/15 text-primary border border-primary/30">
                       {group.count}
                     </span>
                   </div>
                   {group.subtitle && (
-                    <span className="text-[11px] text-textMuted font-medium">{group.subtitle}</span>
+                    <span className="text-xs text-textMuted font-medium">{group.subtitle}</span>
                   )}
                 </div>
               )}
 
-              {/* Papers inside this group */}
-              <div className="space-y-3">
+              {/* Orderly Responsive Cards Grid: 1 col on mobile, 2 cols on tablet/laptop, 3 cols on desktop */}
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                 {group.items.map((paper) => (
-                  <div key={paper.id} className="liquid-glass rounded-3xl p-4 sm:p-5 space-y-3.5 shadow-md hover:border-primary/50 hover:shadow-xl hover:shadow-primary/10 transition-all duration-200">
-                    {/* Top row: Subject, curriculum badge, paper year */}
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl flex items-center justify-center bg-primary/10 border border-primary/20 shrink-0">
-                          <BookOpen className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
+                  <div
+                    key={paper.id}
+                    className="liquid-glass rounded-3xl p-5 flex flex-col justify-between gap-4 border border-white/20 dark:border-white/10 shadow-lg hover:border-primary/40 hover:shadow-2xl hover:shadow-primary/10 transition-all duration-200 group"
+                  >
+                    {/* Top Row: Subject Title, Icon & Year/Session Badge */}
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-3 min-w-0">
+                        <div className="w-11 h-11 rounded-2xl flex items-center justify-center bg-primary/10 border border-primary/25 text-primary shrink-0 shadow-inner group-hover:scale-105 transition-transform">
+                          <BookOpen className="w-5 h-5" />
                         </div>
                         <div className="min-w-0">
-                          <h3 className="font-bold text-text text-sm sm:text-base leading-tight truncate">{paper.subject}</h3>
-                          <div className="flex items-center gap-1.5 text-[11px] text-textMuted mt-0.5 flex-wrap">
-                            <span className={`px-1.5 py-0.2 rounded font-semibold ${
-                              paper.curriculum === 'Cambridge' ? 'bg-blue-500/10 text-blue-400' : 'bg-emerald-500/10 text-emerald-400'
+                          <h3 className="font-bold text-text text-base leading-snug truncate" title={paper.subject}>
+                            {paper.subject}
+                          </h3>
+                          {/* Board, Grade Level & Paper Number */}
+                          <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                            <span className={`px-2 py-0.5 rounded-md text-[11px] font-bold ${
+                              paper.curriculum === 'Cambridge' 
+                                ? 'bg-blue-500/10 text-blue-500 border border-blue-500/25' 
+                                : 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/25'
                             }`}>
                               {paper.curriculum}
                             </span>
-                            <span>•</span>
-                            <span>{paper.grade_level || 'O-Level'}</span>
-                            <span>•</span>
-                            <span className="font-medium text-text">Paper {paper.paper_number}</span>
-                            {paper.variant && <span className="text-textMuted">(Var {paper.variant})</span>}
+                            <span className="px-2 py-0.5 rounded-md text-[11px] font-medium bg-surface/80 border border-border text-textMuted">
+                              {paper.grade_level || 'O-Level'}
+                            </span>
+                            <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-primary/10 text-primary border border-primary/20">
+                              Paper {paper.paper_number}{paper.variant ? ` (Var ${paper.variant})` : ''}
+                            </span>
                           </div>
                         </div>
                       </div>
 
-                      <div className="text-right shrink-0">
-                        <span className="inline-block px-2.5 py-1 rounded-xl text-xs font-bold bg-background border border-border text-text shadow-2xs">
-                          {paper.year} {paper.session ? `(${paper.session})` : ''}
+                      {/* Year & Session Badge */}
+                      <div className="shrink-0 text-right">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-bold bg-background/80 border border-border text-text shadow-xs">
+                          <Calendar className="w-3 h-3 text-textMuted" />
+                          <span>{paper.year}</span>
+                          {paper.session && <span className="text-textMuted text-[10px]">({paper.session})</span>}
                         </span>
                       </div>
                     </div>
 
-                    {/* Status / Feature Tags */}
-                    <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-                      {paper.question_count > 0 ? (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] font-semibold bg-primary/10 text-primary border border-primary/20">
-                          {paper.question_count} Questions
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] font-semibold bg-amber-500/10 text-amber-500 border border-amber-500/20">
-                          Pending Ingestion
-                        </span>
-                      )}
+                    {/* Information Strip: Orderly 2-Column Mini Box */}
+                    <div className="bg-background/40 rounded-2xl p-3 border border-border/60 grid grid-cols-2 gap-2 text-xs">
+                      {/* Questions count */}
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center text-primary shrink-0">
+                          <FileText className="w-3.5 h-3.5" />
+                        </div>
+                        <div className="min-w-0">
+                          <span className="text-[10px] text-textMuted block font-medium">Questions</span>
+                          <span className="font-semibold text-text truncate block text-xs">
+                            {paper.question_count > 0 ? `${paper.question_count} Extracted` : 'Pending'}
+                          </span>
+                        </div>
+                      </div>
 
-                      {paper.solution_count > 0 ? (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] font-semibold bg-success/15 text-success border border-success/30">
-                          Mark Scheme Available ({paper.solution_count})
-                        </span>
-                      ) : paper.mark_scheme_url ? (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                          Scheme PDF Attached
-                        </span>
-                      ) : null}
-
-                      {paper.pdf_url && (
-                        <a
-                          href={paper.pdf_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-medium text-primary bg-primary/5 border border-primary/20 hover:bg-primary/10 transition-colors ml-auto"
-                        >
-                          <span>PDF</span>
-                          <ExternalLink className="w-2.5 h-2.5 opacity-70" />
-                        </a>
-                      )}
+                      {/* Marking scheme status */}
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                          paper.solution_count > 0 ? 'bg-success/15 text-success' : paper.mark_scheme_url ? 'bg-blue-500/10 text-blue-400' : 'bg-amber-500/10 text-amber-500'
+                        }`}>
+                          <FileCheck className="w-3.5 h-3.5" />
+                        </div>
+                        <div className="min-w-0">
+                          <span className="text-[10px] text-textMuted block font-medium">Mark Scheme</span>
+                          <span className="font-semibold text-text truncate block text-xs">
+                            {paper.solution_count > 0 ? `${paper.solution_count} Solutions` : paper.mark_scheme_url ? 'PDF Attached' : 'None'}
+                          </span>
+                        </div>
+                      </div>
                     </div>
 
-                    {/* Action Buttons */}
-                    <div className="pt-2 border-t border-border/60 flex flex-col gap-2">
-                      {/* Primary Action Button: Mark Paper */}
+                    {/* Document Download Links (if available) */}
+                    {(paper.pdf_url || paper.mark_scheme_url) && (
+                      <div className="flex items-center gap-2 pt-0.5 flex-wrap">
+                        {paper.pdf_url && (
+                          <a
+                            href={paper.pdf_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[11px] font-semibold text-primary bg-primary/5 hover:bg-primary/10 border border-primary/20 transition-colors"
+                            title="Open Question Paper PDF"
+                          >
+                            <FileText className="w-3 h-3" />
+                            <span>Paper PDF</span>
+                            <ExternalLink className="w-2.5 h-2.5 opacity-60" />
+                          </a>
+                        )}
+                        {paper.mark_scheme_url && (
+                          <a
+                            href={paper.mark_scheme_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/5 hover:bg-emerald-500/10 border border-emerald-500/20 transition-colors"
+                            title="Open Official Mark Scheme PDF"
+                          >
+                            <FileCheck className="w-3 h-3" />
+                            <span>Scheme PDF</span>
+                            <ExternalLink className="w-2.5 h-2.5 opacity-60" />
+                          </a>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Action Buttons Area: No overlapping elements! */}
+                    <div className="pt-3 border-t border-border/60 flex flex-col gap-2.5">
+                      {/* Primary 3D Marking Button */}
                       <button
                         type="button"
                         onClick={() => setSelectedPaperForMarking(paper)}
-                        className="btn-3d-primary w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-2xl text-xs font-bold cursor-pointer shadow-md whitespace-nowrap"
+                        className="btn-3d-primary w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-2xl text-xs font-bold cursor-pointer"
                       >
-                        <Sparkles className="w-3.5 h-3.5 shrink-0" />
-                        <span className="whitespace-nowrap">{isStudent ? 'Mark My Paper with AI' : 'Mark Students Papers'}</span>
+                        <Sparkles className="w-4 h-4 shrink-0" />
+                        <span className="truncate">{isStudent ? 'Mark My Paper with AI' : 'Mark Students Papers'}</span>
                         {paper.marked_count > 0 && (
-                          <span className="ml-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-white/20 text-white font-extrabold whitespace-nowrap shrink-0">
+                          <span className="ml-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-white/25 text-white font-extrabold shrink-0 shadow-inner">
                             <span>{paper.marked_count}</span>
                             <span className="opacity-90 font-medium">marked</span>
                           </span>
                         )}
                       </button>
 
-                      {/* Secondary Action Row: Scheme, View Details, Delete */}
-                      <div className="flex items-center gap-2">
+                      {/* Secondary Action Toolbar */}
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setViewingPaperId(paper.id);
+                            setInitialModalTab('questions');
+                          }}
+                          className="btn-3d-glass flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-semibold text-text cursor-pointer truncate"
+                          title="View Questions & Booklets"
+                        >
+                          <Eye className="w-3.5 h-3.5 shrink-0 text-textMuted" />
+                          <span className="truncate">Questions</span>
+                        </button>
+
                         {paper.solution_count > 0 ? (
                           <button
                             type="button"
@@ -641,316 +743,234 @@ export default function Papers() {
                               setViewingPaperId(paper.id);
                               setInitialModalTab('scheme');
                             }}
-                            className="flex-1 btn-3d-glass inline-flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-semibold text-success hover:text-success cursor-pointer"
+                            className="btn-3d-glass flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-semibold text-success cursor-pointer truncate"
+                            title="View Official Worked Solutions"
                           >
-                            <FileCheck className="w-3.5 h-3.5" />
-                            <span>Scheme ({paper.solution_count})</span>
+                            <FileCheck className="w-3.5 h-3.5 shrink-0 text-success" />
+                            <span className="truncate">Scheme ({paper.solution_count})</span>
                           </button>
-                        ) : paper.mark_scheme_url ? (
-                          <a
-                            href={paper.mark_scheme_url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="flex-1 btn-3d-glass inline-flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-medium text-text"
+                        ) : !isStudent ? (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedPaperForMs(paper)}
+                            className="btn-3d-glass flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-semibold text-primary cursor-pointer truncate"
+                            title="Attach Official Marking Scheme"
                           >
-                            <ExternalLink className="w-3.5 h-3.5 text-textMuted" />
-                            <span>Scheme PDF</span>
-                          </a>
-                        ) : null}
+                            <Plus className="w-3.5 h-3.5 shrink-0 text-primary" />
+                            <span className="truncate">Attach Scheme</span>
+                          </button>
+                        ) : (
+                          <div className="flex items-center justify-center text-[11px] text-textMuted italic bg-background/30 rounded-xl border border-border/40 py-2 px-3">
+                            No Scheme
+                          </div>
+                        )}
+                      </div>
 
-                        <button
-                          onClick={() => {
-                            setViewingPaperId(paper.id);
-                            setInitialModalTab('questions');
-                          }}
-                          className="flex-1 btn-3d-glass inline-flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-semibold text-text cursor-pointer"
-                        >
-                          <Eye className="w-3.5 h-3.5" />
-                          <span>View Questions</span>
-                        </button>
+                      {/* Admin/Teacher Extra Options: Extract & Delete in a clean footer */}
+                      {!isStudent && (
+                        <div className="flex items-center justify-between pt-1 text-xs text-textMuted">
+                          {(!paper.ingestion_jobs || paper.ingestion_jobs[0]?.status !== 'completed') ? (
+                            <button
+                              type="button"
+                              onClick={() => handleExtractPaper(paper.id)}
+                              disabled={extractingPaperId === paper.id}
+                              className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline cursor-pointer disabled:opacity-50"
+                            >
+                              <RefreshCw className={`w-3 h-3 ${extractingPaperId === paper.id ? 'animate-spin' : ''}`} />
+                              <span>{extractingPaperId === paper.id ? 'Extracting...' : 'Extract Content'}</span>
+                            </button>
+                          ) : (
+                            <span className="text-[11px] text-success flex items-center gap-1 font-medium">
+                              <CheckCircle2 className="w-3 h-3" />
+                              <span>Ingested</span>
+                            </span>
+                          )}
 
-                        {!isStudent && (
                           <button
                             onClick={() => handleDelete(paper.id)}
-                            className="p-2 text-textMuted hover:text-error hover:bg-error/10 rounded-xl transition-colors cursor-pointer border border-border shrink-0"
+                            className="p-1 text-textMuted hover:text-error hover:bg-error/10 rounded-lg transition-colors cursor-pointer"
                             title="Delete Paper"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
-                        )}
-                      </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
               </div>
             </div>
-          ))
-        )}
-      </div>
-
-      {/* Desktop Papers Table (Visible on lg+) */}
-      <div className="hidden lg:block liquid-glass rounded-3xl overflow-hidden shadow-xl border border-border/80">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-surface-sunken/60 border-b border-border text-textMuted text-xs font-semibold uppercase tracking-wider">
-                <th className="p-4 font-medium">Subject</th>
-                <th className="p-4 font-medium">Details</th>
-                <th className="p-4 font-medium">Type</th>
-                <th className="p-4 font-medium">Year & Session</th>
-                <th className="p-4 font-medium">Status</th>
-                <th className="p-4 font-medium">PDF File</th>
-                <th className="p-4 font-medium">Marking Scheme</th>
-                <th className="p-4 font-medium whitespace-nowrap">{isStudent ? 'AI Paper Marking' : 'Student Papers'}</th>
-                <th className="p-4 font-medium text-right whitespace-nowrap">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {loading ? (
-                 <tr>
-                 <td colSpan={9} className="p-8 text-center text-textMuted">
-                   Loading papers...
-                 </td>
-               </tr>
-              ) : filteredPapers.length === 0 ? (
-                <tr>
-                  <td colSpan={9} className="p-8 text-center text-textMuted">
-                    No papers found matching your criteria.
-                  </td>
+          ))}
+        </div>
+      ) : (
+        /* ========================================================================= */
+        /* STREAMLINED TABLE VIEW (Spacious, No Column Crowding)                     */
+        /* ========================================================================= */
+        <div className="liquid-glass rounded-3xl overflow-hidden shadow-xl border border-border/80">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse min-w-[850px]">
+              <thead>
+                <tr className="bg-surface-sunken/60 border-b border-border text-textMuted text-xs font-semibold uppercase tracking-wider">
+                  <th className="p-4 font-medium min-w-[220px]">Paper & Subject</th>
+                  <th className="p-4 font-medium min-w-[120px]">Year & Session</th>
+                  <th className="p-4 font-medium min-w-[130px]">Content Status</th>
+                  <th className="p-4 font-medium min-w-[130px]">Documents</th>
+                  <th className="p-4 font-medium min-w-[150px]">Mark Scheme</th>
+                  <th className="p-4 font-medium min-w-[190px]">{isStudent ? 'AI Marking' : 'Student Papers'}</th>
+                  <th className="p-4 font-medium text-right min-w-[100px]">Actions</th>
                 </tr>
-              ) : (
-                filteredPapers.map((paper) => (
-                  <tr key={paper.id} className="hover:bg-background transition-colors group">
+              </thead>
+              <tbody className="divide-y divide-border/60">
+                {filteredPapers.map((paper) => (
+                  <tr key={paper.id} className="hover:bg-background/40 transition-colors group">
+                    {/* Paper & Subject */}
                     <td className="p-4">
-                      <div className="flex items-center space-x-3">
-                        <div className={`w-10 h-10 rounded-2xl flex items-center justify-center bg-primary/10 border border-primary/20 shrink-0`}>
-                          <BookOpen className="w-5 h-5 text-primary" />
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-2xl flex items-center justify-center bg-primary/10 border border-primary/20 shrink-0 text-primary">
+                          <BookOpen className="w-5 h-5" />
                         </div>
-                        <div>
-                          <span className="font-medium text-text">{paper.subject}</span>
-                          <span className="text-xs text-textMuted block mt-0.5">{paper.curriculum} • {paper.grade_level}</span>
+                        <div className="min-w-0">
+                          <span className="font-bold text-text text-sm block truncate">{paper.subject}</span>
+                          <div className="flex items-center gap-1.5 mt-0.5 text-xs text-textMuted">
+                            <span className="font-semibold text-primary">{paper.curriculum}</span>
+                            <span>•</span>
+                            <span>Paper {paper.paper_number}</span>
+                            {paper.variant && <span>(Var {paper.variant})</span>}
+                          </div>
                         </div>
                       </div>
                     </td>
-                    <td className="p-4 text-textMuted">
-                      <span className="block text-text font-medium">Paper {paper.paper_number}</span>
-                      {paper.variant && <span className="text-xs">Variant {paper.variant}</span>}
+
+                    {/* Year & Session */}
+                    <td className="p-4 text-xs">
+                      <span className="block font-bold text-text">{paper.year}</span>
+                      <span className="text-textMuted">{paper.session || 'Main'}</span>
                     </td>
+
+                    {/* Content Status */}
                     <td className="p-4">
-                      {paper.type === 'ms' ? (
-                        <span className="inline-flex items-center px-2.5 py-1 rounded-xl text-xs font-medium bg-success/10 text-success border border-success/20">
-                          Marking Scheme
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center px-2.5 py-1 rounded-xl text-xs font-medium bg-primary/10 text-primary border border-primary/20">
-                          Question Paper
-                        </span>
-                      )}
-                    </td>
-                    <td className="p-4 text-textMuted">
-                      <span className="block text-text">{paper.year}</span>
-                      <span className="text-xs">{paper.session || 'N/A'}</span>
-                    </td>
-                    <td className="p-4">
-                      <div className="flex items-center gap-2">
-                        {paper.ingestion_jobs && paper.ingestion_jobs.length > 0 ? (
-                          <div className="flex flex-col gap-0.5">
-                          <span className={`inline-flex items-center px-2.5 py-1 rounded-xl text-xs font-medium ${
-                            paper.ingestion_jobs[0].status === 'completed' ? 'bg-success/10 text-success border border-success/20' :
-                            paper.ingestion_jobs[0].status === 'failed' ? 'bg-error/10 text-error border border-error/20' :
-                            'bg-warning/10 text-warning border border-warning/20'
-                          }`}>
-                            {paper.ingestion_jobs[0].status.charAt(0).toUpperCase() + paper.ingestion_jobs[0].status.slice(1)}
+                      <div className="flex flex-col gap-1">
+                        {paper.question_count > 0 ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-semibold bg-primary/10 text-primary border border-primary/20 w-fit">
+                            {paper.question_count} Questions
                           </span>
-                          {paper.question_count > 0 && (
-                            <span className="text-[11px] text-textMuted font-medium pl-1">
-                              {paper.question_count} Questions
-                            </span>
-                          )}
-                        </div>
                         ) : (
-                          <span className="inline-flex items-center px-2.5 py-1 rounded-xl text-xs font-medium bg-surface text-textMuted border border-border">
-                            Legacy
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-semibold bg-amber-500/10 text-amber-500 border border-amber-500/20 w-fit">
+                            Pending
                           </span>
                         )}
-
-                        {(!paper.ingestion_jobs || paper.ingestion_jobs[0]?.status !== 'completed') && (
+                        {!isStudent && (!paper.ingestion_jobs || paper.ingestion_jobs[0]?.status !== 'completed') && (
                           <button
                             type="button"
                             onClick={() => handleExtractPaper(paper.id)}
                             disabled={extractingPaperId === paper.id}
-                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors disabled:opacity-50 cursor-pointer"
-                            title="Run Agent Extraction on Supabase Edge Functions"
+                            className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline cursor-pointer disabled:opacity-50"
                           >
-                            {extractingPaperId === paper.id ? (
-                              <RefreshCw className="w-3 h-3 animate-spin" />
-                            ) : (
-                              <Sparkles className="w-3 h-3" />
-                            )}
-                            <span>{extractingPaperId === paper.id ? 'Extracting...' : 'Extract'}</span>
+                            <RefreshCw className={`w-3 h-3 ${extractingPaperId === paper.id ? 'animate-spin' : ''}`} />
+                            <span>Extract</span>
                           </button>
                         )}
                       </div>
                     </td>
-                    <td className="p-4">
-                      {paper.pdf_url ? (
-                        <a href={paper.pdf_url} target="_blank" rel="noreferrer" className="text-primary text-sm hover:underline inline-flex items-center gap-1">
-                          <span>View PDF</span>
-                          <ExternalLink className="w-3 h-3 opacity-70" />
-                        </a>
-                      ) : (
-                        <span className="text-textMuted text-sm">No PDF</span>
-                      )}
+
+                    {/* Documents */}
+                    <td className="p-4 text-xs">
+                      <div className="flex flex-col gap-1">
+                        {paper.pdf_url ? (
+                          <a href={paper.pdf_url} target="_blank" rel="noreferrer" className="text-primary hover:underline inline-flex items-center gap-1 font-medium">
+                            <FileText className="w-3 h-3" />
+                            <span>Exam PDF</span>
+                            <ExternalLink className="w-2.5 h-2.5 opacity-60" />
+                          </a>
+                        ) : (
+                          <span className="text-textMuted italic">No Paper PDF</span>
+                        )}
+                        {paper.mark_scheme_url && (
+                          <a href={paper.mark_scheme_url} target="_blank" rel="noreferrer" className="text-emerald-500 hover:underline inline-flex items-center gap-1 font-medium">
+                            <FileCheck className="w-3 h-3" />
+                            <span>Scheme PDF</span>
+                            <ExternalLink className="w-2.5 h-2.5 opacity-60" />
+                          </a>
+                        )}
+                      </div>
                     </td>
 
-                    {/* Dedicated Marking Scheme Column */}
+                    {/* Mark Scheme */}
                     <td className="p-4">
-                      {paper.mark_scheme_url ? (
-                        <div className="flex items-center space-x-2">
-                          {paper.solution_count > 0 ? (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setViewingPaperId(paper.id);
-                                setInitialModalTab('scheme');
-                              }}
-                              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-semibold bg-success/15 text-success border border-success/30 hover:bg-success/25 transition-all cursor-pointer shadow-sm"
-                              title="View Extracted Marking Scheme Rubrics & Worked Solutions"
-                            >
-                              <FileCheck className="w-3.5 h-3.5" />
-                              <span>View Scheme ({paper.solution_count})</span>
-                            </button>
-                          ) : !isStudent ? (
-                            <button
-                              type="button"
-                              onClick={() => handleProcessMarkScheme(paper.id, paper.mark_scheme_url)}
-                              disabled={processingMsPaperId === paper.id}
-                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium bg-amber-500/10 text-amber-500 border border-amber-500/20 hover:bg-amber-500/20 transition-colors disabled:opacity-50 cursor-pointer"
-                              title="Extract rubrics and solutions with Marking Scheme Agent"
-                            >
-                              {processingMsPaperId === paper.id ? (
-                                <RefreshCw className="w-3 h-3 animate-spin" />
-                              ) : (
-                                <Sparkles className="w-3 h-3" />
-                              )}
-                              <span>{processingMsPaperId === paper.id ? 'Extracting...' : 'Extract Scheme'}</span>
-                            </button>
-                          ) : null}
-
-                          <a 
-                            href={paper.mark_scheme_url} 
-                            target="_blank" 
-                            rel="noreferrer" 
-                            className="p-1.5 text-textMuted hover:text-success hover:bg-success/10 rounded-lg transition-colors"
-                            title="Open Original Marking Scheme PDF in new tab"
-                          >
-                            <ExternalLink className="w-3.5 h-3.5 opacity-70" />
-                          </a>
-
-                          {!isStudent && (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => setSelectedPaperForMs(paper)}
-                                className="p-1.5 text-textMuted hover:text-primary hover:bg-primary/10 rounded-lg transition-colors cursor-pointer"
-                                title="Update / Replace Marking Scheme"
-                              >
-                                <Edit className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteMarkScheme(paper)}
-                                className="p-1.5 text-textMuted hover:text-error hover:bg-error/10 rounded-lg transition-colors cursor-pointer"
-                                title="Delete Marking Scheme"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </>
-                          )}
-                        </div>
+                      {paper.solution_count > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setViewingPaperId(paper.id);
+                            setInitialModalTab('scheme');
+                          }}
+                          className="btn-3d-glass inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-success cursor-pointer"
+                        >
+                          <FileCheck className="w-3.5 h-3.5" />
+                          <span>Scheme ({paper.solution_count})</span>
+                        </button>
                       ) : !isStudent ? (
                         <button
                           type="button"
                           onClick={() => setSelectedPaperForMs(paper)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-medium bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors cursor-pointer"
-                          title="Attach or upload marking scheme"
+                          className="btn-3d-glass inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-primary cursor-pointer"
                         >
-                          <Plus className="w-3 h-3" />
+                          <Plus className="w-3.5 h-3.5" />
                           <span>Attach Scheme</span>
                         </button>
                       ) : (
-                        <span className="text-xs text-textMuted italic">Pending educator</span>
+                        <span className="text-xs text-textMuted italic">No Scheme</span>
                       )}
                     </td>
 
-                    {/* Student Papers / Bulk Marking Column */}
-                    <td className="p-4 whitespace-nowrap">
-                      {isStudent ? (
-                        <button
-                          type="button"
-                          onClick={() => setSelectedPaperForMarking(paper)}
-                          className="btn-3d-primary inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap cursor-pointer shadow-md group"
-                          title="Upload your handwritten answers to get marked by the AI Senior Examiner"
-                        >
-                          <Sparkles className="w-3.5 h-3.5 text-white group-hover:rotate-12 transition-transform shrink-0" />
-                          <span className="whitespace-nowrap font-bold">Mark My Paper</span>
-                          {paper.marked_count > 0 && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-white/20 text-white font-extrabold whitespace-nowrap shrink-0 shadow-xs">
-                              <span>{paper.marked_count}</span>
-                              <span className="opacity-90 font-medium">marked</span>
-                            </span>
-                          )}
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => setSelectedPaperForMarking(paper)}
-                          className="btn-3d-primary inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap cursor-pointer shadow-md group"
-                          title="Mark student exam scripts with AI"
-                        >
-                          <Sparkles className="w-3.5 h-3.5 text-white group-hover:rotate-12 transition-transform shrink-0" />
-                          <span className="whitespace-nowrap font-bold">Mark Students Papers</span>
-                          {paper.marked_count > 0 && (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] bg-white/20 text-white font-extrabold whitespace-nowrap shrink-0 shadow-xs">
-                              {paper.marked_count}
-                            </span>
-                          )}
-                        </button>
-                      )}
+                    {/* AI Marking */}
+                    <td className="p-4">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedPaperForMarking(paper)}
+                        className="btn-3d-primary inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>{isStudent ? 'Mark My Paper' : 'Mark Paper'}</span>
+                        {paper.marked_count > 0 && (
+                          <span className="ml-1 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] bg-white/20 text-white font-extrabold">
+                            {paper.marked_count}
+                          </span>
+                        )}
+                      </button>
                     </td>
 
+                    {/* Actions */}
                     <td className="p-4 text-right">
-                      <div className="flex items-center justify-end space-x-3">
+                      <div className="flex items-center justify-end gap-1.5">
                         <button 
                           onClick={() => {
                             setViewingPaperId(paper.id);
                             setInitialModalTab('questions');
                           }}
-                          className="flex items-center space-x-1 p-2 text-textMuted hover:text-primary hover:bg-primary/10 rounded-xl transition-colors cursor-pointer" 
-                          title="View Paper Details"
+                          className="p-2 text-textMuted hover:text-primary hover:bg-primary/10 rounded-xl transition-colors cursor-pointer" 
+                          title="View Paper Details & Booklets"
                         >
                           <Eye className="w-4 h-4" />
-                          <span className="text-sm font-medium">View</span>
                         </button>
                         {!isStudent && (
                           <button 
                             onClick={() => handleDelete(paper.id)}
-                            className="flex items-center space-x-1 p-2 text-textMuted hover:text-error hover:bg-error/10 rounded-xl transition-colors cursor-pointer" 
+                            className="p-2 text-textMuted hover:text-error hover:bg-error/10 rounded-xl transition-colors cursor-pointer" 
                             title="Delete Paper"
                           >
                             <Trash2 className="w-4 h-4" />
-                            <span className="text-sm font-medium">Delete</span>
                           </button>
                         )}
                       </div>
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Modals */}
       {showFormModal && (
