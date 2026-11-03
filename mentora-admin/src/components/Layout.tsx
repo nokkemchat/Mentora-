@@ -236,9 +236,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         <div className="pointer-events-none fixed top-1/2 -left-32 w-96 h-96 rounded-full bg-indigo-500/10 blur-[130px] z-0" />
         <div className="pointer-events-none fixed -bottom-32 right-1/4 w-80 h-80 rounded-full bg-purple-500/10 blur-[120px] z-0" />
 
-        {/* Subtle Watermark Logo */}
-        <div className="fixed inset-0 md:left-64 pointer-events-none opacity-[0.035] md:opacity-[0.05] z-0 mix-blend-luminosity overflow-hidden flex items-center justify-center">
-          <img src="/logo.png" alt="Watermark" className="w-[180%] md:w-[150%] max-w-none object-cover" />
+        {/* Cozy Furry 'Z' Ambient Background Watermark */}
+        <div className="fixed inset-0 md:left-64 pointer-events-none z-0 overflow-hidden flex items-center justify-center p-6">
+          <img 
+            src="/logo.png" 
+            alt="Ziviso Furry Z Watermark" 
+            className="w-[320px] h-[320px] sm:w-[460px] sm:h-[460px] md:w-[560px] md:h-[560px] max-w-[85vw] max-h-[85vh] object-contain opacity-[0.16] sm:opacity-[0.20] dark:opacity-[0.26] drop-shadow-[0_0_60px_rgba(92,103,242,0.35)] select-none transition-opacity duration-300" 
+          />
         </div>
 
         {/* Content with responsive padding */}

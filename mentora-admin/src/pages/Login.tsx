@@ -113,6 +113,15 @@ export default function Login() {
       <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-primary/20 rounded-full blur-[100px] pointer-events-none" />
       <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-500/10 rounded-full blur-[100px] pointer-events-none" />
 
+      {/* Cozy Furry 'Z' Ambient Background Watermark */}
+      <div className="absolute inset-0 pointer-events-none flex items-center justify-center z-0 overflow-hidden">
+        <img 
+          src="/logo.png" 
+          alt="Z Watermark" 
+          className="w-[450px] sm:w-[580px] max-w-[90vw] object-contain opacity-[0.14] dark:opacity-[0.22] drop-shadow-[0_0_60px_rgba(92,103,242,0.35)] select-none" 
+        />
+      </div>
+
       <div className="w-full max-w-md liquid-glass rounded-3xl p-8 sm:p-10 relative z-10 shadow-2xl border border-primary/20">
         <div className="flex flex-col items-center mb-6 text-center">
           <div className="flex justify-center mb-4">
