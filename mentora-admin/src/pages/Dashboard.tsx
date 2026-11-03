@@ -196,7 +196,7 @@ export default function Dashboard() {
           <>
             <Link
               to="/papers"
-              className="flex items-center gap-4 p-4 rounded-3xl liquid-glass hover:border-primary/40 transition-all shadow-sm active:scale-[0.98]"
+              className="flex items-center gap-4 p-4 rounded-3xl liquid-glass transition-all shadow-sm active:scale-[0.98]"
             >
               <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-primary to-indigo-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-primary/30 border border-white/20">
                 <Sparkles className="w-6 h-6" />
@@ -212,7 +212,7 @@ export default function Dashboard() {
 
             <Link
               to="/papers"
-              className="flex items-center gap-4 p-4 rounded-3xl liquid-glass hover:border-primary/40 transition-all shadow-sm active:scale-[0.98]"
+              className="flex items-center gap-4 p-4 rounded-3xl liquid-glass transition-all shadow-sm active:scale-[0.98]"
             >
               <div className="w-12 h-12 rounded-2xl bg-blue-500/15 text-blue-400 border border-blue-500/25 flex items-center justify-center shrink-0">
                 <FileText className="w-6 h-6" />
@@ -228,7 +228,7 @@ export default function Dashboard() {
 
             <Link
               to="/papers"
-              className="flex items-center gap-4 p-4 rounded-3xl liquid-glass hover:border-primary/40 transition-all shadow-sm active:scale-[0.98]"
+              className="flex items-center gap-4 p-4 rounded-3xl liquid-glass transition-all shadow-sm active:scale-[0.98]"
             >
               <div className="w-12 h-12 rounded-2xl bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 flex items-center justify-center shrink-0">
                 <CheckCircle2 className="w-6 h-6" />
@@ -246,7 +246,7 @@ export default function Dashboard() {
           <>
             <Link
               to="/papers"
-              className="flex items-center gap-4 p-4 rounded-3xl liquid-glass hover:border-primary/40 transition-all shadow-sm active:scale-[0.98]"
+              className="flex items-center gap-4 p-4 rounded-3xl liquid-glass transition-all shadow-sm active:scale-[0.98]"
             >
               <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-primary to-indigo-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-primary/30 border border-white/20">
                 <Sparkles className="w-6 h-6" />
@@ -262,7 +262,7 @@ export default function Dashboard() {
 
             <Link
               to="/papers"
-              className="flex items-center gap-4 p-4 rounded-3xl liquid-glass hover:border-primary/40 transition-all shadow-sm active:scale-[0.98]"
+              className="flex items-center gap-4 p-4 rounded-3xl liquid-glass transition-all shadow-sm active:scale-[0.98]"
             >
               <div className="w-12 h-12 rounded-2xl bg-purple-500/10 text-purple-500 flex items-center justify-center shrink-0">
                 <FileText className="w-6 h-6" />
@@ -278,7 +278,7 @@ export default function Dashboard() {
 
             <Link
               to="/courses"
-              className="flex items-center gap-3.5 p-4 rounded-3xl liquid-glass hover:border-primary/40 transition-all shadow-sm active:scale-[0.98]"
+              className="flex items-center gap-3.5 p-4 rounded-3xl liquid-glass transition-all shadow-sm active:scale-[0.98]"
             >
               <div className="w-12 h-12 rounded-2xl bg-blue-500/10 text-blue-500 flex items-center justify-center shrink-0">
                 <BookOpen className="w-6 h-6" />

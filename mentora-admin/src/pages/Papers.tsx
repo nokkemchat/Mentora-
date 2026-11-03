@@ -599,7 +599,7 @@ export default function Papers() {
                 {group.items.map((paper) => (
                   <div
                     key={paper.id}
-                    className="liquid-glass rounded-3xl p-5 flex flex-col justify-between gap-4 border border-white/20 dark:border-white/10 shadow-lg hover:border-primary/40 hover:shadow-2xl hover:shadow-primary/10 transition-all duration-200 group"
+                    className="liquid-glass rounded-3xl p-5 flex flex-col justify-between gap-4 shadow-md transition-all duration-200 group"
                   >
                     {/* Top Row: Subject Title, Icon & Year/Session Badge */}
                     <div className="flex items-start justify-between gap-3">
