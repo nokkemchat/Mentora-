@@ -130,8 +130,8 @@ export default function PaperFormModal({ onClose, onSuccess }: PaperFormModalPro
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-background rounded-3xl w-full max-w-2xl flex flex-col overflow-hidden shadow-xl border border-border">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 dark:bg-black/70 backdrop-blur-md p-4 animate-fade-in">
+      <div className="liquid-glass-modal rounded-3xl w-full max-w-2xl flex flex-col overflow-hidden shadow-xl">
         {/* Header */}
         <div className="flex justify-between items-center p-6 border-b border-border bg-surface">
           <div>

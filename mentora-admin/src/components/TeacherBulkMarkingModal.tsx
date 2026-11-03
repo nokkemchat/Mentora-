@@ -1316,11 +1316,11 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
     : 0;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 overflow-hidden">
-      <div className="liquid-glass border border-white/20 dark:border-white/10 rounded-3xl w-full max-w-6xl h-[94dvh] max-h-[94dvh] flex flex-col shadow-2xl overflow-hidden backdrop-blur-2xl">
+    <div className="fixed inset-0 z-50 bg-slate-950/40 dark:bg-black/70 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 overflow-hidden animate-fade-in">
+      <div className="liquid-glass-modal rounded-3xl w-full max-w-6xl h-[94dvh] max-h-[94dvh] flex flex-col shadow-2xl overflow-hidden">
         
         {/* Header */}
-        <div className="px-4 sm:px-6 py-3.5 sm:py-5 border-b border-border/80 bg-background/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
+        <div className="px-4 sm:px-6 py-3.5 sm:py-5 border-b border-border/60 bg-surface/30 backdrop-blur-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-primary/10 border border-primary/25 flex items-center justify-center text-primary shrink-0 shadow-inner">
               <Sparkles className="w-5 h-5 sm:w-6 sm:h-6" />
@@ -1394,9 +1394,9 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
         </div>
 
         {/* Quick Analytics Bar (Hidden on mobile to keep interface focused and distraction-free) */}
-        <div className="hidden md:grid grid-cols-2 sm:grid-cols-4 gap-3 px-6 py-3.5 bg-surface border-b border-border/80 shrink-0">
-          <div className="bg-background/60 border border-border/60 rounded-2xl p-3 flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-blue-500/10 text-blue-400 flex items-center justify-center shrink-0">
+        <div className="hidden md:grid grid-cols-2 sm:grid-cols-4 gap-3 px-6 py-3.5 bg-surface/20 border-b border-border/60 shrink-0">
+          <div className="liquid-glass-well rounded-2xl p-3 flex items-center gap-3 border border-white/40 dark:border-white/10 shadow-sm">
+            <div className="w-9 h-9 rounded-xl bg-blue-500/15 text-blue-500 dark:text-blue-400 flex items-center justify-center shrink-0">
               <Users className="w-4 h-4" />
             </div>
             <div>
@@ -1409,8 +1409,8 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
             </div>
           </div>
 
-          <div className="bg-background/60 border border-border/60 rounded-2xl p-3 flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-purple-500/10 text-purple-400 flex items-center justify-center shrink-0">
+          <div className="liquid-glass-well rounded-2xl p-3 flex items-center gap-3 border border-white/40 dark:border-white/10 shadow-sm">
+            <div className="w-9 h-9 rounded-xl bg-purple-500/15 text-purple-500 dark:text-purple-400 flex items-center justify-center shrink-0">
               <BarChart3 className="w-4 h-4" />
             </div>
             <div>
@@ -1421,8 +1421,8 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
             </div>
           </div>
 
-          <div className="bg-background/60 border border-border/60 rounded-2xl p-3 flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-success/10 text-success flex items-center justify-center shrink-0">
+          <div className="liquid-glass-well rounded-2xl p-3 flex items-center gap-3 border border-white/40 dark:border-white/10 shadow-sm">
+            <div className="w-9 h-9 rounded-xl bg-emerald-500/15 text-emerald-500 flex items-center justify-center shrink-0">
               <Award className="w-4 h-4" />
             </div>
             <div>
@@ -1433,8 +1433,8 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
             </div>
           </div>
 
-          <div className="bg-background/60 border border-border/60 rounded-2xl p-3 flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-amber-500/10 text-amber-400 flex items-center justify-center shrink-0">
+          <div className="liquid-glass-well rounded-2xl p-3 flex items-center gap-3 border border-white/40 dark:border-white/10 shadow-sm">
+            <div className="w-9 h-9 rounded-xl bg-amber-500/15 text-amber-500 dark:text-amber-400 flex items-center justify-center shrink-0">
               <CheckCheck className="w-4 h-4" />
             </div>
             <div>
@@ -1445,7 +1445,7 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
         </div>
 
         {/* Search & Actions Bar */}
-        <div className="px-6 py-3 border-b border-border bg-surface flex items-center justify-between gap-4 shrink-0">
+        <div className="px-6 py-3 border-b border-border/60 bg-surface/15 flex items-center justify-between gap-4 shrink-0">
           <div className="relative flex-1 max-w-md">
             <Search className="w-4 h-4 text-textMuted absolute left-3.5 top-1/2 -translate-y-1/2" />
             <input
@@ -1453,14 +1453,14 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
               placeholder="Search by student name or candidate ID..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-background border border-border rounded-xl text-sm text-text placeholder-textMuted focus:outline-none focus:border-primary transition-colors"
+              className="w-full pl-10 pr-4 py-2 bg-background/80 dark:bg-background/50 border border-border rounded-xl text-sm text-text placeholder-textMuted focus:outline-none focus:border-primary transition-colors shadow-inner"
             />
           </div>
 
           <button
             onClick={fetchMarkedPapers}
             disabled={loading}
-            className="flex items-center gap-1.5 px-3 py-2 bg-background hover:bg-border/50 border border-border rounded-xl text-xs font-medium text-textMuted hover:text-text transition-colors cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-2 bg-background/70 hover:bg-border/50 border border-border rounded-xl text-xs font-medium text-textMuted hover:text-text transition-colors cursor-pointer"
             title="Refresh List"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
@@ -1469,7 +1469,7 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
         </div>
 
         {/* Students Table / List */}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-y-auto p-6 bg-surface-sunken/15">
           {/* Active Marking Queue Panel */}
           {queue.length > 0 && (() => {
             const activeItems = queue.filter(q => q.status === 'uploading' || q.status === 'marking');
@@ -1800,14 +1800,17 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
               <p className="text-sm font-medium">Loading marked student papers...</p>
             </div>
           ) : filteredPapers.length === 0 ? (
-            <div className="text-center py-16 px-4 bg-background/40 border border-dashed border-border rounded-3xl max-w-xl mx-auto my-6">
-              <div className="w-16 h-16 rounded-3xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary mx-auto mb-4">
+            <div className="text-center py-16 px-8 liquid-glass-well border border-primary/20 rounded-3xl max-w-xl mx-auto my-8 shadow-xl relative overflow-hidden">
+              <div className="absolute -top-12 -right-12 w-36 h-36 rounded-full bg-primary/15 blur-2xl pointer-events-none" />
+              <div className="absolute -bottom-12 -left-12 w-36 h-36 rounded-full bg-indigo-500/15 blur-2xl pointer-events-none" />
+              
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-indigo-600 text-white flex items-center justify-center mx-auto mb-4 shadow-lg shadow-primary/30 border border-white/20">
                 <FileText className="w-8 h-8" />
               </div>
-              <h3 className="text-lg font-bold text-text">
+              <h3 className="text-xl font-bold text-text">
                 {isStudent ? 'No Marked Submissions Yet' : 'No Marked Student Papers Yet'}
               </h3>
-              <p className="text-sm text-textMuted mt-1.5 max-w-md mx-auto">
+              <p className="text-sm text-textMuted mt-2 max-w-md mx-auto leading-relaxed">
                 {searchQuery 
                   ? 'No records found matching your search term.' 
                   : isStudent
@@ -1820,7 +1823,7 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                     resetUploadForm();
                     setShowUploadModal(true);
                   }}
-                  className="mt-5 inline-flex items-center gap-2 btn-3d-primary px-5 py-2.5 rounded-2xl font-semibold text-sm cursor-pointer"
+                  className="mt-6 inline-flex items-center gap-2 btn-3d-primary px-6 py-3 rounded-2xl font-bold text-sm cursor-pointer shadow-lg shadow-primary/25 hover:scale-[1.02] active:scale-[0.98] transition-transform"
                 >
                   <Plus className="w-4 h-4" />
                   <span>{isStudent ? 'Mark My Paper' : 'Mark First Student Paper'}</span>
@@ -1828,10 +1831,10 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
               )}
             </div>
           ) : (
-            <div className="bg-background/60 border border-border rounded-2xl overflow-hidden shadow-sm">
+            <div className="liquid-glass-well rounded-2xl overflow-hidden border border-white/50 dark:border-white/10 shadow-lg">
               <table className="w-full text-left border-collapse">
                 <thead>
-                  <tr className="bg-surface/80 border-b border-border text-textMuted text-xs font-semibold uppercase tracking-wider">
+                  <tr className="bg-surface/70 border-b border-border/70 text-textMuted text-xs font-semibold uppercase tracking-wider backdrop-blur-sm">
                     <th className="p-4">Student</th>
                     <th className="p-4">Score</th>
                     <th className="p-4">Percentage</th>
@@ -1966,8 +1969,8 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
       {/* SUB-MODAL: MARK NEW STUDENT PAPERS (SINGLE OR BATCH WHOLE CLASS) */}
       {/* ========================================================================= */}
       {showUploadModal && (
-        <div className="fixed inset-0 z-60 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-6">
-          <div className="liquid-glass border border-white/20 dark:border-white/10 rounded-3xl w-full max-w-3xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden relative">
+        <div className="fixed inset-0 z-60 bg-slate-950/45 dark:bg-black/75 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 animate-fade-in">
+          <div className="liquid-glass-modal rounded-3xl w-full max-w-3xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden relative">
             
             {/* Modal Header */}
             <div className="px-6 py-5 border-b border-border bg-background/50 flex items-center justify-between shrink-0">
@@ -2450,8 +2453,8 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
       {/* (NO ANNOTATIONS ON TOP OF MARKED IMAGES, FULL HEIGHT UNCROPPED VIEW)       */}
       {/* ========================================================================= */}
       {viewingPaper && (
-        <div className="fixed inset-0 z-70 bg-black/90 backdrop-blur-md flex items-center justify-center p-2 sm:p-4">
-          <div className="bg-surface border border-border rounded-3xl w-full max-w-[96vw] h-[94vh] flex flex-col shadow-2xl overflow-hidden">
+        <div className="fixed inset-0 z-70 bg-slate-950/50 dark:bg-black/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 animate-fade-in">
+          <div className="liquid-glass-modal rounded-3xl w-full max-w-[96vw] h-[94vh] flex flex-col shadow-2xl overflow-hidden">
             
             {/* Viewer Top Bar */}
             <div className="px-6 py-3.5 border-b border-border bg-background/60 flex items-center justify-between gap-4 shrink-0">

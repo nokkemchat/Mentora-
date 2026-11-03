@@ -139,8 +139,8 @@ export default function MarkingSchemeModal({ paper, onClose, onSuccess }: Markin
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-4">
-      <div className="liquid-glass rounded-3xl w-full max-w-xl flex flex-col overflow-hidden shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 dark:bg-black/70 backdrop-blur-md p-4 animate-fade-in">
+      <div className="liquid-glass-modal rounded-3xl w-full max-w-xl flex flex-col overflow-hidden shadow-2xl">
         {/* Header */}
         <div className="flex justify-between items-center p-6 border-b border-border/80 bg-surface/20">
           <div>

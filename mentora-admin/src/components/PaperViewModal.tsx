@@ -453,8 +453,8 @@ export default function PaperViewModal({ paperId, initialTab = 'questions', onCl
     : questions.filter(q => String(q.question_number) === selectedQNumber);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-background/80 backdrop-blur-md">
-      <div className="liquid-glass w-full max-w-5xl h-[95dvh] max-h-[95dvh] rounded-3xl sm:rounded-[2rem] shadow-2xl border border-white/20 dark:border-white/10 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/40 dark:bg-black/70 backdrop-blur-md animate-fade-in">
+      <div className="liquid-glass-modal w-full max-w-5xl h-[95dvh] max-h-[95dvh] rounded-3xl sm:rounded-[2rem] shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         
         {/* Header */}
         <div className="px-3.5 sm:px-8 py-3 sm:py-5 border-b border-border/70 flex items-center justify-between shrink-0 bg-surface/40 backdrop-blur-md">
