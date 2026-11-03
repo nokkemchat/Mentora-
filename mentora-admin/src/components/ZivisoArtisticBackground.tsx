@@ -1,127 +1,43 @@
 import React from 'react';
 
+interface ZivisoArtisticBackgroundProps {
+  offsetSidebar?: boolean;
+  className?: string;
+}
+
 /**
  * ZivisoArtisticBackground
  * 
- * Renders an artistic, unorderly constellation of the letters Z-I-V-I-S-O
- * scattered across the background with organic tilts, varied depths, and gentle
- * falling / floating kinetic animations.
+ * Displays large, cozy 3D furry plush letters spelling Z-I-V-I-S-O
+ * in an artistic tumbling/floating arrangement.
  * 
- * 100% transparent vector typography with zero solid image borders, seamlessly
- * blending into both Light and Dark mode forefronts beneath the liquid-glass cards.
+ * Rendered with 100% transparent alpha falloff so the plush fibers blend seamlessly
+ * into both light and dark backgrounds beneath liquid-glass cards without any solid gray border.
+ * Centered and scaled generously to provide warm visual interest right in the center.
  */
-export default function ZivisoArtisticBackground() {
-  const letters = [
-    {
-      char: 'Z',
-      className: 'top-[-2%] right-[4%] md:right-[8%]',
-      size: 'text-[150px] sm:text-[220px] md:text-[300px] lg:text-[360px]',
-      rotation: '-rotate-[14deg]',
-      animation: 'animate-float-slow',
-      delay: '0s',
-      opacity: 'opacity-20 dark:opacity-30',
-      blur: 'blur-[0.5px]',
-      gradient: 'from-primary via-indigo-400 to-purple-400',
-    },
-    {
-      char: 'I',
-      className: 'top-[12%] left-[18%] md:left-[24%]',
-      size: 'text-[110px] sm:text-[150px] md:text-[200px] lg:text-[240px]',
-      rotation: 'rotate-[24deg]',
-      animation: 'animate-drift-fall',
-      delay: '1.2s',
-      opacity: 'opacity-15 dark:opacity-25',
-      blur: 'blur-none',
-      gradient: 'from-blue-400 via-primaryLight to-indigo-500',
-    },
-    {
-      char: 'V',
-      className: 'top-[36%] left-[2%] md:left-[5%]',
-      size: 'text-[130px] sm:text-[180px] md:text-[250px] lg:text-[300px]',
-      rotation: '-rotate-[22deg]',
-      animation: 'animate-float-slow',
-      delay: '2.5s',
-      opacity: 'opacity-18 dark:opacity-28',
-      blur: 'blur-[1px]',
-      gradient: 'from-indigo-500 via-primary to-purple-500',
-    },
-    {
-      char: 'I',
-      className: 'top-[42%] right-[12%] md:right-[18%]',
-      size: 'text-[90px] sm:text-[130px] md:text-[170px] lg:text-[210px]',
-      rotation: '-rotate-[10deg]',
-      animation: 'animate-drift-fall',
-      delay: '3.8s',
-      opacity: 'opacity-15 dark:opacity-22',
-      blur: 'blur-none',
-      gradient: 'from-purple-400 via-primaryLight to-blue-400',
-    },
-    {
-      char: 'S',
-      className: 'bottom-[14%] left-[26%] md:left-[35%]',
-      size: 'text-[140px] sm:text-[200px] md:text-[270px] lg:text-[320px]',
-      rotation: 'rotate-[18deg]',
-      animation: 'animate-drift-fall',
-      delay: '0.8s',
-      opacity: 'opacity-20 dark:opacity-30',
-      blur: 'blur-[0.5px]',
-      gradient: 'from-primaryLight via-indigo-500 to-purple-400',
-    },
-    {
-      char: 'O',
-      className: 'bottom-[-2%] right-[2%] md:right-[6%]',
-      size: 'text-[130px] sm:text-[190px] md:text-[250px] lg:text-[310px]',
-      rotation: '-rotate-[15deg]',
-      animation: 'animate-float-slow',
-      delay: '2.1s',
-      opacity: 'opacity-18 dark:opacity-25',
-      blur: 'blur-[1px]',
-      gradient: 'from-blue-500 via-primary to-indigo-400',
-    },
-    // Extra artistic scattered falling accents
-    {
-      char: 'Z',
-      className: 'bottom-[8%] left-[4%]',
-      size: 'text-[80px] sm:text-[110px] md:text-[140px]',
-      rotation: 'rotate-[32deg]',
-      animation: 'animate-drift-fall',
-      delay: '4.2s',
-      opacity: 'opacity-12 dark:opacity-20',
-      blur: 'blur-[1.5px]',
-      gradient: 'from-primary via-blue-400 to-indigo-500',
-    },
-    {
-      char: 'O',
-      className: 'top-[4%] left-[3%]',
-      size: 'text-[70px] sm:text-[95px] md:text-[120px]',
-      rotation: '-rotate-[20deg]',
-      animation: 'animate-float-slow',
-      delay: '3.1s',
-      opacity: 'opacity-10 dark:opacity-18',
-      blur: 'blur-[2px]',
-      gradient: 'from-purple-500 via-primaryLight to-blue-400',
-    },
-  ];
-
+export default function ZivisoArtisticBackground({ 
+  offsetSidebar = true,
+  className = '' 
+}: ZivisoArtisticBackgroundProps) {
   return (
     <div 
-      className="fixed inset-0 pointer-events-none z-0 overflow-hidden select-none"
+      className={`fixed inset-0 pointer-events-none z-0 overflow-hidden select-none flex items-center justify-center ${
+        offsetSidebar ? 'md:left-64' : 'left-0'
+      } ${className}`}
       aria-hidden="true"
     >
-      {letters.map((item, idx) => (
-        <span
-          key={`${item.char}-${idx}`}
-          style={{ animationDelay: item.delay }}
-          className={`absolute font-black tracking-tighter leading-none select-none transition-all duration-700 ${item.className} ${item.size} ${item.rotation} ${item.animation} ${item.opacity} ${item.blur}`}
-        >
-          <span 
-            className={`bg-gradient-to-br ${item.gradient} bg-clip-text text-transparent drop-shadow-[0_12px_24px_rgba(92,103,242,0.22)] block`}
-            style={{ fontFamily: "'Outfit', ui-sans-serif, system-ui, sans-serif" }}
-          >
-            {item.char}
-          </span>
-        </span>
-      ))}
+      {/* Soft central ambient lilac-indigo aura behind the furry letters */}
+      <div className="absolute w-[500px] sm:w-[750px] lg:w-[950px] h-[320px] sm:h-[450px] rounded-full bg-primary/12 dark:bg-primary/20 blur-[130px] pointer-events-none -z-10 animate-pulse duration-[8000ms]" />
+
+      {/* Floating 3D Furry Z-I-V-I-S-O Composition */}
+      <div className="relative flex items-center justify-center w-full px-4 sm:px-8 py-6 animate-float-slow">
+        <img
+          src="/ziviso-furry-letters.png"
+          alt="ZIVISO Furry Letters"
+          className="w-[92%] sm:w-[86%] max-w-[950px] lg:max-w-[1150px] xl:max-w-[1300px] h-auto object-contain select-none transition-all duration-700 opacity-40 sm:opacity-50 dark:opacity-60 drop-shadow-[0_20px_50px_rgba(92,103,242,0.30)] dark:drop-shadow-[0_25px_60px_rgba(129,140,248,0.40)] hover:scale-[1.02]"
+          draggable={false}
+        />
+      </div>
     </div>
   );
 }

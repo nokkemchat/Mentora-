@@ -115,7 +115,7 @@ export default function Login() {
       <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-500/10 rounded-full blur-[100px] pointer-events-none" />
 
       {/* Artistic Scattered & Falling Z-I-V-I-S-O Letters Background */}
-      <ZivisoArtisticBackground />
+      <ZivisoArtisticBackground offsetSidebar={false} />
 
       <div className="w-full max-w-md liquid-glass rounded-3xl p-8 sm:p-10 relative z-10 shadow-2xl border border-primary/20">
         <div className="flex flex-col items-center mb-6 text-center">
