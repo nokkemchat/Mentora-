@@ -72,7 +72,7 @@ export default function PendingApproval() {
   };
 
   return (
-    <div className="bg-surface border border-border rounded-3xl p-6 flex flex-col h-full">
+    <div className="liquid-glass rounded-3xl p-6 flex flex-col h-full shadow-xl">
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-xl font-bold text-text flex items-center">
           <Clock className="w-5 h-5 mr-2 text-warning" />
@@ -90,7 +90,7 @@ export default function PendingApproval() {
           <div className="text-center text-textMuted py-8">No pending approvals!</div>
         ) : (
           pendingTeachers.map(teacher => (
-            <div key={teacher.id} className="bg-background border border-border rounded-2xl p-5 transition-colors hover:border-primary/50">
+            <div key={teacher.id} className="liquid-glass-well border border-white/25 dark:border-white/10 rounded-2xl p-5 transition-all hover:translate-y-[-2px]">
               <h3 className="font-bold text-lg text-text mb-2 flex items-center">
                 <User className="w-4 h-4 mr-2 text-primary" />
                 {teacher.first_name} {teacher.last_name}

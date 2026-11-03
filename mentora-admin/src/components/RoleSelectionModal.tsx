@@ -24,7 +24,7 @@ export default function RoleSelectionModal() {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in">
-      <div className="relative w-full max-w-xl bg-surface border border-border rounded-3xl shadow-2xl p-6 sm:p-8 overflow-hidden text-text">
+      <div className="relative w-full max-w-xl liquid-glass rounded-3xl shadow-2xl p-6 sm:p-8 overflow-hidden text-text">
         {/* Subtle background glow */}
         <div className="absolute -top-24 -right-24 w-60 h-60 bg-primary/20 rounded-full blur-[80px] pointer-events-none" />
         <div className="absolute -bottom-24 -left-24 w-60 h-60 bg-purple-500/15 rounded-full blur-[80px] pointer-events-none" />

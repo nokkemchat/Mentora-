@@ -12,11 +12,11 @@ export default function RevenueChart({ totalRevenue, teacherShare, platformShare
   const platformPercentage = totalRevenue > 0 ? 100 - teacherPercentage : 0;
 
   return (
-    <div className="bg-surface border border-border rounded-3xl p-6 mb-6">
+    <div className="liquid-glass rounded-3xl p-6 mb-6 shadow-xl">
       <h3 className="text-lg font-bold text-text mb-6">Revenue Split Overview (Platform-Wide)</h3>
       
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <div className="bg-background rounded-2xl p-4 border border-border">
+        <div className="liquid-glass-well rounded-2xl p-4 border border-white/20 dark:border-white/10 shadow-sm">
           <div className="flex items-center gap-3 mb-2">
             <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
               <DollarSign className="w-4 h-4 text-primary" />
@@ -26,7 +26,7 @@ export default function RevenueChart({ totalRevenue, teacherShare, platformShare
           <p className="text-3xl font-bold text-text">${totalRevenue.toFixed(2)}</p>
         </div>
         
-        <div className="bg-background rounded-2xl p-4 border border-border">
+        <div className="liquid-glass-well rounded-2xl p-4 border border-white/20 dark:border-white/10 shadow-sm">
           <div className="flex items-center gap-3 mb-2">
             <div className="w-8 h-8 rounded-full bg-success/10 flex items-center justify-center">
               <Users className="w-4 h-4 text-success" />
@@ -36,7 +36,7 @@ export default function RevenueChart({ totalRevenue, teacherShare, platformShare
           <p className="text-3xl font-bold text-success">${teacherShare.toFixed(2)}</p>
         </div>
         
-        <div className="bg-background rounded-2xl p-4 border border-border">
+        <div className="liquid-glass-well rounded-2xl p-4 border border-white/20 dark:border-white/10 shadow-sm">
           <div className="flex items-center gap-3 mb-2">
             <div className="w-8 h-8 rounded-full bg-blue-500/10 flex items-center justify-center">
               <TrendingUp className="w-4 h-4 text-blue-500" />
@@ -46,7 +46,7 @@ export default function RevenueChart({ totalRevenue, teacherShare, platformShare
           <p className="text-3xl font-bold text-blue-500">${platformShare.toFixed(2)}</p>
         </div>
 
-        <div className="bg-background rounded-2xl p-4 border border-border">
+        <div className="liquid-glass-well rounded-2xl p-4 border border-white/20 dark:border-white/10 shadow-sm">
           <div className="flex items-center gap-3 mb-2">
             <div className="w-8 h-8 rounded-full bg-orange-500/10 flex items-center justify-center">
               <DollarSign className="w-4 h-4 text-orange-500" />

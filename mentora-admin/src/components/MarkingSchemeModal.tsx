@@ -139,10 +139,10 @@ export default function MarkingSchemeModal({ paper, onClose, onSuccess }: Markin
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-      <div className="bg-background rounded-3xl w-full max-w-xl flex flex-col overflow-hidden shadow-2xl border border-border">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-4">
+      <div className="liquid-glass rounded-3xl w-full max-w-xl flex flex-col overflow-hidden shadow-2xl">
         {/* Header */}
-        <div className="flex justify-between items-center p-6 border-b border-border bg-surface">
+        <div className="flex justify-between items-center p-6 border-b border-border/80 bg-surface/20">
           <div>
             <h2 className="text-xl font-semibold text-text">Marking Scheme Management</h2>
             <p className="text-sm text-textMuted mt-1">
@@ -161,7 +161,7 @@ export default function MarkingSchemeModal({ paper, onClose, onSuccess }: Markin
         {/* Content */}
         <div className="p-6 space-y-6">
           {/* Current Status Badge */}
-          <div className="p-4 rounded-2xl border border-border bg-surface/50">
+          <div className="p-4 rounded-2xl liquid-glass-well border border-white/20 dark:border-white/10">
             <span className="text-xs font-medium text-textMuted uppercase tracking-wider block mb-2">Current Status</span>
             {paper.mark_scheme_url ? (
               <div className="flex items-center justify-between gap-3">

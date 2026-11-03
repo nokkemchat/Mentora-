@@ -86,7 +86,7 @@ export default function Courses() {
       </div>
 
       {/* Toolbar */}
-      <div className="bg-surface border border-border rounded-3xl p-3 sm:p-4 flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
+      <div className="liquid-glass rounded-3xl p-3 sm:p-4 flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between shadow-lg">
         <div className="relative w-full md:flex-1 md:min-w-[200px]">
           <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-textMuted" />
           <input
@@ -137,7 +137,7 @@ export default function Courses() {
       </div>
 
       {/* Course Table */}
-      <div className="bg-surface border border-border rounded-3xl overflow-hidden">
+      <div className="liquid-glass rounded-3xl overflow-hidden shadow-xl">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>

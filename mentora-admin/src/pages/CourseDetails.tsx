@@ -635,7 +635,7 @@ export default function CourseDetails() {
       </button>
 
       {/* Course Header */}
-      <div className="bg-surface border border-border rounded-3xl p-8">
+      <div className="liquid-glass rounded-3xl p-8 shadow-xl">
         <div className="flex justify-between items-start">
           <div>
             <h1 className="text-3xl font-bold text-text mb-2">{course.title}</h1>
