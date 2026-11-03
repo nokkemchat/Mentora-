@@ -8,12 +8,12 @@ interface ZivisoArtisticBackgroundProps {
 /**
  * ZivisoArtisticBackground
  * 
- * Displays large, cozy 3D furry plush letters spelling Z-I-V-I-S-O
- * in an artistic tumbling/floating arrangement.
+ * Displays large, spread-out 3D plush furry letters spelling Z-I-V-I-S-O
+ * floating gracefully across the center canvas.
  * 
- * Rendered with 100% transparent alpha falloff so the plush fibers blend seamlessly
- * into both light and dark backgrounds beneath liquid-glass cards without any solid gray border.
- * Centered and scaled generously to provide warm visual interest right in the center.
+ * Rendered with 100% transparent edges and enhanced opacity/scale so the soft,
+ * vibrant furry fibers are clearly visible through the translucent liquid-glass
+ * forefront cards in both light and dark mode.
  */
 export default function ZivisoArtisticBackground({ 
   offsetSidebar = true,
@@ -26,15 +26,15 @@ export default function ZivisoArtisticBackground({
       } ${className}`}
       aria-hidden="true"
     >
-      {/* Soft central ambient lilac-indigo aura behind the furry letters */}
-      <div className="absolute w-[500px] sm:w-[750px] lg:w-[950px] h-[320px] sm:h-[450px] rounded-full bg-primary/12 dark:bg-primary/20 blur-[130px] pointer-events-none -z-10 animate-pulse duration-[8000ms]" />
+      {/* Rich ambient lilac-periwinkle aura glowing behind the letters */}
+      <div className="absolute w-[90%] max-w-[1200px] h-[380px] sm:h-[500px] rounded-full bg-primary/20 dark:bg-primary/30 blur-[140px] pointer-events-none -z-10 animate-pulse duration-[8000ms]" />
 
-      {/* Floating 3D Furry Z-I-V-I-S-O Composition */}
-      <div className="relative flex items-center justify-center w-full px-4 sm:px-8 py-6 animate-float-slow">
+      {/* Spaced-Out, Bigger 3D Furry Z-I-V-I-S-O Composition */}
+      <div className="relative flex items-center justify-center w-full px-2 sm:px-6 py-4 animate-float-slow">
         <img
           src="/ziviso-furry-letters.png"
           alt="ZIVISO Furry Letters"
-          className="w-[92%] sm:w-[86%] max-w-[950px] lg:max-w-[1150px] xl:max-w-[1300px] h-auto object-contain select-none transition-all duration-700 opacity-40 sm:opacity-50 dark:opacity-60 drop-shadow-[0_20px_50px_rgba(92,103,242,0.30)] dark:drop-shadow-[0_25px_60px_rgba(129,140,248,0.40)] hover:scale-[1.02]"
+          className="w-[98%] sm:w-[94%] max-w-[1150px] lg:max-w-[1400px] xl:max-w-[1650px] h-auto object-contain select-none transition-all duration-700 opacity-60 sm:opacity-70 dark:opacity-80 drop-shadow-[0_25px_60px_rgba(92,103,242,0.40)] dark:drop-shadow-[0_30px_70px_rgba(129,140,248,0.50)]"
           draggable={false}
         />
       </div>

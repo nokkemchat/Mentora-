@@ -278,7 +278,7 @@ export default function Dashboard() {
 
             <Link
               to="/courses"
-              className="flex items-center gap-3.5 p-4 rounded-3xl bg-surface border border-border hover:border-primary/40 transition-all shadow-sm active:scale-[0.98]"
+              className="flex items-center gap-3.5 p-4 rounded-3xl liquid-glass hover:border-primary/40 transition-all shadow-sm active:scale-[0.98]"
             >
               <div className="w-12 h-12 rounded-2xl bg-blue-500/10 text-blue-500 flex items-center justify-center shrink-0">
                 <BookOpen className="w-6 h-6" />
@@ -302,7 +302,7 @@ export default function Dashboard() {
           </div>
           
           {/* DEVELOPMENT ONLY: Extracted Content Table */}
-          <div className="bg-surface border border-border rounded-3xl p-6 mt-6">
+          <div className="liquid-glass rounded-3xl p-6 mt-6">
             <h2 className="text-xl font-bold text-text mb-4">Development Only: Extracted Questions</h2>
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
