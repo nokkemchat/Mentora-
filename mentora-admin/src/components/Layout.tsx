@@ -231,7 +231,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       </aside>
 
       {/* Main Content Area */}
-      <main className="flex-1 overflow-y-auto relative bg-background flex flex-col">
+      <main className="flex-1 overflow-y-auto relative bg-transparent flex flex-col">
         {/* Modern Ambient Lilac Glow Spheres */}
         <div className="pointer-events-none fixed -top-32 -right-32 w-96 h-96 rounded-full bg-primary/15 blur-[120px] z-0" />
         <div className="pointer-events-none fixed top-1/2 -left-32 w-96 h-96 rounded-full bg-indigo-500/10 blur-[130px] z-0" />

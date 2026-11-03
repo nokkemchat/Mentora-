@@ -604,7 +604,7 @@ export default function Papers() {
                     {/* Top Row: Subject Title, Icon & Year/Session Badge */}
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex items-start gap-3 min-w-0">
-                        <div className="w-11 h-11 rounded-2xl flex items-center justify-center bg-primary/10 border border-primary/25 text-primary shrink-0 shadow-inner group-hover:scale-105 transition-transform">
+                        <div className="w-11 h-11 rounded-2xl flex items-center justify-center liquid-glass-well border border-white/50 dark:border-white/20 text-primary shrink-0 shadow-inner group-hover:scale-105 transition-transform">
                           <BookOpen className="w-5 h-5" />
                         </div>
                         <div className="min-w-0">
@@ -632,7 +632,7 @@ export default function Papers() {
 
                       {/* Year & Session Badge */}
                       <div className="shrink-0 text-right">
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-bold bg-background/80 border border-border text-text shadow-xs">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-bold liquid-glass-well border border-white/40 dark:border-white/15 text-text shadow-xs">
                           <Calendar className="w-3 h-3 text-textMuted" />
                           <span>{paper.year}</span>
                           {paper.session && <span className="text-textMuted text-[10px]">({paper.session})</span>}
@@ -641,7 +641,7 @@ export default function Papers() {
                     </div>
 
                     {/* Information Strip: Orderly 2-Column Mini Box */}
-                    <div className="bg-background/40 rounded-2xl p-3 border border-border/60 grid grid-cols-2 gap-2 text-xs">
+                    <div className="liquid-glass-well rounded-2xl p-3 border border-white/40 dark:border-white/15 grid grid-cols-2 gap-2 text-xs">
                       {/* Questions count */}
                       <div className="flex items-center gap-2 min-w-0">
                         <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center text-primary shrink-0">

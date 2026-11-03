@@ -177,7 +177,7 @@ export default function Dashboard() {
                   <p className="text-xs sm:text-sm font-semibold text-textMuted mb-1.5">{stat.label}</p>
                   <h3 className="text-3xl font-extrabold text-text tracking-tight">{stat.value}</h3>
                 </div>
-                <div className={`p-3.5 rounded-2xl ${stat.bg} border border-white/10 shadow-sm group-hover:scale-110 transition-transform`}>
+                <div className="p-3.5 rounded-2xl liquid-glass-well border border-white/40 shadow-inner group-hover:scale-110 transition-transform">
                   <Icon className={`w-6 h-6 ${stat.color}`} />
                 </div>
               </div>
