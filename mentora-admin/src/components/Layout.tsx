@@ -58,23 +58,23 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       <RoleSelectionModal />
 
       {/* Mobile Top Navigation Header */}
-      <header className="md:hidden flex items-center justify-between px-4 py-3 bg-surface/90 backdrop-blur-md border-b border-border sticky top-0 z-30 shrink-0">
+      <header className="md:hidden flex items-center justify-between px-4 py-3 bg-surface/80 backdrop-blur-xl border-b border-border sticky top-0 z-30 shrink-0 shadow-sm">
         <div className="flex items-center gap-3">
           <button
             onClick={() => setMobileMenuOpen(true)}
-            className="p-2 -ml-1 rounded-xl text-text hover:bg-border/60 transition-colors cursor-pointer"
+            className="p-2 -ml-1 rounded-2xl text-text hover:bg-border/60 transition-all cursor-pointer active:scale-95"
             aria-label="Open Navigation Menu"
           >
             <Menu className="w-5 h-5" />
           </button>
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 flex items-center justify-center bg-white rounded-xl p-0.5 overflow-hidden shadow-sm">
-              <img src="/logo.png" alt="Mentora" className="w-full h-full object-contain" />
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-2xl bg-gradient-to-br from-primary/30 via-white/10 to-transparent p-0.5 border border-white/20 shadow-md shadow-primary/25 overflow-hidden flex items-center justify-center shrink-0">
+              <img src="/logo.png" alt="Ziviso" className="w-full h-full object-cover rounded-xl" />
             </div>
             <div>
-              <span className="font-bold text-base tracking-tight block leading-tight">Mentora</span>
-              <span className="text-[10px] text-textMuted uppercase font-semibold tracking-wider block">
-                {isAdmin ? 'Admin' : isTeacher ? 'Educator Hub' : 'Student Hub'}
+              <span className="font-extrabold text-base tracking-tight block leading-tight bg-gradient-to-r from-text via-text to-primaryLight bg-clip-text">Ziviso</span>
+              <span className="text-[10px] text-primaryLight uppercase font-bold tracking-wider block">
+                {isAdmin ? 'Admin Console' : isTeacher ? 'Educator Hub' : 'Student Hub'}
               </span>
             </div>
           </div>
@@ -84,7 +84,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           <ThemeToggle />
           <div 
             onClick={() => setMobileMenuOpen(true)}
-            className="w-8 h-8 rounded-full bg-primary/10 border border-primary/25 flex items-center justify-center text-primary font-bold text-xs cursor-pointer"
+            className="w-8 h-8 rounded-2xl bg-gradient-to-br from-primary to-indigo-600 border border-white/20 shadow-sm flex items-center justify-center text-white font-bold text-xs cursor-pointer active:scale-95 transition-transform"
             title={user?.email || 'User Profile'}
           >
             {user?.email?.charAt(0).toUpperCase() || 'U'}
@@ -97,20 +97,20 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         <div className="fixed inset-0 z-50 md:hidden flex animate-fade-in">
           {/* Backdrop */}
           <div 
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
+            className="fixed inset-0 bg-black/70 backdrop-blur-md transition-opacity"
             onClick={() => setMobileMenuOpen(false)}
           />
 
           {/* Drawer Content */}
-          <aside className="relative w-72 max-w-[85vw] bg-surface border-r border-border h-full flex flex-col z-10 shadow-2xl animate-slide-right">
-            <div className="p-5 flex items-center justify-between border-b border-border">
+          <aside className="relative w-72 max-w-[85vw] bg-surface/95 backdrop-blur-2xl border-r border-border h-full flex flex-col z-10 shadow-2xl animate-slide-right">
+            <div className="p-5 flex items-center justify-between border-b border-border/80">
               <div className="flex items-center gap-3">
-                <div className="w-9 h-9 flex items-center justify-center bg-white rounded-xl p-1 overflow-hidden shadow-sm">
-                  <img src="/logo.png" alt="Mentora" className="w-full h-full object-contain" />
+                <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-primary/30 via-white/10 to-transparent p-0.5 border border-white/20 shadow-md shadow-primary/25 overflow-hidden flex items-center justify-center shrink-0">
+                  <img src="/logo.png" alt="Ziviso" className="w-full h-full object-cover rounded-xl" />
                 </div>
                 <div>
-                  <h2 className="text-lg font-bold">Mentora</h2>
-                  <p className="text-[10px] text-textMuted uppercase tracking-wider font-semibold">
+                  <h2 className="text-lg font-extrabold bg-gradient-to-r from-text to-primaryLight bg-clip-text">Ziviso</h2>
+                  <p className="text-[10px] text-primaryLight uppercase tracking-wider font-bold">
                     {isAdmin ? 'Admin Console' : isTeacher ? 'Educator Hub' : 'Student Hub'}
                   </p>
                 </div>
@@ -132,35 +132,35 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   <Link
                     key={item.path}
                     to={item.path}
-                    className={`flex items-center gap-3 px-4 py-3 rounded-2xl transition-colors ${
+                    className={`flex items-center gap-3 px-4 py-3 rounded-2xl transition-all ${
                       isActive 
-                        ? 'bg-primary/10 text-primary font-medium' 
+                        ? 'bg-primary text-white font-bold shadow-md shadow-primary/30 border border-white/15' 
                         : 'text-textMuted hover:bg-border/50 hover:text-text'
                     }`}
                   >
-                    <Icon className={`w-5 h-5 ${isActive ? 'text-primary' : 'text-textMuted'}`} />
+                    <Icon className={`w-5 h-5 ${isActive ? 'text-white' : 'text-textMuted'}`} />
                     <span className="text-sm">{item.label}</span>
                   </Link>
                 );
               })}
             </nav>
 
-            <div className="p-4 border-t border-border space-y-3 bg-background/50">
+            <div className="p-4 border-t border-border space-y-3 bg-surface-sunken/60">
               <div className="px-2">
                 <div className="flex items-center gap-3 mb-1">
-                  <div className="w-8 h-8 rounded-full bg-border flex items-center justify-center text-primary font-bold text-xs">
+                  <div className="w-9 h-9 rounded-2xl bg-gradient-to-br from-primary to-indigo-600 border border-white/20 shadow-sm flex items-center justify-center text-white font-bold text-xs shrink-0">
                     {user?.email?.charAt(0).toUpperCase() || 'U'}
                   </div>
                   <div className="flex-1 truncate">
-                    <p className="text-xs font-medium truncate">{user?.email}</p>
-                    <p className="text-[11px] text-primary font-semibold">{roleLabel}</p>
+                    <p className="text-xs font-semibold truncate text-text">{user?.email}</p>
+                    <p className="text-[11px] text-primary font-bold">{roleLabel}</p>
                   </div>
                 </div>
               </div>
 
               <button
                 onClick={handleSignOut}
-                className="flex items-center gap-3 w-full px-4 py-2.5 text-error hover:bg-error/10 rounded-2xl transition-colors cursor-pointer text-sm font-medium"
+                className="flex items-center gap-3 w-full px-4 py-2.5 text-error hover:bg-error/15 border border-error/20 rounded-2xl transition-all cursor-pointer text-sm font-semibold"
               >
                 <LogOut className="w-4 h-4" />
                 <span>Sign Out</span>
@@ -171,14 +171,14 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       )}
 
       {/* Desktop Permanent Sidebar */}
-      <aside className="hidden md:flex w-64 bg-surface border-r border-border flex-col shrink-0">
-        <div className="p-6 flex items-center gap-3 border-b border-border">
-          <div className="w-10 h-10 flex items-center justify-center bg-white rounded-2xl p-1 overflow-hidden shadow-sm">
-            <img src="/logo.png" alt="Mentora" className="w-full h-full object-contain" />
+      <aside className="hidden md:flex w-64 bg-surface/80 backdrop-blur-2xl border-r border-border/80 flex-col shrink-0 relative z-20 shadow-xl shadow-black/10">
+        <div className="p-5 flex items-center gap-3 border-b border-border/80">
+          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-primary/30 via-white/10 to-transparent p-0.5 border border-white/25 shadow-lg shadow-primary/25 overflow-hidden flex items-center justify-center shrink-0 group hover:scale-105 transition-transform">
+            <img src="/logo.png" alt="Ziviso" className="w-full h-full object-cover rounded-xl" />
           </div>
-          <div className="flex-1">
-            <h1 className="text-xl font-bold">Mentora</h1>
-            <p className="text-xs text-textMuted uppercase tracking-wider font-semibold">
+          <div className="flex-1 min-w-0">
+            <h1 className="text-xl font-extrabold tracking-tight bg-gradient-to-r from-text via-text to-primaryLight bg-clip-text">Ziviso</h1>
+            <p className="text-[10px] text-primaryLight uppercase tracking-wider font-extrabold truncate">
               {isAdmin ? 'Admin Console' : isTeacher ? 'Educator Hub' : 'Student Hub'}
             </p>
           </div>
@@ -193,64 +193,66 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               <Link
                 key={item.path}
                 to={item.path}
-                className={`flex items-center gap-3 px-4 py-3 rounded-2xl transition-colors ${
+                className={`flex items-center gap-3.5 px-4 py-3 rounded-2xl transition-all duration-200 ${
                   isActive 
-                    ? 'bg-primary/10 text-primary font-medium' 
-                    : 'text-textMuted hover:bg-border/50 hover:text-text'
+                    ? 'btn-3d-primary font-bold shadow-lg shadow-primary/30' 
+                    : 'text-textMuted hover:text-text hover:bg-surface-elevated/70 hover:translate-x-1'
                 }`}
               >
-                <Icon className={`w-5 h-5 ${isActive ? 'text-primary' : 'text-textMuted'}`} />
-                {item.label}
+                <Icon className={`w-5 h-5 shrink-0 ${isActive ? 'text-white' : 'text-textMuted'}`} />
+                <span className="text-sm font-semibold">{item.label}</span>
               </Link>
             );
           })}
         </nav>
 
-        <div className="p-4 border-t border-border space-y-3">
+        <div className="p-4 border-t border-border/80 space-y-3 bg-surface-sunken/40">
           <div className="px-2">
             <div className="flex items-center gap-3 mb-1">
-              <div className="w-8 h-8 rounded-full bg-border flex items-center justify-center text-primary font-bold text-xs">
+              <div className="w-9 h-9 rounded-2xl bg-gradient-to-br from-primary to-indigo-600 border border-white/20 shadow-md shadow-primary/20 flex items-center justify-center text-white font-bold text-xs shrink-0">
                 {user?.email?.charAt(0).toUpperCase() || 'U'}
               </div>
               <div className="flex-1 truncate">
-                <p className="text-sm font-medium truncate">{user?.email}</p>
-                <p className="text-xs text-primary font-semibold">{roleLabel}</p>
+                <p className="text-sm font-semibold truncate text-text">{user?.email}</p>
+                <p className="text-xs text-primary font-bold">{roleLabel}</p>
               </div>
             </div>
           </div>
 
           <button
             onClick={handleSignOut}
-            className="flex items-center gap-3 w-full px-4 py-2 text-error hover:bg-error/10 rounded-2xl transition-colors cursor-pointer"
+            className="flex items-center gap-3 w-full px-4 py-2 text-error hover:bg-error/15 border border-transparent hover:border-error/25 rounded-2xl transition-all cursor-pointer font-semibold text-sm"
           >
-            <LogOut className="w-5 h-5" />
-            <span className="font-medium text-sm">Sign Out</span>
+            <LogOut className="w-4 h-4" />
+            <span>Sign Out</span>
           </button>
         </div>
       </aside>
 
       {/* Main Content Area */}
       <main className="flex-1 overflow-y-auto relative bg-background flex flex-col">
-        {/* Background Gradient */}
-        <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-transparent pointer-events-none z-0" />
-        
-        {/* Watermark Logo (Centered responsively) */}
-        <div className="fixed inset-0 md:left-64 pointer-events-none opacity-[0.04] md:opacity-[0.06] z-0 mix-blend-luminosity overflow-hidden flex items-center justify-center">
+        {/* Modern Ambient Lilac Glow Spheres */}
+        <div className="pointer-events-none fixed -top-32 -right-32 w-96 h-96 rounded-full bg-primary/15 blur-[120px] z-0" />
+        <div className="pointer-events-none fixed top-1/2 -left-32 w-96 h-96 rounded-full bg-indigo-500/10 blur-[130px] z-0" />
+        <div className="pointer-events-none fixed -bottom-32 right-1/4 w-80 h-80 rounded-full bg-purple-500/10 blur-[120px] z-0" />
+
+        {/* Subtle Watermark Logo */}
+        <div className="fixed inset-0 md:left-64 pointer-events-none opacity-[0.035] md:opacity-[0.05] z-0 mix-blend-luminosity overflow-hidden flex items-center justify-center">
           <img src="/logo.png" alt="Watermark" className="w-[180%] md:w-[150%] max-w-none object-cover" />
         </div>
 
-        {/* Content with responsive padding: extra bottom space on mobile for bottom bar */}
+        {/* Content with responsive padding */}
         <div className="p-4 sm:p-6 lg:p-8 pb-24 md:pb-8 relative z-10 max-w-full">
           {children}
         </div>
       </main>
 
       {/* Mobile App Bottom Navigation Bar */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-surface/95 backdrop-blur-lg border-t border-border px-3 py-1.5 flex items-center justify-around shadow-2xl">
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-surface/90 backdrop-blur-xl border-t border-border px-3 py-1.5 flex items-center justify-around shadow-2xl">
         <Link
           to="/"
           className={`flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition-all ${
-            location.pathname === '/' ? 'text-primary font-semibold' : 'text-textMuted hover:text-text'
+            location.pathname === '/' ? 'text-primary font-bold' : 'text-textMuted hover:text-text'
           }`}
         >
           <LayoutDashboard className={`w-5 h-5 ${location.pathname === '/' ? 'text-primary' : 'text-textMuted'}`} />
@@ -260,7 +262,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         <Link
           to="/papers"
           className={`flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition-all ${
-            location.pathname === '/papers' ? 'text-primary font-semibold' : 'text-textMuted hover:text-text'
+            location.pathname === '/papers' ? 'text-primary font-bold' : 'text-textMuted hover:text-text'
           }`}
         >
           <FileBox className={`w-5 h-5 ${location.pathname === '/papers' ? 'text-primary' : 'text-textMuted'}`} />
@@ -271,7 +273,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           <Link
             to="/courses"
             className={`flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition-all ${
-              location.pathname === '/courses' ? 'text-primary font-semibold' : 'text-textMuted hover:text-text'
+              location.pathname === '/courses' ? 'text-primary font-bold' : 'text-textMuted hover:text-text'
             }`}
           >
             <BookOpen className={`w-5 h-5 ${location.pathname === '/courses' ? 'text-primary' : 'text-textMuted'}`} />

@@ -1317,10 +1317,10 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 overflow-hidden">
-      <div className="bg-surface border border-border rounded-3xl w-full max-w-6xl h-[94dvh] max-h-[94dvh] flex flex-col shadow-2xl overflow-hidden">
+      <div className="liquid-glass border border-white/20 dark:border-white/10 rounded-3xl w-full max-w-6xl h-[94dvh] max-h-[94dvh] flex flex-col shadow-2xl overflow-hidden backdrop-blur-2xl">
         
         {/* Header */}
-        <div className="px-4 sm:px-6 py-3.5 sm:py-5 border-b border-border bg-background/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
+        <div className="px-4 sm:px-6 py-3.5 sm:py-5 border-b border-border/80 bg-background/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-primary/10 border border-primary/25 flex items-center justify-center text-primary shrink-0 shadow-inner">
               <Sparkles className="w-5 h-5 sm:w-6 sm:h-6" />
@@ -1372,7 +1372,7 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                   setShowUploadModal(true);
                 }}
                 disabled={isStudent && queue.some(it => it.status === 'queued' || it.status === 'uploading' || it.status === 'marking')}
-                className={`flex items-center gap-1.5 bg-primary hover:bg-primaryHover text-white px-3 sm:px-4 py-2 sm:py-2.5 rounded-2xl font-semibold text-xs sm:text-sm transition-all shadow-lg shadow-primary/20 cursor-pointer ${
+                className={`flex items-center gap-1.5 btn-3d-primary px-3 sm:px-4 py-2 sm:py-2.5 rounded-2xl font-semibold text-xs sm:text-sm cursor-pointer ${
                   (isStudent && queue.some(it => it.status === 'queued' || it.status === 'uploading' || it.status === 'marking'))
                     ? 'opacity-50 cursor-not-allowed'
                     : ''
@@ -1820,7 +1820,7 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                     resetUploadForm();
                     setShowUploadModal(true);
                   }}
-                  className="mt-5 inline-flex items-center gap-2 bg-primary hover:bg-primaryHover text-white px-5 py-2.5 rounded-2xl font-semibold text-sm transition-all shadow-md cursor-pointer"
+                  className="mt-5 inline-flex items-center gap-2 btn-3d-primary px-5 py-2.5 rounded-2xl font-semibold text-sm cursor-pointer"
                 >
                   <Plus className="w-4 h-4" />
                   <span>{isStudent ? 'Mark My Paper' : 'Mark First Student Paper'}</span>
@@ -1967,7 +1967,7 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
       {/* ========================================================================= */}
       {showUploadModal && (
         <div className="fixed inset-0 z-60 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-6">
-          <div className="bg-surface border border-border rounded-3xl w-full max-w-3xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden relative">
+          <div className="liquid-glass border border-white/20 dark:border-white/10 rounded-3xl w-full max-w-3xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden relative">
             
             {/* Modal Header */}
             <div className="px-6 py-5 border-b border-border bg-background/50 flex items-center justify-between shrink-0">
@@ -2432,7 +2432,7 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                     <button
                       type="submit"
                       disabled={!studentName.trim() || selectedFiles.length === 0 || (isStudent && queue.some(item => item.status === 'queued' || item.status === 'uploading' || item.status === 'marking'))}
-                      className="flex items-center gap-2 bg-primary hover:bg-primaryHover disabled:opacity-50 disabled:cursor-not-allowed text-white px-5 py-2.5 rounded-2xl text-sm font-semibold transition-all shadow-md cursor-pointer"
+                      className="flex items-center gap-2 btn-3d-primary disabled:opacity-50 disabled:cursor-not-allowed px-5 py-2.5 rounded-2xl text-sm font-semibold cursor-pointer"
                     >
                       <Sparkles className="w-4 h-4" />
                       <span>{isStudent ? 'Start Marking My Paper' : 'Add to Marking Queue'}</span>

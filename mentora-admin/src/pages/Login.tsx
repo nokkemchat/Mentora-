@@ -113,17 +113,17 @@ export default function Login() {
       <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-primary/20 rounded-full blur-[100px] pointer-events-none" />
       <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-500/10 rounded-full blur-[100px] pointer-events-none" />
 
-      <div className="w-full max-w-md bg-surface border border-border rounded-3xl p-8 relative z-10 shadow-xl">
+      <div className="w-full max-w-md liquid-glass rounded-3xl p-8 sm:p-10 relative z-10 shadow-2xl border border-primary/20">
         <div className="flex flex-col items-center mb-6 text-center">
           <div className="flex justify-center mb-4">
-            <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center p-2 overflow-hidden shadow-md">
-              <img src="/logo.png" alt="Mentora Logo" className="w-full h-full object-contain" />
+            <div className="w-20 h-20 bg-gradient-to-br from-primary/30 via-white/10 to-transparent rounded-3xl flex items-center justify-center p-1 overflow-hidden shadow-xl shadow-primary/30 border border-white/25 group hover:scale-105 transition-transform">
+              <img src="/logo.png" alt="Ziviso Logo" className="w-full h-full object-cover rounded-2xl" />
             </div>
           </div>
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">
-            {isSignUp ? 'Create Your Account' : 'Welcome to Mentora'}
+          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight bg-gradient-to-r from-text via-text to-primaryLight bg-clip-text">
+            {isSignUp ? 'Create Your Account' : 'Welcome to Ziviso'}
           </h1>
-          <p className="text-textMuted text-sm mt-1.5">
+          <p className="text-textMuted text-sm mt-1.5 font-medium">
             {isSignUp 
               ? 'Select your role to start learning or teaching' 
               : 'Sign in to access your courses, papers, and AI tutor'}
@@ -131,7 +131,7 @@ export default function Login() {
         </div>
 
         {error && (
-          <div className="mb-6 p-4 bg-error/10 border border-error/20 rounded-2xl text-error text-sm text-center">
+          <div className="mb-6 p-4 bg-error/10 border border-error/25 rounded-2xl text-error text-sm text-center font-medium shadow-xs">
             {error}
           </div>
         )}
@@ -139,49 +139,49 @@ export default function Login() {
         {/* Role Selector on Sign Up */}
         {isSignUp && (
           <div className="mb-6">
-            <label className="block text-xs font-semibold text-text uppercase tracking-wider mb-2">
+            <label className="block text-xs font-bold text-text uppercase tracking-wider mb-2">
               Select Your Account Type
             </label>
             <div className="grid grid-cols-2 gap-3">
               <button
                 type="button"
                 onClick={() => setRoleChoice('student')}
-                className={`relative flex flex-col items-center justify-center p-3.5 rounded-2xl border-2 transition-all cursor-pointer ${
+                className={`relative flex flex-col items-center justify-center p-4 rounded-2xl border-2 transition-all cursor-pointer ${
                   roleChoice === 'student'
-                    ? 'border-primary bg-primary/10 text-primary font-bold shadow-sm'
-                    : 'border-border bg-background text-textMuted hover:border-textMuted/50'
+                    ? 'border-primary bg-primary/15 text-primary font-bold shadow-md shadow-primary/20'
+                    : 'border-border/80 bg-surface-sunken/40 text-textMuted hover:border-textMuted/50'
                 }`}
               >
                 {roleChoice === 'student' && (
                   <CheckCircle2 className="w-4 h-4 absolute top-2 right-2 text-primary" />
                 )}
-                <div className={`p-2 rounded-xl mb-1.5 ${roleChoice === 'student' ? 'bg-primary/20 text-primary' : 'bg-border/40 text-textMuted'}`}>
+                <div className={`p-2.5 rounded-xl mb-1.5 ${roleChoice === 'student' ? 'bg-primary/20 text-primary' : 'bg-border/40 text-textMuted'}`}>
                   <GraduationCap className="w-5 h-5" />
                 </div>
-                <span className="text-sm font-semibold">Student</span>
+                <span className="text-sm font-bold">Student</span>
                 <span className="text-[10px] text-textMuted mt-0.5">Practice & Study</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setRoleChoice('teacher')}
-                className={`relative flex flex-col items-center justify-center p-3.5 rounded-2xl border-2 transition-all cursor-pointer ${
+                className={`relative flex flex-col items-center justify-center p-4 rounded-2xl border-2 transition-all cursor-pointer ${
                   roleChoice === 'teacher'
-                    ? 'border-primary bg-primary/10 text-primary font-bold shadow-sm'
-                    : 'border-border bg-background text-textMuted hover:border-textMuted/50'
+                    ? 'border-primary bg-primary/15 text-primary font-bold shadow-md shadow-primary/20'
+                    : 'border-border/80 bg-surface-sunken/40 text-textMuted hover:border-textMuted/50'
                 }`}
               >
                 {roleChoice === 'teacher' && (
                   <CheckCircle2 className="w-4 h-4 absolute top-2 right-2 text-primary" />
                 )}
-                <div className={`p-2 rounded-xl mb-1.5 ${roleChoice === 'teacher' ? 'bg-primary/20 text-primary' : 'bg-border/40 text-textMuted'}`}>
+                <div className={`p-2.5 rounded-xl mb-1.5 ${roleChoice === 'teacher' ? 'bg-primary/20 text-primary' : 'bg-border/40 text-textMuted'}`}>
                   <BookOpen className="w-5 h-5" />
                 </div>
-                <span className="text-sm font-semibold">Teacher</span>
+                <span className="text-sm font-bold">Teacher</span>
                 <span className="text-[10px] text-textMuted mt-0.5">Upload Papers & Teach</span>
               </button>
             </div>
-            <p className="text-[11px] text-textMuted mt-2 text-center">
+            <p className="text-[11px] text-textMuted mt-2 text-center font-medium">
               {roleChoice === 'student'
                 ? '📘 Access public past papers, view marking schemes, practice.'
                 : '👨‍🏫 Upload exam papers, attach marking schemes, manage courses.'}
@@ -191,7 +191,7 @@ export default function Login() {
 
         <form onSubmit={handleAuth} className="space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-text uppercase tracking-wider mb-1.5">Email Address</label>
+            <label className="block text-xs font-bold text-text uppercase tracking-wider mb-1.5">Email Address</label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
                 <Mail className="h-5 w-5 text-textMuted" />
@@ -200,7 +200,7 @@ export default function Login() {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="block w-full pl-10 pr-3.5 py-3 border border-border rounded-2xl bg-background text-text placeholder-textMuted/60 focus:ring-2 focus:ring-primary focus:border-transparent transition-all text-sm"
+                className="block w-full pl-10 pr-3.5 py-3 border border-border/80 rounded-2xl bg-surface-sunken/60 text-text placeholder-textMuted/60 focus:ring-2 focus:ring-primary focus:border-transparent transition-all text-sm"
                 placeholder="name@example.com"
                 required
               />
@@ -208,7 +208,7 @@ export default function Login() {
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-text uppercase tracking-wider mb-1.5">Password</label>
+            <label className="block text-xs font-bold text-text uppercase tracking-wider mb-1.5">Password</label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
                 <Lock className="h-5 w-5 text-textMuted" />
@@ -217,7 +217,7 @@ export default function Login() {
                 type={showPassword ? 'text' : 'password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="block w-full pl-10 pr-10 py-3 border border-border rounded-2xl bg-background text-text placeholder-textMuted/60 focus:ring-2 focus:ring-primary focus:border-transparent transition-all text-sm"
+                className="block w-full pl-10 pr-10 py-3 border border-border/80 rounded-2xl bg-surface-sunken/60 text-text placeholder-textMuted/60 focus:ring-2 focus:ring-primary focus:border-transparent transition-all text-sm"
                 placeholder="••••••••"
                 required
               />
@@ -234,7 +234,7 @@ export default function Login() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full flex justify-center py-3.5 px-4 border border-transparent rounded-2xl text-sm font-semibold text-white bg-primary hover:bg-primaryHover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary focus:ring-offset-background disabled:opacity-50 transition-all cursor-pointer shadow-lg shadow-primary/20"
+            className="btn-3d-primary w-full flex justify-center py-3.5 px-4 rounded-2xl text-sm font-bold cursor-pointer shadow-lg disabled:opacity-50"
           >
             {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : (isSignUp ? `Sign Up as ${roleChoice === 'teacher' ? 'Teacher' : 'Student'}` : 'Sign In with Email')}
           </button>
@@ -242,17 +242,17 @@ export default function Login() {
 
         <div className="relative my-5">
           <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t border-border" />
+            <div className="w-full border-t border-border/80" />
           </div>
           <div className="relative flex justify-center text-xs uppercase">
-            <span className="bg-surface px-3 text-textMuted font-medium">Or continue with</span>
+            <span className="bg-surface px-3 text-textMuted font-bold">Or continue with</span>
           </div>
         </div>
 
         <button
           type="button"
           onClick={handleGoogleSignIn}
-          className="w-full flex items-center justify-center gap-3 py-3 px-4 border border-border rounded-2xl bg-background hover:bg-border/30 text-sm font-semibold text-text transition-all cursor-pointer shadow-sm"
+          className="btn-3d-glass w-full flex items-center justify-center gap-3 py-3.5 px-4 rounded-2xl text-sm font-bold text-text cursor-pointer shadow-sm"
         >
           <svg className="w-5 h-5" viewBox="0 0 24 24">
             <path
@@ -281,7 +281,7 @@ export default function Login() {
               setIsSignUp(!isSignUp);
               setError('');
             }}
-            className="text-sm font-medium text-primary hover:text-primaryHover transition-colors cursor-pointer"
+            className="text-sm font-semibold text-primary hover:text-primaryHover transition-colors cursor-pointer"
           >
             {isSignUp ? 'Already have an account? Sign In' : 'Need an account? Sign Up as Student / Teacher'}
           </button>

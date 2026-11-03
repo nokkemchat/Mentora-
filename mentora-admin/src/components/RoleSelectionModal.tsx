@@ -36,7 +36,7 @@ export default function RoleSelectionModal() {
           </div>
           <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">Choose Your Role</h2>
           <p className="text-textMuted text-sm sm:text-base mt-2 max-w-md mx-auto">
-            Select how you will be using Mentora. This is a one-time setup choice that determines your account permissions.
+            Select how you will be using Ziviso. This is a one-time setup choice that determines your account permissions.
           </p>
         </div>
 

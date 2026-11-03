@@ -97,10 +97,10 @@ const QuestionCard = ({
   onOpenScheme?: (questionNumber: string) => void;
 }) => {
   return (
-    <div className="bg-surface border border-border rounded-2xl sm:rounded-3xl p-3.5 sm:p-6 shadow-sm">
+    <div className="liquid-glass-subtle border border-white/20 dark:border-white/10 rounded-2xl sm:rounded-3xl p-3.5 sm:p-6 shadow-sm">
       <div className="flex items-start justify-between gap-2 mb-3 sm:mb-4">
         <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
-          <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+          <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-primary/10 border border-primary/25 flex items-center justify-center shrink-0 shadow-inner">
             <span className="font-bold text-primary text-base sm:text-lg">{q.question_number}</span>
           </div>
           <div className="min-w-0">
@@ -453,11 +453,11 @@ export default function PaperViewModal({ paperId, initialTab = 'questions', onCl
     : questions.filter(q => String(q.question_number) === selectedQNumber);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-background/80 backdrop-blur-sm">
-      <div className="bg-surface w-full max-w-5xl h-[95dvh] max-h-[95dvh] rounded-3xl sm:rounded-[2rem] shadow-2xl border border-border flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-background/80 backdrop-blur-md">
+      <div className="liquid-glass w-full max-w-5xl h-[95dvh] max-h-[95dvh] rounded-3xl sm:rounded-[2rem] shadow-2xl border border-white/20 dark:border-white/10 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         
         {/* Header */}
-        <div className="px-3.5 sm:px-8 py-3 sm:py-5 border-b border-border flex items-center justify-between shrink-0 bg-surface/50">
+        <div className="px-3.5 sm:px-8 py-3 sm:py-5 border-b border-border/70 flex items-center justify-between shrink-0 bg-surface/40 backdrop-blur-md">
           <div className="min-w-0 pr-2">
             <div className="flex items-center gap-2">
               <h2 className="text-base sm:text-2xl font-bold text-text truncate">
@@ -542,13 +542,13 @@ export default function PaperViewModal({ paperId, initialTab = 'questions', onCl
               <button
                 type="button"
                 onClick={() => setShowBulkMarking(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-primary text-white hover:bg-primaryHover transition-all cursor-pointer shadow-sm shadow-primary/20 shrink-0"
+                className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold btn-3d-primary cursor-pointer shrink-0 whitespace-nowrap"
                 title={isStudent ? "Mark your handwritten working with AI" : "Mark student papers with AI"}
               >
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>{isStudent ? 'Mark My Paper' : 'Mark Papers'}</span>
+                <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                <span className="whitespace-nowrap">{isStudent ? 'Mark My Paper' : 'Mark Papers'}</span>
                 {markedCount > 0 && (
-                  <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-white text-primary font-bold">
+                  <span className="ml-1 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] bg-white text-primary font-bold whitespace-nowrap shrink-0 shadow-xs">
                     {markedCount}
                   </span>
                 )}

@@ -1,10 +1,10 @@
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap');
 @import "tailwindcss";
 
 /* ============================================================
    Design tokens — SINGLE SOURCE OF TRUTH.
-   Utilities (bg-background, text-textMuted, …) reference these
-   runtime variables, so switching [data-theme] re-skins the app.
+   Theme colors: Signature Edtech Lilac Blue (#5C67F2 / #6366F1),
+   Liquid Glassmorphism, and Smooth 3D tactile UI.
    ============================================================ */
 @theme inline {
   --color-background: var(--background);
@@ -13,46 +13,54 @@
   --color-surface-sunken: var(--surface-sunken);
   --color-primary: var(--primary);
   --color-primaryHover: var(--primary-hover);
+  --color-primaryLight: var(--primary-light);
+  --color-primaryGlow: var(--primary-glow);
   --color-border: var(--border);
+  --color-borderHighlight: var(--border-highlight);
   --color-text: var(--text);
   --color-textMuted: var(--text-muted);
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-error: var(--error);
-  /* Red teacher ink drawn ON paper images — identical in both themes (content, not chrome) */
   --color-inkRed: var(--ink-red);
   --font-sans: 'Outfit', ui-sans-serif, system-ui, sans-serif;
 }
 
-/* ---------- Dark theme (default) ---------- */
+/* ---------- Dark theme (default - Sleek Midnight Lilac Glass) ---------- */
 :root,
 [data-theme='dark'] {
-  --background: #0B0F19;
-  --surface: #141C2B;
-  --surface-elevated: #1A2334;
-  --surface-sunken: #080B12;
-  --primary: #8B80A5;
-  --primary-hover: #7A6F9B;
-  --border: #1F2937;
-  --text: #F3F4F6;
-  --text-muted: #9CA3AF;
+  --background: #080B16;
+  --surface: #10162B;
+  --surface-elevated: #161E38;
+  --surface-sunken: #050811;
+  --primary: #5C67F2;
+  --primary-hover: #4D57E6;
+  --primary-light: #818CF8;
+  --primary-glow: rgba(92, 103, 242, 0.4);
+  --border: rgba(165, 180, 252, 0.12);
+  --border-highlight: rgba(255, 255, 255, 0.16);
+  --text: #F8FAFC;
+  --text-muted: #94A3B8;
   --success: #10B981;
   --warning: #F59E0B;
   --error: #EF4444;
   --ink-red: #DC2626;
 }
 
-/* ---------- Light theme ---------- */
+/* ---------- Light theme (Airy Frosted Lilac Glass) ---------- */
 [data-theme='light'] {
-  --background: #F6F7FB;
+  --background: #F4F6FF;
   --surface: #FFFFFF;
   --surface-elevated: #FFFFFF;
-  --surface-sunken: #EDF0F7;
-  --primary: #6D5BA6;
-  --primary-hover: #5D4C94;
-  --border: #E3E6EE;
-  --text: #16181D;
-  --text-muted: #5F6673;
+  --surface-sunken: #EAEFFE;
+  --primary: #5551FF;
+  --primary-hover: #433FE6;
+  --primary-light: #6366F1;
+  --primary-glow: rgba(85, 81, 255, 0.25);
+  --border: rgba(99, 102, 241, 0.14);
+  --border-highlight: rgba(255, 255, 255, 0.85);
+  --text: #0F172A;
+  --text-muted: #64748B;
   --success: #059669;
   --warning: #D97706;
   --error: #DC2626;
@@ -65,22 +73,107 @@
     color: var(--text);
     font-family: 'Outfit', ui-sans-serif, system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
-    transition: background-color 0.2s ease, color 0.2s ease;
+    transition: background-color 0.25s ease, color 0.25s ease;
   }
+}
+
+/* ============================================================
+   LIQUID GLASS & GLASSMORPHISM UTILITIES
+   ============================================================ */
+.liquid-glass {
+  background: radial-gradient(circle at 10% 10%, rgba(255, 255, 255, 0.08), transparent 70%), var(--surface);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid var(--border);
+  box-shadow: 
+    inset 0 1px 1px 0 rgba(255, 255, 255, 0.14),
+    0 20px 40px -15px rgba(0, 0, 0, 0.4);
+}
+
+.liquid-glass-subtle {
+  background: var(--surface);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border);
+  box-shadow: 
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.08),
+    0 10px 25px -5px rgba(0, 0, 0, 0.25);
+}
+
+/* ============================================================
+   SMOOTH 3D TACTILE BUTTONS
+   ============================================================ */
+.btn-3d-primary {
+  background: linear-gradient(180deg, #6C77FF 0%, #4F5AE8 100%);
+  color: #FFFFFF;
+  font-weight: 600;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-bottom: 2px solid #353EC4;
+  box-shadow: 
+    inset 0 1px 1px 0 rgba(255, 255, 255, 0.45),
+    0 4px 14px 0 rgba(79, 90, 232, 0.38),
+    0 2px 0 0 #353EC4;
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  transform: translateY(0);
+}
+
+.btn-3d-primary:hover {
+  background: linear-gradient(180deg, #7882FF 0%, #5863F0 100%);
+  box-shadow: 
+    inset 0 1px 1px 0 rgba(255, 255, 255, 0.5),
+    0 6px 18px 0 rgba(79, 90, 232, 0.48),
+    0 2px 0 0 #353EC4;
+  transform: translateY(-1px);
+}
+
+.btn-3d-primary:active {
+  transform: translateY(2px);
+  box-shadow: 
+    inset 0 1px 1px 0 rgba(255, 255, 255, 0.3),
+    0 2px 6px 0 rgba(79, 90, 232, 0.25),
+    0 0px 0 0 #353EC4;
+}
+
+.btn-3d-glass {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.03) 100%);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border);
+  box-shadow: 
+    inset 0 1px 1px 0 rgba(255, 255, 255, 0.18),
+    0 4px 12px -2px rgba(0, 0, 0, 0.2);
+  transition: all 0.15s ease;
+  transform: translateY(0);
+}
+
+.btn-3d-glass:hover {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.14) 0%, rgba(255, 255, 255, 0.06) 100%);
+  border-color: rgba(165, 180, 252, 0.3);
+  box-shadow: 
+    inset 0 1px 1px 0 rgba(255, 255, 255, 0.25),
+    0 6px 16px -2px rgba(0, 0, 0, 0.3);
+  transform: translateY(-1px);
+}
+
+.btn-3d-glass:active {
+  transform: translateY(1.5px);
+  box-shadow: 
+    inset 0 1px 1px 0 rgba(255, 255, 255, 0.1),
+    0 2px 4px 0 rgba(0, 0, 0, 0.2);
 }
 
 /* Custom Scrollbar (theme-aware) */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
 }
 ::-webkit-scrollbar-track {
-  background-color: var(--surface);
+  background-color: transparent;
 }
 ::-webkit-scrollbar-thumb {
   background-color: var(--border);
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background-color: var(--text-muted);
+  background-color: var(--primary);
 }

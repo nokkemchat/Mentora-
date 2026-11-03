@@ -128,50 +128,56 @@ export default function Dashboard() {
         <h1 className="text-2xl sm:text-3xl font-bold text-text tracking-tight">Overview</h1>
         <p className="text-sm sm:text-base text-textMuted mt-1">
           {isAdmin 
-            ? 'Welcome to the Mentora Admin Console.' 
+            ? 'Welcome to the Ziviso Admin Console.' 
             : isStudent 
-            ? 'Welcome to your Mentora Learning & Exam Practice Hub.' 
+            ? 'Welcome to your Ziviso Learning & Exam Practice Hub.' 
             : 'Welcome to your Educator Dashboard.'}
         </p>
       </div>
 
       {/* Student Highlight Banner */}
       {isStudent && (
-        <div className="p-4 sm:p-6 rounded-3xl bg-gradient-to-r from-primary/15 via-primary/5 to-transparent border border-primary/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-3.5 sm:gap-4">
-            <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl bg-primary text-white flex items-center justify-center shadow-lg shadow-primary/30 shrink-0">
-              <GraduationCap className="w-5 h-5 sm:w-6 sm:h-6" />
+        <div className="p-6 sm:p-7 rounded-3xl liquid-glass relative overflow-hidden flex flex-col sm:flex-row items-start sm:items-center justify-between gap-5 group border border-primary/25 shadow-xl shadow-primary/10">
+          <div className="absolute top-0 right-0 w-64 h-64 bg-primary/10 rounded-full blur-3xl pointer-events-none" />
+          <div className="flex items-center gap-4 relative z-10">
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-primary to-indigo-600 text-white flex items-center justify-center shadow-lg shadow-primary/40 shrink-0 border border-white/25">
+              <GraduationCap className="w-7 h-7" />
             </div>
             <div>
-              <h2 className="text-base sm:text-lg font-bold text-text">Practice Past Papers & Mark with AI</h2>
-              <p className="text-xs sm:text-sm text-textMuted mt-0.5">
-                Review questions, upload your handwritten working, and get graded instantly by the AI Senior Examiner with red-ink marks.
+              <div className="flex items-center gap-2 mb-0.5">
+                <span className="text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-primary/20 text-primary border border-primary/30">
+                  AI Examiner Studio
+                </span>
+              </div>
+              <h2 className="text-lg sm:text-xl font-extrabold text-text tracking-tight">Practice Past Papers & Mark with AI</h2>
+              <p className="text-xs sm:text-sm text-textMuted mt-1 max-w-xl leading-relaxed">
+                Review questions, upload your handwritten working, and get graded instantly with examiner annotations and step-by-step mark breakdown.
               </p>
             </div>
           </div>
           <Link
             to="/papers"
-            className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-2.5 rounded-2xl bg-primary hover:bg-primaryHover text-white text-sm font-semibold transition-colors shadow-md shadow-primary/20 shrink-0"
+            className="w-full sm:w-auto flex items-center justify-center gap-2.5 px-6 py-3 rounded-2xl btn-3d-primary text-sm font-bold shrink-0 relative z-10 cursor-pointer"
           >
             <Sparkles className="w-4 h-4" />
             <span>Mark My Past Papers</span>
-            <ArrowRight className="w-4 h-4" />
+            <ArrowRight className="w-4 h-4 ml-1" />
           </Link>
         </div>
       )}
 
-      {/* Desktop Stat Cards (Hidden on mobile to keep the interface focused on core features) */}
+      {/* Desktop Stat Cards */}
       <div className="hidden md:grid md:grid-cols-2 lg:grid-cols-4 gap-6">
         {statCards.map((stat, i) => {
           const Icon = stat.icon;
           return (
-            <div key={i} className="bg-surface border border-border rounded-3xl p-6 hover:border-border/80 transition-colors shadow-sm">
+            <div key={i} className="liquid-glass rounded-3xl p-6 hover:translate-y-[-2px] transition-all duration-200 group">
               <div className="flex items-start justify-between">
                 <div>
-                  <p className="text-xs sm:text-sm font-medium text-textMuted mb-1">{stat.label}</p>
-                  <h3 className="text-2xl sm:text-3xl font-bold text-text">{stat.value}</h3>
+                  <p className="text-xs sm:text-sm font-semibold text-textMuted mb-1.5">{stat.label}</p>
+                  <h3 className="text-3xl font-extrabold text-text tracking-tight">{stat.value}</h3>
                 </div>
-                <div className={`p-3 rounded-2xl ${stat.bg}`}>
+                <div className={`p-3.5 rounded-2xl ${stat.bg} border border-white/10 shadow-sm group-hover:scale-110 transition-transform`}>
                   <Icon className={`w-6 h-6 ${stat.color}`} />
                 </div>
               </div>
@@ -180,7 +186,7 @@ export default function Dashboard() {
         })}
       </div>
 
-      {/* Mobile Streamlined Feature Actions (Focuses students and teachers directly on core tasks) */}
+      {/* Mobile Streamlined Feature Actions */}
       <div className="md:hidden space-y-3">
         <div className="text-xs font-bold text-textMuted uppercase tracking-wider px-1">
           {isStudent ? 'Start Learning & Practicing' : 'Core Features'}
@@ -190,13 +196,13 @@ export default function Dashboard() {
           <>
             <Link
               to="/papers"
-              className="flex items-center gap-3.5 p-4 rounded-3xl bg-surface border border-border hover:border-primary/40 transition-all shadow-sm active:scale-[0.98]"
+              className="flex items-center gap-4 p-4 rounded-3xl liquid-glass hover:border-primary/40 transition-all shadow-sm active:scale-[0.98]"
             >
-              <div className="w-12 h-12 rounded-2xl bg-primary text-white flex items-center justify-center shrink-0 shadow-md shadow-primary/20">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-primary to-indigo-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-primary/30 border border-white/20">
                 <Sparkles className="w-6 h-6" />
               </div>
               <div className="flex-1 min-w-0">
-                <h3 className="font-bold text-base text-text leading-tight">Mark My Past Paper</h3>
+                <h3 className="font-extrabold text-base text-text leading-tight">Mark My Past Paper</h3>
                 <p className="text-xs text-textMuted mt-0.5 truncate">
                   Upload handwritten answers for instant AI grading
                 </p>
@@ -206,13 +212,13 @@ export default function Dashboard() {
 
             <Link
               to="/papers"
-              className="flex items-center gap-3.5 p-4 rounded-3xl bg-surface border border-border hover:border-primary/40 transition-all shadow-sm active:scale-[0.98]"
+              className="flex items-center gap-4 p-4 rounded-3xl liquid-glass hover:border-primary/40 transition-all shadow-sm active:scale-[0.98]"
             >
-              <div className="w-12 h-12 rounded-2xl bg-blue-500/10 text-blue-500 flex items-center justify-center shrink-0">
+              <div className="w-12 h-12 rounded-2xl bg-blue-500/15 text-blue-400 border border-blue-500/25 flex items-center justify-center shrink-0">
                 <FileText className="w-6 h-6" />
               </div>
               <div className="flex-1 min-w-0">
-                <h3 className="font-bold text-base text-text leading-tight">Past Exam Papers</h3>
+                <h3 className="font-extrabold text-base text-text leading-tight">Past Exam Papers</h3>
                 <p className="text-xs text-textMuted mt-0.5 truncate">
                   Explore official ZIMSEC & Cambridge question papers
                 </p>
@@ -222,13 +228,13 @@ export default function Dashboard() {
 
             <Link
               to="/papers"
-              className="flex items-center gap-3.5 p-4 rounded-3xl bg-surface border border-border hover:border-primary/40 transition-all shadow-sm active:scale-[0.98]"
+              className="flex items-center gap-4 p-4 rounded-3xl liquid-glass hover:border-primary/40 transition-all shadow-sm active:scale-[0.98]"
             >
-              <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center shrink-0">
+              <div className="w-12 h-12 rounded-2xl bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 flex items-center justify-center shrink-0">
                 <CheckCircle2 className="w-6 h-6" />
               </div>
               <div className="flex-1 min-w-0">
-                <h3 className="font-bold text-base text-text leading-tight">Marking Schemes</h3>
+                <h3 className="font-extrabold text-base text-text leading-tight">Marking Schemes</h3>
                 <p className="text-xs text-textMuted mt-0.5 truncate">
                   Step-by-step teacher worked solutions & rubrics
                 </p>
@@ -240,13 +246,13 @@ export default function Dashboard() {
           <>
             <Link
               to="/papers"
-              className="flex items-center gap-3.5 p-4 rounded-3xl bg-surface border border-border hover:border-primary/40 transition-all shadow-sm active:scale-[0.98]"
+              className="flex items-center gap-4 p-4 rounded-3xl liquid-glass hover:border-primary/40 transition-all shadow-sm active:scale-[0.98]"
             >
-              <div className="w-12 h-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-primary to-indigo-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-primary/30 border border-white/20">
                 <Sparkles className="w-6 h-6" />
               </div>
               <div className="flex-1 min-w-0">
-                <h3 className="font-bold text-base text-text leading-tight">Grade Student Scripts</h3>
+                <h3 className="font-extrabold text-base text-text leading-tight">Grade Student Scripts</h3>
                 <p className="text-xs text-textMuted mt-0.5 truncate">
                   AI Senior Examiner marking with red-ink annotations
                 </p>
@@ -256,7 +262,7 @@ export default function Dashboard() {
 
             <Link
               to="/papers"
-              className="flex items-center gap-3.5 p-4 rounded-3xl bg-surface border border-border hover:border-primary/40 transition-all shadow-sm active:scale-[0.98]"
+              className="flex items-center gap-4 p-4 rounded-3xl liquid-glass hover:border-primary/40 transition-all shadow-sm active:scale-[0.98]"
             >
               <div className="w-12 h-12 rounded-2xl bg-purple-500/10 text-purple-500 flex items-center justify-center shrink-0">
                 <FileText className="w-6 h-6" />

@@ -66,7 +66,7 @@ export default function Papers() {
       } catch (e) {}
 
       if (localTriggered) {
-        alert('Extraction started with Mentora Visual Ingestion Agent (cropping diagrams & visual assets).');
+        alert('Extraction started with Ziviso Visual Ingestion Agent (cropping diagrams & visual assets).');
       } else {
         const { data: extractRes, error: extractErr } = await supabase.functions.invoke('process-paper', {
           body: { 
@@ -356,14 +356,14 @@ export default function Papers() {
           <div className="flex items-center gap-2">
             <button 
               onClick={() => setShowBulkModal(true)}
-              className="flex items-center gap-1.5 bg-surface hover:bg-border/50 text-text border border-border px-3 py-1.5 rounded-xl text-xs font-medium transition-colors cursor-pointer"
+              className="btn-3d-glass flex items-center gap-2 px-4 py-2 rounded-2xl text-xs font-semibold text-text cursor-pointer"
             >
-              <UploadCloud className="w-3.5 h-3.5" />
+              <UploadCloud className="w-3.5 h-3.5 text-primary" />
               <span className="hidden sm:inline">Bulk Upload</span>
             </button>
             <button 
               onClick={() => setShowFormModal(true)}
-              className="flex items-center gap-1.5 bg-primary hover:bg-primaryHover text-white px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer shadow-sm shadow-primary/20"
+              className="btn-3d-primary flex items-center gap-2 px-4 py-2 rounded-2xl text-xs font-bold cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Add Paper</span>
@@ -373,7 +373,7 @@ export default function Papers() {
       </div>
 
       {/* Sleek, Compact Filter Bar */}
-      <div className="bg-surface border border-border rounded-2xl p-2.5 sm:p-3 space-y-2 shadow-sm">
+      <div className="liquid-glass rounded-3xl p-3 sm:p-4 space-y-2.5 shadow-lg border border-border/80">
         {/* Search Row */}
         <div className="relative">
           <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-textMuted" />
@@ -548,7 +548,7 @@ export default function Papers() {
               {/* Papers inside this group */}
               <div className="space-y-3">
                 {group.items.map((paper) => (
-                  <div key={paper.id} className="bg-surface border border-border rounded-3xl p-3.5 sm:p-4 space-y-3 shadow-sm hover:border-primary/40 transition-colors">
+                  <div key={paper.id} className="liquid-glass rounded-3xl p-4 sm:p-5 space-y-3.5 shadow-md hover:border-primary/50 hover:shadow-xl hover:shadow-primary/10 transition-all duration-200">
                     {/* Top row: Subject, curriculum badge, paper year */}
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex items-center gap-2.5 min-w-0">
@@ -620,13 +620,14 @@ export default function Papers() {
                       <button
                         type="button"
                         onClick={() => setSelectedPaperForMarking(paper)}
-                        className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-2xl text-xs font-bold bg-primary hover:bg-primaryHover text-white transition-all shadow-md shadow-primary/20 cursor-pointer"
+                        className="btn-3d-primary w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-2xl text-xs font-bold cursor-pointer shadow-md whitespace-nowrap"
                       >
-                        <Sparkles className="w-3.5 h-3.5" />
-                        <span>{isStudent ? 'Mark My Paper with AI' : 'Mark Students Papers'}</span>
+                        <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                        <span className="whitespace-nowrap">{isStudent ? 'Mark My Paper with AI' : 'Mark Students Papers'}</span>
                         {paper.marked_count > 0 && (
-                          <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] bg-white/20 text-white font-bold">
-                            {paper.marked_count} marked
+                          <span className="ml-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-white/20 text-white font-extrabold whitespace-nowrap shrink-0">
+                            <span>{paper.marked_count}</span>
+                            <span className="opacity-90 font-medium">marked</span>
                           </span>
                         )}
                       </button>
@@ -640,7 +641,7 @@ export default function Papers() {
                               setViewingPaperId(paper.id);
                               setInitialModalTab('scheme');
                             }}
-                            className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-semibold bg-success/15 text-success border border-success/30 hover:bg-success/25 transition-all cursor-pointer"
+                            className="flex-1 btn-3d-glass inline-flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-semibold text-success hover:text-success cursor-pointer"
                           >
                             <FileCheck className="w-3.5 h-3.5" />
                             <span>Scheme ({paper.solution_count})</span>
@@ -650,7 +651,7 @@ export default function Papers() {
                             href={paper.mark_scheme_url}
                             target="_blank"
                             rel="noreferrer"
-                            className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-medium bg-background border border-border text-text hover:bg-border/40 transition-colors"
+                            className="flex-1 btn-3d-glass inline-flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-medium text-text"
                           >
                             <ExternalLink className="w-3.5 h-3.5 text-textMuted" />
                             <span>Scheme PDF</span>
@@ -662,7 +663,7 @@ export default function Papers() {
                             setViewingPaperId(paper.id);
                             setInitialModalTab('questions');
                           }}
-                          className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-medium bg-background hover:bg-border/50 text-text border border-border transition-colors cursor-pointer"
+                          className="flex-1 btn-3d-glass inline-flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-semibold text-text cursor-pointer"
                         >
                           <Eye className="w-3.5 h-3.5" />
                           <span>View Questions</span>
@@ -688,11 +689,11 @@ export default function Papers() {
       </div>
 
       {/* Desktop Papers Table (Visible on lg+) */}
-      <div className="hidden lg:block bg-surface border border-border rounded-3xl overflow-hidden shadow-sm">
+      <div className="hidden lg:block liquid-glass rounded-3xl overflow-hidden shadow-xl border border-border/80">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="bg-background border-b border-border text-textMuted text-sm">
+              <tr className="bg-surface-sunken/60 border-b border-border text-textMuted text-xs font-semibold uppercase tracking-wider">
                 <th className="p-4 font-medium">Subject</th>
                 <th className="p-4 font-medium">Details</th>
                 <th className="p-4 font-medium">Type</th>
@@ -700,8 +701,8 @@ export default function Papers() {
                 <th className="p-4 font-medium">Status</th>
                 <th className="p-4 font-medium">PDF File</th>
                 <th className="p-4 font-medium">Marking Scheme</th>
-                <th className="p-4 font-medium">{isStudent ? 'AI Paper Marking' : 'Student Papers'}</th>
-                <th className="p-4 font-medium text-right">Actions</th>
+                <th className="p-4 font-medium whitespace-nowrap">{isStudent ? 'AI Paper Marking' : 'Student Papers'}</th>
+                <th className="p-4 font-medium text-right whitespace-nowrap">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -883,19 +884,20 @@ export default function Papers() {
                     </td>
 
                     {/* Student Papers / Bulk Marking Column */}
-                    <td className="p-4">
+                    <td className="p-4 whitespace-nowrap">
                       {isStudent ? (
                         <button
                           type="button"
                           onClick={() => setSelectedPaperForMarking(paper)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-gradient-to-r from-primary/20 via-primary/10 to-purple-500/15 text-primary border border-primary/30 hover:bg-primary/25 hover:border-primary/50 transition-all cursor-pointer shadow-sm group"
+                          className="btn-3d-primary inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap cursor-pointer shadow-md group"
                           title="Upload your handwritten answers to get marked by the AI Senior Examiner"
                         >
-                          <Sparkles className="w-3.5 h-3.5 text-primary group-hover:rotate-12 transition-transform" />
-                          <span>Mark My Paper</span>
+                          <Sparkles className="w-3.5 h-3.5 text-white group-hover:rotate-12 transition-transform shrink-0" />
+                          <span className="whitespace-nowrap font-bold">Mark My Paper</span>
                           {paper.marked_count > 0 && (
-                            <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] bg-primary text-white font-bold">
-                              {paper.marked_count} marked
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-white/20 text-white font-extrabold whitespace-nowrap shrink-0 shadow-xs">
+                              <span>{paper.marked_count}</span>
+                              <span className="opacity-90 font-medium">marked</span>
                             </span>
                           )}
                         </button>
@@ -903,13 +905,13 @@ export default function Papers() {
                         <button
                           type="button"
                           onClick={() => setSelectedPaperForMarking(paper)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-primary/15 text-primary border border-primary/30 hover:bg-primary/25 transition-all cursor-pointer shadow-sm group"
+                          className="btn-3d-primary inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap cursor-pointer shadow-md group"
                           title="Mark student exam scripts with AI"
                         >
-                          <Sparkles className="w-3.5 h-3.5 text-primary group-hover:rotate-12 transition-transform" />
-                          <span>Mark Students Papers</span>
+                          <Sparkles className="w-3.5 h-3.5 text-white group-hover:rotate-12 transition-transform shrink-0" />
+                          <span className="whitespace-nowrap font-bold">Mark Students Papers</span>
                           {paper.marked_count > 0 && (
-                            <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] bg-primary text-white font-bold">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] bg-white/20 text-white font-extrabold whitespace-nowrap shrink-0 shadow-xs">
                               {paper.marked_count}
                             </span>
                           )}

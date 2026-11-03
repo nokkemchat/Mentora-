@@ -60,7 +60,7 @@ export default function RevenueChart({ totalRevenue, teacherShare, platformShare
       <div>
         <div className="flex justify-between text-sm mb-2 font-medium">
           <span className="text-success">Teachers: {teacherPercentage}%</span>
-          <span className="text-blue-500">Mentora: {platformPercentage}%</span>
+          <span className="text-blue-500">Ziviso: {platformPercentage}%</span>
         </div>
         <div className="h-4 w-full bg-background rounded-full overflow-hidden flex">
           <div 
