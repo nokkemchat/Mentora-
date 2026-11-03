@@ -19,7 +19,7 @@ export default function Papers() {
   const [extractingPaperId, setExtractingPaperId] = useState<string | null>(null);
   const [processingMsPaperId, setProcessingMsPaperId] = useState<string | null>(null);
   const [selectedPaperForMarking, setSelectedPaperForMarking] = useState<any | null>(null);
-  const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
+  const [viewMode, setViewMode] = useState<'grid' | 'table'>('table');
 
   const handleExtractPaper = async (paperId: string) => {
     try {
