@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { LayoutDashboard, Users, BookOpen, CreditCard, LogOut, ShieldAlert, FileBox, Menu, X, MoreHorizontal } from 'lucide-react';
 import ThemeToggle from './ThemeToggle';
 import RoleSelectionModal from './RoleSelectionModal';
+import ZivisoArtisticBackground from './ZivisoArtisticBackground';
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
@@ -236,14 +237,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         <div className="pointer-events-none fixed top-1/2 -left-32 w-96 h-96 rounded-full bg-indigo-500/10 blur-[130px] z-0" />
         <div className="pointer-events-none fixed -bottom-32 right-1/4 w-80 h-80 rounded-full bg-purple-500/10 blur-[120px] z-0" />
 
-        {/* Cozy Furry 'Z' Ambient Background Watermark */}
-        <div className="fixed inset-0 md:left-64 pointer-events-none z-0 overflow-hidden flex items-center justify-center p-6">
-          <img 
-            src="/logo.png" 
-            alt="Ziviso Furry Z Watermark" 
-            className="w-[320px] h-[320px] sm:w-[460px] sm:h-[460px] md:w-[560px] md:h-[560px] max-w-[85vw] max-h-[85vh] object-contain opacity-[0.16] sm:opacity-[0.20] dark:opacity-[0.26] drop-shadow-[0_0_60px_rgba(92,103,242,0.35)] select-none transition-opacity duration-300" 
-          />
-        </div>
+        {/* Artistic Scattered & Falling Z-I-V-I-S-O Letters Background */}
+        <ZivisoArtisticBackground />
 
         {/* Content with responsive padding */}
         <div className="p-4 sm:p-6 lg:p-8 pb-24 md:pb-8 relative z-10 max-w-full">

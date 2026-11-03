@@ -177,3 +177,32 @@
 ::-webkit-scrollbar-thumb:hover {
   background-color: var(--primary);
 }
+
+/* ============================================================
+   ARTISTIC KINETIC LETTER ANIMATIONS
+   ============================================================ */
+@keyframes float-slow {
+  0%, 100% {
+    transform: translateY(0px) scale(1);
+  }
+  50% {
+    transform: translateY(-16px) scale(1.02);
+  }
+}
+
+@keyframes drift-fall {
+  0%, 100% {
+    transform: translateY(0px) scale(1);
+  }
+  50% {
+    transform: translateY(22px) scale(0.98);
+  }
+}
+
+.animate-float-slow {
+  animation: float-slow 9s ease-in-out infinite;
+}
+
+.animate-drift-fall {
+  animation: drift-fall 11s ease-in-out infinite;
+}
