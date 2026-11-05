@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {X, Sparkles, Plus, UploadCloud, Search, Trash2, Eye, CheckCircle2, 
   AlertCircle, ChevronRight, ChevronLeft, Award, FileText, ArrowUp, 
   ArrowDown, RotateCcw, ZoomIn, ZoomOut, Check, HelpCircle, BookOpen, 
@@ -246,6 +247,29 @@ export default function TeacherBulkMarkingModal({ paper, onClose, onPaperUpdated
   const [generatingPages, setGeneratingPages] = useState<Record<number, boolean>>({});
   const [loadingViewerId, setLoadingViewerId] = useState<string | null>(null);
   const [showAnnotationsComments, setShowAnnotationsComments] = useState(true);
+
+  // Allow Left/Right arrow keys to flip pages when viewing a marked script
+  useEffect(() => {
+    if (!viewingPaper || viewerTab !== 'script') return;
+    const rawCount = Array.isArray(viewingPaper.page_images) ? viewingPaper.page_images.length : 0;
+    const assCount = Array.isArray(viewingPaper.assessment_result?.pages) ? viewingPaper.assessment_result.pages.length : 0;
+    const pageCount = Math.max(rawCount, assCount, 1);
+    if (pageCount <= 1) return;
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        setViewerPageIdx(prev => Math.max(0, prev - 1));
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        setViewerPageIdx(prev => Math.min(pageCount - 1, prev + 1));
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [viewingPaper, viewerTab]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -1315,8 +1339,8 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
     ? Math.round((markedPapers.filter(p => (p.percentage || 0) >= 50).length / totalCount) * 100)
     : 0;
 
-  return (
-    <div className="fixed inset-0 z-50 bg-slate-950/40 dark:bg-black/70 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 overflow-hidden animate-fade-in">
+  return createPortal(
+    <div className="fixed inset-0 z-[60] bg-slate-950/45 dark:bg-black/75 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 overflow-hidden animate-fade-in">
       <div className="liquid-glass-modal rounded-3xl w-full max-w-6xl h-[94dvh] max-h-[94dvh] flex flex-col shadow-2xl overflow-hidden">
         
         {/* Header */}
@@ -1969,7 +1993,7 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
       {/* SUB-MODAL: MARK NEW STUDENT PAPERS (SINGLE OR BATCH WHOLE CLASS) */}
       {/* ========================================================================= */}
       {showUploadModal && (
-        <div className="fixed inset-0 z-60 bg-slate-950/45 dark:bg-black/75 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 animate-fade-in">
+        <div className="fixed inset-0 z-[70] bg-slate-950/45 dark:bg-black/75 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 animate-fade-in">
           <div className="liquid-glass-modal rounded-3xl w-full max-w-3xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden relative">
             
             {/* Modal Header */}
@@ -2453,7 +2477,7 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
       {/* (NO ANNOTATIONS ON TOP OF MARKED IMAGES, FULL HEIGHT UNCROPPED VIEW)       */}
       {/* ========================================================================= */}
       {viewingPaper && (
-        <div className="fixed inset-0 z-70 bg-slate-950/50 dark:bg-black/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 animate-fade-in">
+        <div className="fixed inset-0 z-[80] bg-slate-950/55 dark:bg-black/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 animate-fade-in">
           <div className="liquid-glass-modal rounded-3xl w-full max-w-[96vw] h-[94vh] flex flex-col shadow-2xl overflow-hidden">
             
             {/* Viewer Top Bar */}
@@ -2746,7 +2770,32 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                   </div>
 
                   {/* Main Image Display - Fully Contained (Whole image 100% visible on screen) */}
-                  <div className="flex-1 min-h-0 p-3 sm:p-5 bg-background flex items-center justify-center overflow-hidden">
+                  <div className="flex-1 min-h-0 p-3 sm:p-5 bg-background flex items-center justify-center overflow-hidden relative">
+                    {/* Floating Side Page Navigation Arrows */}
+                    {totalPages > 1 && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setViewerPageIdx(prev => Math.max(0, prev - 1))}
+                          disabled={viewerPageIdx === 0}
+                          className="absolute left-3 top-1/2 -translate-y-1/2 z-30 w-10 h-10 rounded-full bg-slate-900/75 hover:bg-indigo-600 text-white border border-white/20 shadow-xl backdrop-blur-md flex items-center justify-center transition-all cursor-pointer disabled:opacity-25 disabled:pointer-events-none active:scale-95"
+                          title="Previous Page (←)"
+                          aria-label="Previous Page"
+                        >
+                          <ChevronLeft className="w-5 h-5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setViewerPageIdx(prev => Math.min(totalPages - 1, prev + 1))}
+                          disabled={viewerPageIdx === totalPages - 1}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 z-30 w-10 h-10 rounded-full bg-slate-900/75 hover:bg-indigo-600 text-white border border-white/20 shadow-xl backdrop-blur-md flex items-center justify-center transition-all cursor-pointer disabled:opacity-25 disabled:pointer-events-none active:scale-95"
+                          title="Next Page (→)"
+                          aria-label="Next Page"
+                        >
+                          <ChevronRight className="w-5 h-5" />
+                        </button>
+                      </>
+                    )}
                     <div className="relative w-full h-full flex items-center justify-center">
                       {/* Generation Status Badge */}
                       {viewerMode === 'marked' && isPageGenerating && (
@@ -3204,6 +3253,7 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
         </div>
       )}
 
-    </div>
+    </div>,
+    document.body
   );
 }

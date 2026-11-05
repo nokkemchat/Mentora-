@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   X, BookOpen, Layers, Target, ChevronRight, FileText, ExternalLink,
   Plus, Edit, Trash2, CheckCircle2, Sparkles, AlertCircle, Lightbulb,
@@ -452,8 +453,8 @@ export default function PaperViewModal({ paperId, initialTab = 'questions', onCl
     ? questions
     : questions.filter(q => String(q.question_number) === selectedQNumber);
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/40 dark:bg-black/70 backdrop-blur-md animate-fade-in">
+  return createPortal(
+    <div className="fixed inset-0 z-[55] flex items-center justify-center p-2 sm:p-4 bg-slate-950/45 dark:bg-black/75 backdrop-blur-md animate-fade-in">
       <div className="liquid-glass-modal w-full max-w-5xl h-[95dvh] max-h-[95dvh] rounded-3xl sm:rounded-[2rem] shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         
         {/* Header */}
@@ -1168,6 +1169,7 @@ export default function PaperViewModal({ paperId, initialTab = 'questions', onCl
           />
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

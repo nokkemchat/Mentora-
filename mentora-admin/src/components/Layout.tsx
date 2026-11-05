@@ -240,8 +240,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         {/* Artistic Scattered & Falling Z-I-V-I-S-O Letters Background */}
         <ZivisoArtisticBackground />
 
-        {/* Content with responsive padding */}
-        <div className="p-4 sm:p-6 lg:p-8 pb-24 md:pb-8 relative z-10 max-w-full">
+        {/* Content with responsive padding — no z-index here so fixed modals aren't trapped below the z-20 sidebar */}
+        <div className="p-4 sm:p-6 lg:p-8 pb-24 md:pb-8 relative max-w-full">
           {children}
         </div>
       </main>

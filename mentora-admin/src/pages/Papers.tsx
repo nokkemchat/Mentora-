@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Search, Filter, Plus, Edit, Trash2, Eye, BarChart2, BookOpen, ChevronDown, ChevronUp, UploadCloud, FileText, ExternalLink, FileCheck, Sparkles, RefreshCw, CheckCircle2, GraduationCap, Calendar, ArrowUpDown, SlidersHorizontal, LayoutGrid, List, X as CloseIcon } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import PaperFormModal from '../components/PaperFormModal';
@@ -20,6 +20,22 @@ export default function Papers() {
   const [processingMsPaperId, setProcessingMsPaperId] = useState<string | null>(null);
   const [selectedPaperForMarking, setSelectedPaperForMarking] = useState<any | null>(null);
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('table');
+
+  // Fixed top chrome (title, actions, search & filters): its measured height
+  // is exposed as --papers-chrome-h so the table pane and sticky column
+  // headers can offset below it.
+  const chromeRef = useRef<HTMLDivElement>(null);
+  const [chromeHeight, setChromeHeight] = useState(0);
+
+  useEffect(() => {
+    const el = chromeRef.current;
+    if (!el) return;
+    const update = () => setChromeHeight(el.offsetHeight);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   const handleExtractPaper = async (paperId: string) => {
     try {
@@ -341,28 +357,42 @@ export default function Papers() {
   };
 
   return (
-    <div className="max-w-7xl mx-auto space-y-4">
+    <div
+      className="max-w-7xl mx-auto space-y-4"
+      style={{ ['--papers-chrome-h']: `${chromeHeight}px` } as React.CSSProperties}
+    >
+      {/* Fixed Frosted Top Chrome — title, actions, search & filters stay pinned
+          while the question papers list scrolls beneath them (iOS-style) */}
+      <div
+        ref={chromeRef}
+        className="papers-chrome -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 pt-2 pb-3 space-y-3 bg-background/70 backdrop-blur-2xl backdrop-saturate-150"
+      >
+        {/* Smooth fade-out scrim: papers dissolve into the header instead of hitting a hard edge */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute left-0 right-0 top-full h-14 bg-gradient-to-b from-background/70 via-background/35 to-transparent"
+        />
       {/* Clean, Compact Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center gap-2.5">
-          <h1 className="text-xl sm:text-2xl font-bold text-text tracking-tight">
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
             Past Papers
           </h1>
-          <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-surface border border-border text-textMuted">
+          <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-700 border border-indigo-500/20 dark:bg-indigo-400/15 dark:text-indigo-100 dark:border-indigo-300/30">
             {filteredPapers.length}
           </span>
         </div>
 
         <div className="flex items-center gap-2 self-end sm:self-auto flex-wrap">
           {/* View Mode Toggle: Grid Cards vs Table */}
-          <div className="flex items-center bg-surface/80 border border-border rounded-2xl p-1 gap-1 shadow-xs">
+          <div className="flex items-center bg-white/80 dark:bg-slate-900/70 backdrop-blur-md border border-slate-200/90 dark:border-white/15 rounded-xl p-1 gap-1 shadow-xs">
             <button
               type="button"
               onClick={() => setViewMode('grid')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                 viewMode === 'grid'
-                  ? 'btn-3d-primary'
-                  : 'text-textMuted hover:text-text'
+                  ? 'bg-gradient-to-b from-indigo-500 to-indigo-600 text-white shadow-sm shadow-indigo-500/30'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
               }`}
               title="Card Grid View"
             >
@@ -372,10 +402,10 @@ export default function Papers() {
             <button
               type="button"
               onClick={() => setViewMode('table')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                 viewMode === 'table'
-                  ? 'btn-3d-primary'
-                  : 'text-textMuted hover:text-text'
+                  ? 'bg-gradient-to-b from-indigo-500 to-indigo-600 text-white shadow-sm shadow-indigo-500/30'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
               }`}
               title="Table View"
             >
@@ -388,14 +418,14 @@ export default function Papers() {
             <>
               <button 
                 onClick={() => setShowBulkModal(true)}
-                className="btn-3d-glass flex items-center gap-2 px-3.5 py-2 rounded-2xl text-xs font-semibold text-text cursor-pointer"
+                className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold bg-white/85 hover:bg-white text-slate-800 border border-slate-200/90 hover:border-indigo-300 dark:bg-slate-900/70 dark:hover:bg-slate-800/90 dark:text-slate-100 dark:border-white/15 dark:hover:border-indigo-300/40 backdrop-blur-md shadow-xs transition-all cursor-pointer active:scale-[0.98]"
               >
-                <UploadCloud className="w-3.5 h-3.5 text-primary" />
+                <UploadCloud className="w-3.5 h-3.5 text-indigo-600 dark:text-sky-300" />
                 <span className="hidden sm:inline">Bulk Upload</span>
               </button>
               <button 
                 onClick={() => setShowFormModal(true)}
-                className="btn-3d-primary flex items-center gap-2 px-3.5 py-2 rounded-2xl text-xs font-bold cursor-pointer"
+                className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold text-white bg-gradient-to-b from-indigo-500 to-indigo-600 hover:from-indigo-400 hover:to-indigo-500 border border-indigo-400/40 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.32),0_4px_14px_-2px_rgba(99,102,241,0.5)] hover:-translate-y-0.5 active:translate-y-0 transition-all cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>Add Paper</span>
@@ -405,23 +435,23 @@ export default function Papers() {
         </div>
       </div>
 
-      {/* Sleek, Compact Filter Bar */}
-      <div className="liquid-glass rounded-3xl p-3 sm:p-4 space-y-2.5 shadow-lg border border-border/80">
+      {/* Search & Filters — sit directly on the frosted chrome, no boxed container */}
+      <div className="space-y-2.5">
         {/* Search Row */}
         <div className="relative">
-          <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-textMuted" />
+          <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-300/80" />
           <input
             type="text"
             placeholder="Search by subject, year (e.g. '2024 Math', 'Cambridge P2')..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-9 pr-8 py-2 bg-background border border-border rounded-xl text-xs sm:text-sm text-text placeholder:text-textMuted/70 focus:outline-none focus:border-primary transition-colors"
+            className="w-full pl-9 pr-8 py-2.5 bg-white/85 dark:bg-slate-900/75 backdrop-blur-md border border-slate-200/90 dark:border-white/15 rounded-xl text-xs sm:text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-400 focus:outline-none focus:border-indigo-500 dark:focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/15 transition-all"
           />
           {search && (
             <button
               type="button"
               onClick={() => setSearch('')}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-textMuted hover:text-text p-1 rounded-full cursor-pointer"
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 dark:hover:text-white p-1 rounded-full cursor-pointer transition-colors"
               title="Clear search"
             >
               <CloseIcon className="w-3.5 h-3.5" />
@@ -436,17 +466,17 @@ export default function Papers() {
             <select
               value={curriculumFilter}
               onChange={(e) => setCurriculumFilter(e.target.value)}
-              className={`appearance-none text-xs font-semibold pl-3 pr-7 py-1.5 rounded-xl cursor-pointer border transition-colors ${
+              className={`appearance-none text-xs font-semibold pl-3 pr-7 py-1.5 rounded-xl cursor-pointer border backdrop-blur-md transition-all ${
                 curriculumFilter !== 'All'
-                  ? 'bg-primary/10 border-primary text-primary font-bold'
-                  : 'bg-background hover:bg-border/50 text-text border-border'
+                  ? 'bg-indigo-500/12 dark:bg-indigo-400/20 border-indigo-500/40 dark:border-indigo-300/45 text-indigo-700 dark:text-indigo-100 font-bold'
+                  : 'bg-white/80 dark:bg-slate-900/70 hover:bg-white dark:hover:bg-slate-800/85 text-slate-700 dark:text-slate-200 border-slate-200/90 dark:border-white/15'
               }`}
             >
               <option value="All">Board: All</option>
               <option value="ZIMSEC">Board: ZIMSEC</option>
               <option value="Cambridge">Board: Cambridge</option>
             </select>
-            <ChevronDown className={`w-3 h-3 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none ${curriculumFilter !== 'All' ? 'text-primary' : 'text-textMuted'}`} />
+            <ChevronDown className={`w-3 h-3 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none ${curriculumFilter !== 'All' ? 'text-indigo-600 dark:text-indigo-200' : 'text-slate-400 dark:text-slate-300'}`} />
           </div>
 
           {/* Year Pill */}
@@ -454,10 +484,10 @@ export default function Papers() {
             <select
               value={yearFilter}
               onChange={(e) => setYearFilter(e.target.value)}
-              className={`appearance-none text-xs font-semibold pl-3 pr-7 py-1.5 rounded-xl cursor-pointer border transition-colors ${
+              className={`appearance-none text-xs font-semibold pl-3 pr-7 py-1.5 rounded-xl cursor-pointer border backdrop-blur-md transition-all ${
                 yearFilter !== 'All'
-                  ? 'bg-primary/10 border-primary text-primary font-bold'
-                  : 'bg-background hover:bg-border/50 text-text border-border'
+                  ? 'bg-indigo-500/12 dark:bg-indigo-400/20 border-indigo-500/40 dark:border-indigo-300/45 text-indigo-700 dark:text-indigo-100 font-bold'
+                  : 'bg-white/80 dark:bg-slate-900/70 hover:bg-white dark:hover:bg-slate-800/85 text-slate-700 dark:text-slate-200 border-slate-200/90 dark:border-white/15'
               }`}
             >
               <option value="All">Year: All</option>
@@ -465,7 +495,7 @@ export default function Papers() {
                 <option key={yr as string} value={yr.toString()}>{yr as string}</option>
               ))}
             </select>
-            <ChevronDown className={`w-3 h-3 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none ${yearFilter !== 'All' ? 'text-primary' : 'text-textMuted'}`} />
+            <ChevronDown className={`w-3 h-3 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none ${yearFilter !== 'All' ? 'text-indigo-600 dark:text-indigo-200' : 'text-slate-400 dark:text-slate-300'}`} />
           </div>
 
           {/* Subject Pill */}
@@ -473,10 +503,10 @@ export default function Papers() {
             <select
               value={subjectFilter}
               onChange={(e) => setSubjectFilter(e.target.value)}
-              className={`appearance-none text-xs font-semibold pl-3 pr-7 py-1.5 rounded-xl cursor-pointer border transition-colors max-w-[140px] truncate ${
+              className={`appearance-none text-xs font-semibold pl-3 pr-7 py-1.5 rounded-xl cursor-pointer border backdrop-blur-md transition-all max-w-[150px] truncate ${
                 subjectFilter !== 'All'
-                  ? 'bg-primary/10 border-primary text-primary font-bold'
-                  : 'bg-background hover:bg-border/50 text-text border-border'
+                  ? 'bg-indigo-500/12 dark:bg-indigo-400/20 border-indigo-500/40 dark:border-indigo-300/45 text-indigo-700 dark:text-indigo-100 font-bold'
+                  : 'bg-white/80 dark:bg-slate-900/70 hover:bg-white dark:hover:bg-slate-800/85 text-slate-700 dark:text-slate-200 border-slate-200/90 dark:border-white/15'
               }`}
             >
               <option value="All">Subject: All</option>
@@ -484,7 +514,7 @@ export default function Papers() {
                 <option key={sub as string} value={sub as string}>{sub as string}</option>
               ))}
             </select>
-            <ChevronDown className={`w-3 h-3 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none ${subjectFilter !== 'All' ? 'text-primary' : 'text-textMuted'}`} />
+            <ChevronDown className={`w-3 h-3 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none ${subjectFilter !== 'All' ? 'text-indigo-600 dark:text-indigo-200' : 'text-slate-400 dark:text-slate-300'}`} />
           </div>
 
           {/* Grouping Pill */}
@@ -492,13 +522,13 @@ export default function Papers() {
             <select
               value={groupBy}
               onChange={(e) => setGroupBy(e.target.value as any)}
-              className="appearance-none bg-background hover:bg-border/50 text-text text-xs font-semibold pl-3 pr-7 py-1.5 rounded-xl cursor-pointer border border-border transition-colors"
+              className="appearance-none bg-white/80 dark:bg-slate-900/70 hover:bg-white dark:hover:bg-slate-800/85 text-slate-700 dark:text-slate-200 text-xs font-semibold pl-3 pr-7 py-1.5 rounded-xl cursor-pointer border border-slate-200/90 dark:border-white/15 backdrop-blur-md transition-all"
             >
               <option value="year">Group: Year</option>
               <option value="subject">Group: Subject</option>
               <option value="none">Group: Flat</option>
             </select>
-            <ChevronDown className="w-3 h-3 text-textMuted absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <ChevronDown className="w-3 h-3 text-slate-400 dark:text-slate-300 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
           </div>
 
           {/* Sort Pill */}
@@ -506,14 +536,14 @@ export default function Papers() {
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as any)}
-              className="appearance-none bg-background hover:bg-border/50 text-text text-xs font-semibold pl-3 pr-7 py-1.5 rounded-xl cursor-pointer border border-border transition-colors"
+              className="appearance-none bg-white/80 dark:bg-slate-900/70 hover:bg-white dark:hover:bg-slate-800/85 text-slate-700 dark:text-slate-200 text-xs font-semibold pl-3 pr-7 py-1.5 rounded-xl cursor-pointer border border-slate-200/90 dark:border-white/15 backdrop-blur-md transition-all"
             >
               <option value="year_desc">Sort: Newest Year</option>
               <option value="year_asc">Sort: Oldest Year</option>
               <option value="subject_asc">Sort: Subject A-Z</option>
               <option value="questions_desc">Sort: Questions</option>
             </select>
-            <ChevronDown className="w-3 h-3 text-textMuted absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <ChevronDown className="w-3 h-3 text-slate-400 dark:text-slate-300 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
           </div>
 
           {/* Reset Action Pill */}
@@ -521,7 +551,7 @@ export default function Papers() {
             <button
               type="button"
               onClick={resetFilters}
-              className="shrink-0 flex items-center gap-1 text-xs text-primary hover:text-primaryHover font-semibold px-2.5 py-1.5 rounded-xl bg-primary/10 border border-primary/20 cursor-pointer transition-all"
+              className="shrink-0 flex items-center gap-1 text-xs text-rose-700 dark:text-rose-200 hover:text-rose-800 dark:hover:text-white font-semibold px-2.5 py-1.5 rounded-xl bg-rose-500/10 dark:bg-rose-400/15 border border-rose-500/25 dark:border-rose-300/30 cursor-pointer transition-all"
             >
               <CloseIcon className="w-3 h-3" />
               <span>Reset</span>
@@ -529,37 +559,42 @@ export default function Papers() {
           )}
         </div>
       </div>
+      </div>
 
-        {/* Results Counter & Arrangement Indicator */}
-        <div className="flex items-center justify-between text-xs text-textMuted px-2">
+      {/* Results Counter & Arrangement Indicator — frosted pills keep text crisp over floating artwork */}
+      <div className="flex items-center justify-between text-xs px-1">
+        <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/75 dark:bg-slate-900/65 backdrop-blur-md border border-slate-200/80 dark:border-white/12 text-slate-600 dark:text-slate-300 shadow-2xs">
+          <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 dark:bg-cyan-300 shadow-[0_0_6px_rgba(103,232,249,0.75)]" />
           <span>
-            Found <strong className="text-text font-bold">{filteredPapers.length}</strong> {filteredPapers.length === 1 ? 'exam paper' : 'exam papers'}
+            Found <strong className="text-slate-900 dark:text-white font-bold">{filteredPapers.length}</strong> {filteredPapers.length === 1 ? 'exam paper' : 'exam papers'}
             {search ? ` matching "${search}"` : ''}
           </span>
-          <span className="hidden sm:inline">
-            Arranged by {groupBy === 'year' ? 'Exam Year' : groupBy === 'subject' ? 'Subject' : 'Default'}
-          </span>
-        </div>
+        </span>
+        <span className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/75 dark:bg-slate-900/65 backdrop-blur-md border border-slate-200/80 dark:border-white/12 text-slate-600 dark:text-slate-300 shadow-2xs">
+          <ArrowUpDown className="w-3 h-3 text-indigo-500 dark:text-indigo-300" />
+          <span>Arranged by <strong className="text-slate-800 dark:text-slate-100 font-semibold">{groupBy === 'year' ? 'Exam Year' : groupBy === 'subject' ? 'Subject' : 'Default'}</strong></span>
+        </span>
+      </div>
 
-      {/* Main Papers Content: Grid Cards (default) or Streamlined Table */}
+      {/* Main Papers Content: Grid Cards or Streamlined Table */}
       {loading ? (
-        <div className="liquid-glass rounded-3xl p-12 text-center text-textMuted text-sm border border-border/80 flex flex-col items-center justify-center gap-3">
-          <RefreshCw className="w-8 h-8 text-primary animate-spin" />
-          <p className="font-semibold text-text">Loading question papers...</p>
+        <div className="papers-surface rounded-3xl p-12 text-center text-sm flex flex-col items-center justify-center gap-3">
+          <RefreshCw className="w-8 h-8 text-indigo-500 dark:text-sky-300 animate-spin" />
+          <p className="font-semibold text-slate-900 dark:text-white">Loading question papers...</p>
         </div>
       ) : filteredPapers.length === 0 ? (
-        <div className="liquid-glass rounded-3xl p-12 text-center text-textMuted text-sm space-y-3 border border-border/80 flex flex-col items-center justify-center">
-          <div className="w-14 h-14 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shadow-inner">
+        <div className="papers-surface rounded-3xl p-12 text-center text-sm space-y-3 flex flex-col items-center justify-center">
+          <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 dark:bg-indigo-400/15 border border-indigo-500/20 dark:border-indigo-300/30 flex items-center justify-center text-indigo-600 dark:text-indigo-200 shadow-inner">
             <BookOpen className="w-7 h-7" />
           </div>
           <div>
-            <p className="font-bold text-text text-base">No examination papers found</p>
-            <p className="text-xs text-textMuted mt-1">Try adjusting your search keywords, exam year, or board filters.</p>
+            <p className="font-bold text-slate-900 dark:text-white text-base">No examination papers found</p>
+            <p className="text-xs text-slate-500 dark:text-slate-300 mt-1">Try adjusting your search keywords, exam year, or board filters.</p>
           </div>
           {hasActiveFilters && (
             <button
               onClick={resetFilters}
-              className="btn-3d-glass px-4 py-2 rounded-xl text-xs font-semibold text-primary cursor-pointer mt-2"
+              className="px-4 py-2 rounded-xl text-xs font-semibold bg-indigo-500/12 hover:bg-indigo-500/20 text-indigo-700 dark:bg-indigo-400/20 dark:hover:bg-indigo-400/30 dark:text-indigo-100 border border-indigo-500/25 dark:border-indigo-300/35 cursor-pointer mt-2 transition-all"
             >
               Clear All Filters
             </button>
@@ -567,7 +602,7 @@ export default function Papers() {
         </div>
       ) : viewMode === 'grid' ? (
         /* ========================================================================= */
-        /* RESPONSIVE GRID CARDS VIEW (Orderly, Beautiful, Zero Overlap)             */
+        /* RESPONSIVE GRID CARDS VIEW (Orderly, Beautiful, High-Contrast)            */
         /* ========================================================================= */
         <div className="space-y-6">
           {groupedPapers.map((group) => (
@@ -576,20 +611,22 @@ export default function Papers() {
               {groupBy !== 'none' && (
                 <div className="flex items-center justify-between px-2 pt-1">
                   <div className="flex items-center gap-2">
-                    <span className="font-bold text-base sm:text-lg text-text flex items-center gap-2">
+                    <span className="font-bold text-base sm:text-lg text-slate-900 dark:text-white flex items-center gap-2">
                       {groupBy === 'year' ? (
-                        <Calendar className="w-4 h-4 text-primary" />
+                        <Calendar className="w-4 h-4 text-indigo-600 dark:text-sky-300" />
                       ) : (
-                        <BookOpen className="w-4 h-4 text-primary" />
+                        <BookOpen className="w-4 h-4 text-indigo-600 dark:text-sky-300" />
                       )}
                       <span>{group.title}</span>
                     </span>
-                    <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-primary/15 text-primary border border-primary/30">
+                    <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-500/12 text-indigo-700 border border-indigo-500/25 dark:bg-indigo-400/20 dark:text-indigo-100 dark:border-indigo-300/35">
                       {group.count}
                     </span>
                   </div>
                   {group.subtitle && (
-                    <span className="text-xs text-textMuted font-medium">{group.subtitle}</span>
+                    <span className="text-xs text-slate-600 dark:text-slate-300 font-medium px-2.5 py-0.5 rounded-full bg-white/70 dark:bg-slate-900/55 backdrop-blur-md border border-slate-200/80 dark:border-white/10">
+                      {group.subtitle}
+                    </span>
                   )}
                 </div>
               )}
@@ -599,31 +636,31 @@ export default function Papers() {
                 {group.items.map((paper) => (
                   <div
                     key={paper.id}
-                    className="liquid-glass rounded-3xl p-5 flex flex-col justify-between gap-4 shadow-md transition-all duration-200 group"
+                    className="papers-card-surface rounded-3xl p-5 flex flex-col justify-between gap-4 group"
                   >
                     {/* Top Row: Subject Title, Icon & Year/Session Badge */}
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex items-start gap-3 min-w-0">
-                        <div className="w-11 h-11 rounded-2xl flex items-center justify-center liquid-glass-well border border-white/50 dark:border-white/20 text-primary shrink-0 shadow-inner group-hover:scale-105 transition-transform">
+                        <div className="w-11 h-11 rounded-2xl flex items-center justify-center bg-gradient-to-br from-indigo-500/15 to-sky-500/10 dark:from-indigo-400/20 dark:to-cyan-400/10 border border-indigo-500/20 dark:border-indigo-300/25 text-indigo-600 dark:text-indigo-100 shrink-0 shadow-inner group-hover:scale-105 transition-transform">
                           <BookOpen className="w-5 h-5" />
                         </div>
                         <div className="min-w-0">
-                          <h3 className="font-bold text-text text-base leading-snug truncate" title={paper.subject}>
+                          <h3 className="font-bold text-slate-900 dark:text-white text-base leading-snug truncate" title={paper.subject}>
                             {paper.subject}
                           </h3>
                           {/* Board, Grade Level & Paper Number */}
                           <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-                            <span className={`px-2 py-0.5 rounded-md text-[11px] font-bold ${
+                            <span className={`px-2 py-0.5 rounded-md text-[11px] font-semibold border ${
                               paper.curriculum === 'Cambridge' 
-                                ? 'bg-blue-500/10 text-blue-500 border border-blue-500/25' 
-                                : 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/25'
+                                ? 'bg-sky-500/10 text-sky-700 border-sky-500/25 dark:bg-sky-400/15 dark:text-sky-200 dark:border-sky-300/30' 
+                                : 'bg-amber-500/10 text-amber-700 border-amber-500/25 dark:bg-amber-400/15 dark:text-amber-200 dark:border-amber-300/30'
                             }`}>
                               {paper.curriculum}
                             </span>
-                            <span className="px-2 py-0.5 rounded-md text-[11px] font-medium bg-surface/80 border border-border text-textMuted">
+                            <span className="px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100/90 dark:bg-white/[0.07] border border-slate-200/80 dark:border-white/12 text-slate-600 dark:text-slate-200">
                               {paper.grade_level || 'O-Level'}
                             </span>
-                            <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-primary/10 text-primary border border-primary/20">
+                            <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-indigo-500/10 text-indigo-700 border border-indigo-500/20 dark:bg-indigo-400/15 dark:text-indigo-100 dark:border-indigo-300/25">
                               Paper {paper.paper_number}{paper.variant ? ` (Var ${paper.variant})` : ''}
                             </span>
                           </div>
@@ -632,24 +669,24 @@ export default function Papers() {
 
                       {/* Year & Session Badge */}
                       <div className="shrink-0 text-right">
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-bold liquid-glass-well border border-white/40 dark:border-white/15 text-text shadow-xs">
-                          <Calendar className="w-3 h-3 text-textMuted" />
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-bold bg-slate-100/90 dark:bg-white/[0.08] border border-slate-200/80 dark:border-white/15 text-slate-900 dark:text-white shadow-2xs tabular-nums">
+                          <Calendar className="w-3 h-3 text-indigo-500 dark:text-sky-300" />
                           <span>{paper.year}</span>
-                          {paper.session && <span className="text-textMuted text-[10px]">({paper.session})</span>}
+                          {paper.session && <span className="text-slate-500 dark:text-slate-300 text-[10px] font-medium">({paper.session})</span>}
                         </span>
                       </div>
                     </div>
 
                     {/* Information Strip: Orderly 2-Column Mini Box */}
-                    <div className="liquid-glass-well rounded-2xl p-3 border border-white/40 dark:border-white/15 grid grid-cols-2 gap-2 text-xs">
+                    <div className="rounded-2xl p-3 bg-slate-50/85 dark:bg-slate-950/45 border border-slate-200/80 dark:border-white/10 grid grid-cols-2 gap-2 text-xs">
                       {/* Questions count */}
                       <div className="flex items-center gap-2 min-w-0">
-                        <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center text-primary shrink-0">
+                        <div className="w-7 h-7 rounded-lg bg-indigo-500/10 dark:bg-sky-400/15 flex items-center justify-center text-indigo-600 dark:text-sky-300 shrink-0">
                           <FileText className="w-3.5 h-3.5" />
                         </div>
                         <div className="min-w-0">
-                          <span className="text-[10px] text-textMuted block font-medium">Questions</span>
-                          <span className="font-semibold text-text truncate block text-xs">
+                          <span className="text-[10px] text-slate-500 dark:text-slate-400 block font-medium">Questions</span>
+                          <span className="font-semibold text-slate-900 dark:text-white truncate block text-xs">
                             {paper.question_count > 0 ? `${paper.question_count} Extracted` : 'Pending'}
                           </span>
                         </div>
@@ -658,13 +695,17 @@ export default function Papers() {
                       {/* Marking scheme status */}
                       <div className="flex items-center gap-2 min-w-0">
                         <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
-                          paper.solution_count > 0 ? 'bg-success/15 text-success' : paper.mark_scheme_url ? 'bg-blue-500/10 text-blue-400' : 'bg-amber-500/10 text-amber-500'
+                          paper.solution_count > 0
+                            ? 'bg-emerald-500/12 text-emerald-600 dark:bg-emerald-400/18 dark:text-emerald-300'
+                            : paper.mark_scheme_url
+                            ? 'bg-sky-500/12 text-sky-600 dark:bg-sky-400/18 dark:text-sky-300'
+                            : 'bg-amber-500/12 text-amber-600 dark:bg-amber-400/18 dark:text-amber-300'
                         }`}>
                           <FileCheck className="w-3.5 h-3.5" />
                         </div>
                         <div className="min-w-0">
-                          <span className="text-[10px] text-textMuted block font-medium">Mark Scheme</span>
-                          <span className="font-semibold text-text truncate block text-xs">
+                          <span className="text-[10px] text-slate-500 dark:text-slate-400 block font-medium">Mark Scheme</span>
+                          <span className="font-semibold text-slate-900 dark:text-white truncate block text-xs">
                             {paper.solution_count > 0 ? `${paper.solution_count} Solutions` : paper.mark_scheme_url ? 'PDF Attached' : 'None'}
                           </span>
                         </div>
@@ -679,10 +720,10 @@ export default function Papers() {
                             href={paper.pdf_url}
                             target="_blank"
                             rel="noreferrer"
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[11px] font-semibold text-primary bg-primary/5 hover:bg-primary/10 border border-primary/20 transition-colors"
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-slate-100/90 hover:bg-white text-slate-700 hover:text-indigo-600 border border-slate-200/90 hover:border-indigo-300 dark:bg-white/[0.07] dark:hover:bg-white/[0.13] dark:text-slate-100 dark:hover:text-white dark:border-white/12 dark:hover:border-sky-300/40 transition-all"
                             title="Open Question Paper PDF"
                           >
-                            <FileText className="w-3 h-3" />
+                            <FileText className="w-3 h-3 text-indigo-500 dark:text-sky-300" />
                             <span>Paper PDF</span>
                             <ExternalLink className="w-2.5 h-2.5 opacity-60" />
                           </a>
@@ -692,10 +733,10 @@ export default function Papers() {
                             href={paper.mark_scheme_url}
                             target="_blank"
                             rel="noreferrer"
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/5 hover:bg-emerald-500/10 border border-emerald-500/20 transition-colors"
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-emerald-50/90 hover:bg-emerald-50 text-emerald-800 border border-emerald-200/90 hover:border-emerald-300 dark:bg-emerald-400/[0.11] dark:hover:bg-emerald-400/[0.18] dark:text-emerald-100 dark:hover:text-white dark:border-emerald-300/25 dark:hover:border-emerald-300/45 transition-all"
                             title="Open Official Mark Scheme PDF"
                           >
-                            <FileCheck className="w-3 h-3" />
+                            <FileCheck className="w-3 h-3 text-emerald-600 dark:text-emerald-300" />
                             <span>Scheme PDF</span>
                             <ExternalLink className="w-2.5 h-2.5 opacity-60" />
                           </a>
@@ -704,17 +745,17 @@ export default function Papers() {
                     )}
 
                     {/* Action Buttons Area: No overlapping elements! */}
-                    <div className="pt-3 border-t border-border/60 flex flex-col gap-2.5">
-                      {/* Primary 3D Marking Button */}
+                    <div className="pt-3 border-t border-slate-200/80 dark:border-white/10 flex flex-col gap-2.5">
+                      {/* Primary Marking Button */}
                       <button
                         type="button"
                         onClick={() => setSelectedPaperForMarking(paper)}
-                        className="btn-3d-primary w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-2xl text-xs font-bold cursor-pointer"
+                        className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-semibold text-white bg-gradient-to-b from-indigo-500 to-indigo-600 hover:from-indigo-400 hover:to-indigo-500 border border-indigo-400/40 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.32),0_4px_14px_-2px_rgba(99,102,241,0.5)] hover:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.42),0_6px_20px_-2px_rgba(99,102,241,0.65)] hover:-translate-y-0.5 active:translate-y-0 transition-all cursor-pointer"
                       >
-                        <Sparkles className="w-4 h-4 shrink-0" />
+                        <Sparkles className="w-4 h-4 text-indigo-100 shrink-0" />
                         <span className="truncate">{isStudent ? 'Mark My Paper with AI' : 'Mark Students Papers'}</span>
                         {paper.marked_count > 0 && (
-                          <span className="ml-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-white/25 text-white font-extrabold shrink-0 shadow-inner">
+                          <span className="ml-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] bg-white/20 text-white font-bold shrink-0">
                             <span>{paper.marked_count}</span>
                             <span className="opacity-90 font-medium">marked</span>
                           </span>
@@ -729,10 +770,10 @@ export default function Papers() {
                             setViewingPaperId(paper.id);
                             setInitialModalTab('questions');
                           }}
-                          className="btn-3d-glass flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-semibold text-text cursor-pointer truncate"
+                          className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-semibold bg-slate-100/90 hover:bg-white text-slate-800 border border-slate-200/90 dark:bg-white/[0.07] dark:hover:bg-white/[0.13] dark:text-slate-100 dark:border-white/14 transition-all cursor-pointer truncate"
                           title="View Questions & Booklets"
                         >
-                          <Eye className="w-3.5 h-3.5 shrink-0 text-textMuted" />
+                          <Eye className="w-3.5 h-3.5 shrink-0 text-slate-500 dark:text-slate-300" />
                           <span className="truncate">Questions</span>
                         </button>
 
@@ -743,24 +784,24 @@ export default function Papers() {
                               setViewingPaperId(paper.id);
                               setInitialModalTab('scheme');
                             }}
-                            className="btn-3d-glass flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-semibold text-success cursor-pointer truncate"
+                            className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-semibold bg-emerald-500/10 hover:bg-emerald-500/18 text-emerald-700 border border-emerald-500/25 dark:bg-emerald-400/14 dark:hover:bg-emerald-400/22 dark:text-emerald-100 dark:border-emerald-300/30 transition-all cursor-pointer truncate"
                             title="View Official Worked Solutions"
                           >
-                            <FileCheck className="w-3.5 h-3.5 shrink-0 text-success" />
+                            <FileCheck className="w-3.5 h-3.5 shrink-0 text-emerald-600 dark:text-emerald-300" />
                             <span className="truncate">Scheme ({paper.solution_count})</span>
                           </button>
                         ) : !isStudent ? (
                           <button
                             type="button"
                             onClick={() => setSelectedPaperForMs(paper)}
-                            className="btn-3d-glass flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-semibold text-primary cursor-pointer truncate"
+                            className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-semibold bg-indigo-500/10 hover:bg-indigo-500/18 text-indigo-700 border border-indigo-500/25 dark:bg-white/[0.08] dark:hover:bg-white/[0.14] dark:text-indigo-100 dark:border-white/16 transition-all cursor-pointer truncate"
                             title="Attach Official Marking Scheme"
                           >
-                            <Plus className="w-3.5 h-3.5 shrink-0 text-primary" />
+                            <Plus className="w-3.5 h-3.5 shrink-0 text-indigo-600 dark:text-indigo-300" />
                             <span className="truncate">Attach Scheme</span>
                           </button>
                         ) : (
-                          <div className="flex items-center justify-center text-[11px] text-textMuted italic bg-background/30 rounded-xl border border-border/40 py-2 px-3">
+                          <div className="flex items-center justify-center text-[11px] text-slate-400 dark:text-slate-400 italic bg-slate-100/50 dark:bg-white/[0.03] rounded-xl border border-slate-200/60 dark:border-white/10 py-2 px-3">
                             No Scheme
                           </div>
                         )}
@@ -768,19 +809,19 @@ export default function Papers() {
 
                       {/* Admin/Teacher Extra Options: Extract & Delete in a clean footer */}
                       {!isStudent && (
-                        <div className="flex items-center justify-between pt-1 text-xs text-textMuted">
+                        <div className="flex items-center justify-between pt-1 text-xs">
                           {(!paper.ingestion_jobs || paper.ingestion_jobs[0]?.status !== 'completed') ? (
                             <button
                               type="button"
                               onClick={() => handleExtractPaper(paper.id)}
                               disabled={extractingPaperId === paper.id}
-                              className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline cursor-pointer disabled:opacity-50"
+                              className="inline-flex items-center gap-1 text-[11px] font-medium text-indigo-600 dark:text-sky-300 hover:underline cursor-pointer disabled:opacity-50"
                             >
                               <RefreshCw className={`w-3 h-3 ${extractingPaperId === paper.id ? 'animate-spin' : ''}`} />
                               <span>{extractingPaperId === paper.id ? 'Extracting...' : 'Extract Content'}</span>
                             </button>
                           ) : (
-                            <span className="text-[11px] text-success flex items-center gap-1 font-medium">
+                            <span className="text-[11px] text-emerald-600 dark:text-emerald-300 flex items-center gap-1 font-medium">
                               <CheckCircle2 className="w-3 h-3" />
                               <span>Ingested</span>
                             </span>
@@ -788,7 +829,7 @@ export default function Papers() {
 
                           <button
                             onClick={() => handleDelete(paper.id)}
-                            className="p-1 text-textMuted hover:text-error hover:bg-error/10 rounded-lg transition-colors cursor-pointer"
+                            className="p-1.5 text-slate-400 dark:text-slate-300 hover:text-rose-600 dark:hover:text-rose-300 hover:bg-rose-500/10 dark:hover:bg-rose-500/15 rounded-lg transition-colors cursor-pointer"
                             title="Delete Paper"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -804,59 +845,80 @@ export default function Papers() {
         </div>
       ) : (
         /* ========================================================================= */
-        /* STREAMLINED TABLE VIEW (Spacious, No Column Crowding)                     */
+        /* STREAMLINED TABLE VIEW (Sleek, High-Contrast, Harmonious Glass)           */
         /* ========================================================================= */
-        <div className="liquid-glass rounded-3xl overflow-hidden shadow-xl border border-border/80">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse min-w-[850px]">
+        <div className="papers-surface rounded-3xl overflow-hidden">
+          <div className="papers-table-pane overflow-x-auto">
+            <table className="w-full text-left border-collapse min-w-[860px]">
               <thead>
-                <tr className="bg-surface-sunken/60 border-b border-border text-textMuted text-xs font-semibold uppercase tracking-wider">
-                  <th className="p-4 font-medium min-w-[220px]">Paper & Subject</th>
-                  <th className="p-4 font-medium min-w-[120px]">Year & Session</th>
-                  <th className="p-4 font-medium min-w-[130px]">Content Status</th>
-                  <th className="p-4 font-medium min-w-[130px]">Documents</th>
-                  <th className="p-4 font-medium min-w-[150px]">Mark Scheme</th>
-                  <th className="p-4 font-medium min-w-[190px]">{isStudent ? 'AI Marking' : 'Student Papers'}</th>
-                  <th className="p-4 font-medium text-right min-w-[100px]">Actions</th>
+                <tr className="border-b border-slate-200/80 dark:border-white/10 text-slate-500 dark:text-slate-300/85 text-[11px] font-semibold uppercase tracking-[0.08em]">
+                  <th className="sticky top-0 z-10 py-3.5 px-5 font-semibold min-w-[230px]">Paper &amp; Subject</th>
+                  <th className="sticky top-0 z-10 py-3.5 px-4 font-semibold min-w-[125px]">Year &amp; Session</th>
+                  <th className="sticky top-0 z-10 py-3.5 px-4 font-semibold min-w-[140px]">Content Status</th>
+                  <th className="sticky top-0 z-10 py-3.5 px-4 font-semibold min-w-[145px]">Documents</th>
+                  <th className="sticky top-0 z-10 py-3.5 px-4 font-semibold min-w-[155px]">Mark Scheme</th>
+                  <th className="sticky top-0 z-10 py-3.5 px-4 font-semibold min-w-[175px]">{isStudent ? 'AI Marking' : 'Student Papers'}</th>
+                  <th className="sticky top-0 z-10 py-3.5 px-5 font-semibold text-right min-w-[100px]">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border/60">
+              <tbody className="divide-y divide-slate-200/70 dark:divide-white/[0.07]">
                 {filteredPapers.map((paper) => (
-                  <tr key={paper.id} className="hover:bg-background/40 transition-colors group">
+                  <tr
+                    key={paper.id}
+                    className="hover:bg-indigo-500/[0.04] dark:hover:bg-white/[0.045] transition-colors duration-150 group"
+                  >
                     {/* Paper & Subject */}
-                    <td className="p-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-2xl flex items-center justify-center bg-primary/10 border border-primary/20 shrink-0 text-primary">
-                          <BookOpen className="w-5 h-5" />
+                    <td className="py-3.5 px-5">
+                      <div className="flex items-center gap-3.5">
+                        <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-gradient-to-br from-indigo-500/15 to-sky-500/10 dark:from-indigo-400/20 dark:to-cyan-400/10 border border-indigo-500/20 dark:border-indigo-300/25 shrink-0 text-indigo-600 dark:text-indigo-100 shadow-inner group-hover:scale-105 group-hover:border-indigo-400/40 dark:group-hover:border-indigo-200/45 dark:group-hover:text-white transition-all">
+                          <BookOpen className="w-4 h-4" />
                         </div>
                         <div className="min-w-0">
-                          <span className="font-bold text-text text-sm block truncate">{paper.subject}</span>
-                          <div className="flex items-center gap-1.5 mt-0.5 text-xs text-textMuted">
-                            <span className="font-semibold text-primary">{paper.curriculum}</span>
-                            <span>•</span>
-                            <span>Paper {paper.paper_number}</span>
-                            {paper.variant && <span>(Var {paper.variant})</span>}
+                          <span className="font-semibold text-slate-900 dark:text-white text-sm block truncate tracking-tight">
+                            {paper.subject}
+                          </span>
+                          <div className="flex items-center gap-1.5 mt-1 text-xs">
+                            <span
+                              className={`px-1.5 py-0.5 rounded-md text-[10.5px] font-semibold leading-none border ${
+                                paper.curriculum === 'Cambridge'
+                                  ? 'bg-sky-500/10 text-sky-700 border-sky-500/20 dark:bg-sky-400/15 dark:text-sky-200 dark:border-sky-300/30'
+                                  : 'bg-amber-500/10 text-amber-700 border-amber-500/20 dark:bg-amber-400/15 dark:text-amber-200 dark:border-amber-300/30'
+                              }`}
+                            >
+                              {paper.curriculum}
+                            </span>
+                            <span className="text-slate-300 dark:text-slate-500">•</span>
+                            <span className="text-slate-600 dark:text-slate-300 font-medium">
+                              Paper {paper.paper_number}
+                              {paper.variant ? ` (Var ${paper.variant})` : ''}
+                            </span>
                           </div>
                         </div>
                       </div>
                     </td>
 
                     {/* Year & Session */}
-                    <td className="p-4 text-xs">
-                      <span className="block font-bold text-text">{paper.year}</span>
-                      <span className="text-textMuted">{paper.session || 'Main'}</span>
+                    <td className="py-3.5 px-4">
+                      <span className="block font-bold text-sm text-slate-900 dark:text-white tabular-nums">
+                        {paper.year}
+                      </span>
+                      <span className="text-xs text-slate-500 dark:text-slate-300/85 font-medium">
+                        {paper.session || 'Main'}
+                      </span>
                     </td>
 
                     {/* Content Status */}
-                    <td className="p-4">
-                      <div className="flex flex-col gap-1">
+                    <td className="py-3.5 px-4">
+                      <div className="flex flex-col gap-1.5">
                         {paper.question_count > 0 ? (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-semibold bg-primary/10 text-primary border border-primary/20 w-fit">
-                            {paper.question_count} Questions
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200/90 dark:bg-indigo-400/15 dark:text-indigo-100 dark:border-indigo-300/30 shadow-2xs w-fit">
+                            <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 dark:bg-cyan-300 shadow-[0_0_6px_rgba(103,232,249,0.85)] shrink-0" />
+                            <span>{paper.question_count} Questions</span>
                           </span>
                         ) : (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-semibold bg-amber-500/10 text-amber-500 border border-amber-500/20 w-fit">
-                            Pending
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200/90 dark:bg-amber-400/15 dark:text-amber-100 dark:border-amber-300/30 w-fit">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 dark:bg-amber-300 shrink-0" />
+                            <span>Pending</span>
                           </span>
                         )}
                         {!isStudent && (!paper.ingestion_jobs || paper.ingestion_jobs[0]?.status !== 'completed') && (
@@ -864,39 +926,49 @@ export default function Papers() {
                             type="button"
                             onClick={() => handleExtractPaper(paper.id)}
                             disabled={extractingPaperId === paper.id}
-                            className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline cursor-pointer disabled:opacity-50"
+                            className="inline-flex items-center gap-1 text-[11px] font-medium text-indigo-600 dark:text-sky-300 hover:text-indigo-500 dark:hover:text-sky-200 hover:underline cursor-pointer disabled:opacity-50 w-fit pl-1"
                           >
                             <RefreshCw className={`w-3 h-3 ${extractingPaperId === paper.id ? 'animate-spin' : ''}`} />
-                            <span>Extract</span>
+                            <span>{extractingPaperId === paper.id ? 'Extracting...' : 'Extract'}</span>
                           </button>
                         )}
                       </div>
                     </td>
 
                     {/* Documents */}
-                    <td className="p-4 text-xs">
-                      <div className="flex flex-col gap-1">
+                    <td className="py-3.5 px-4 text-xs">
+                      <div className="flex flex-col gap-1.5">
                         {paper.pdf_url ? (
-                          <a href={paper.pdf_url} target="_blank" rel="noreferrer" className="text-primary hover:underline inline-flex items-center gap-1 font-medium">
-                            <FileText className="w-3 h-3" />
+                          <a
+                            href={paper.pdf_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11.5px] font-medium bg-slate-100/90 hover:bg-white text-slate-700 hover:text-indigo-600 border border-slate-200/90 hover:border-indigo-300 dark:bg-white/[0.07] dark:hover:bg-white/[0.13] dark:text-slate-100 dark:hover:text-white dark:border-white/12 dark:hover:border-sky-300/40 transition-all w-fit"
+                          >
+                            <FileText className="w-3 h-3 text-indigo-500 dark:text-sky-300 shrink-0" />
                             <span>Exam PDF</span>
-                            <ExternalLink className="w-2.5 h-2.5 opacity-60" />
+                            <ExternalLink className="w-2.5 h-2.5 opacity-60 shrink-0" />
                           </a>
                         ) : (
-                          <span className="text-textMuted italic">No Paper PDF</span>
+                          <span className="text-slate-400 dark:text-slate-400 italic text-[11px]">No Paper PDF</span>
                         )}
                         {paper.mark_scheme_url && (
-                          <a href={paper.mark_scheme_url} target="_blank" rel="noreferrer" className="text-emerald-500 hover:underline inline-flex items-center gap-1 font-medium">
-                            <FileCheck className="w-3 h-3" />
+                          <a
+                            href={paper.mark_scheme_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11.5px] font-medium bg-emerald-50/90 hover:bg-emerald-50 text-emerald-800 hover:text-emerald-900 border border-emerald-200/90 hover:border-emerald-300 dark:bg-emerald-400/[0.11] dark:hover:bg-emerald-400/[0.18] dark:text-emerald-100 dark:hover:text-white dark:border-emerald-300/25 dark:hover:border-emerald-300/45 transition-all w-fit"
+                          >
+                            <FileCheck className="w-3 h-3 text-emerald-600 dark:text-emerald-300 shrink-0" />
                             <span>Scheme PDF</span>
-                            <ExternalLink className="w-2.5 h-2.5 opacity-60" />
+                            <ExternalLink className="w-2.5 h-2.5 opacity-60 shrink-0" />
                           </a>
                         )}
                       </div>
                     </td>
 
                     {/* Mark Scheme */}
-                    <td className="p-4">
+                    <td className="py-3.5 px-4">
                       {paper.solution_count > 0 ? (
                         <button
                           type="button"
@@ -904,36 +976,39 @@ export default function Papers() {
                             setViewingPaperId(paper.id);
                             setInitialModalTab('scheme');
                           }}
-                          className="btn-3d-glass inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-success cursor-pointer"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-500/10 hover:bg-emerald-500/18 text-emerald-700 border border-emerald-500/25 hover:border-emerald-500/40 dark:bg-emerald-400/14 dark:hover:bg-emerald-400/22 dark:text-emerald-100 dark:hover:text-white dark:border-emerald-300/30 dark:hover:border-emerald-300/50 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.12)] transition-all cursor-pointer active:scale-[0.98]"
                         >
-                          <FileCheck className="w-3.5 h-3.5" />
-                          <span>Scheme ({paper.solution_count})</span>
+                          <FileCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-300 shrink-0" />
+                          <span>Scheme</span>
+                          <span className="px-1.5 py-0.5 rounded-md text-[10.5px] font-bold bg-emerald-500/15 text-emerald-800 dark:bg-emerald-300/20 dark:text-emerald-50 leading-none tabular-nums">
+                            {paper.solution_count}
+                          </span>
                         </button>
                       ) : !isStudent ? (
                         <button
                           type="button"
                           onClick={() => setSelectedPaperForMs(paper)}
-                          className="btn-3d-glass inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-primary cursor-pointer"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-indigo-500/10 hover:bg-indigo-500/18 text-indigo-700 border border-indigo-500/25 dark:bg-white/[0.08] dark:hover:bg-white/[0.14] dark:text-indigo-100 dark:border-white/16 dark:hover:border-indigo-300/40 transition-all cursor-pointer active:scale-[0.98]"
                         >
-                          <Plus className="w-3.5 h-3.5" />
+                          <Plus className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-300 shrink-0" />
                           <span>Attach Scheme</span>
                         </button>
                       ) : (
-                        <span className="text-xs text-textMuted italic">No Scheme</span>
+                        <span className="text-xs text-slate-400 dark:text-slate-400 italic">No Scheme</span>
                       )}
                     </td>
 
                     {/* AI Marking */}
-                    <td className="p-4">
+                    <td className="py-3.5 px-4">
                       <button
                         type="button"
                         onClick={() => setSelectedPaperForMarking(paper)}
-                        className="btn-3d-primary inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer"
+                        className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold text-white bg-gradient-to-b from-indigo-500 to-indigo-600 hover:from-indigo-400 hover:to-indigo-500 border border-indigo-400/40 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.32),0_4px_14px_-2px_rgba(99,102,241,0.5)] hover:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.42),0_6px_20px_-2px_rgba(99,102,241,0.65)] hover:-translate-y-0.5 active:translate-y-0 transition-all cursor-pointer"
                       >
-                        <Sparkles className="w-3.5 h-3.5" />
+                        <Sparkles className="w-3.5 h-3.5 text-indigo-100 shrink-0" />
                         <span>{isStudent ? 'Mark My Paper' : 'Mark Paper'}</span>
                         {paper.marked_count > 0 && (
-                          <span className="ml-1 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] bg-white/20 text-white font-extrabold">
+                          <span className="ml-0.5 inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] bg-white/20 text-white font-bold leading-none tabular-nums">
                             {paper.marked_count}
                           </span>
                         )}
@@ -941,14 +1016,14 @@ export default function Papers() {
                     </td>
 
                     {/* Actions */}
-                    <td className="p-4 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
+                    <td className="py-3.5 px-5 text-right">
+                      <div className="flex items-center justify-end gap-1">
                         <button 
                           onClick={() => {
                             setViewingPaperId(paper.id);
                             setInitialModalTab('questions');
                           }}
-                          className="p-2 text-textMuted hover:text-primary hover:bg-primary/10 rounded-xl transition-colors cursor-pointer" 
+                          className="w-8 h-8 inline-flex items-center justify-center text-slate-500 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-white hover:bg-indigo-500/10 dark:hover:bg-white/12 border border-transparent hover:border-indigo-500/20 dark:hover:border-white/15 rounded-lg transition-all cursor-pointer" 
                           title="View Paper Details & Booklets"
                         >
                           <Eye className="w-4 h-4" />
@@ -956,7 +1031,7 @@ export default function Papers() {
                         {!isStudent && (
                           <button 
                             onClick={() => handleDelete(paper.id)}
-                            className="p-2 text-textMuted hover:text-error hover:bg-error/10 rounded-xl transition-colors cursor-pointer" 
+                            className="w-8 h-8 inline-flex items-center justify-center text-slate-500 dark:text-slate-300 hover:text-rose-600 dark:hover:text-rose-300 hover:bg-rose-500/10 dark:hover:bg-rose-500/15 border border-transparent hover:border-rose-500/20 dark:hover:border-rose-400/30 rounded-lg transition-all cursor-pointer" 
                             title="Delete Paper"
                           >
                             <Trash2 className="w-4 h-4" />

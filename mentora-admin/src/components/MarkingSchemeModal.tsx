@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { X, UploadCloud, FileText, ExternalLink, Trash2, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
@@ -138,8 +139,8 @@ export default function MarkingSchemeModal({ paper, onClose, onSuccess }: Markin
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 dark:bg-black/70 backdrop-blur-md p-4 animate-fade-in">
+  return createPortal(
+    <div className="fixed inset-0 z-[65] flex items-center justify-center bg-slate-950/45 dark:bg-black/75 backdrop-blur-md p-4 animate-fade-in">
       <div className="liquid-glass-modal rounded-3xl w-full max-w-xl flex flex-col overflow-hidden shadow-2xl">
         {/* Header */}
         <div className="flex justify-between items-center p-6 border-b border-border/80 bg-surface/20">
@@ -310,6 +311,7 @@ export default function MarkingSchemeModal({ paper, onClose, onSuccess }: Markin
           </form>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
