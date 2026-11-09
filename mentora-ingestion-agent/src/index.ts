@@ -117,7 +117,7 @@ async function triggerMarkingScheme(job: any, msUrl: string | null | undefined):
     }
 }
 
-async function processJob(job: any) {
+export async function processJob(job: any) {
     console.log(`Processing job ${job.id} for paper ${job.paper_id}`);
     // markSchemeUrl is resolved per job (payload > paper row) and reused by both paths
     const markSchemeUrl: string | null = job?.mark_scheme_url || job?.papers?.mark_scheme_url || null;
@@ -691,7 +691,7 @@ async function processJob(job: any) {
                         const sliceIdx = (asset.page_number || 1) - 1;
                         const targetImagePath = slicePaths[sliceIdx] || slicePaths[0];
                         const targetPageNumber = slices[sliceIdx]?.page_number || slices[0]?.page_number;
-                        await processSubAsset(targetImagePath, job.paper_id, questionId, null, asset, `${qNumberStr}_img${i}`, pdfPath, targetPageNumber);
+                        await processSubAsset(targetImagePath, job.paper_id, questionId, null, asset, `${qNumberStr}_img${i}`);
                     }
                 }
             } catch (e) {
@@ -860,7 +860,7 @@ async function insertParts(
                 const sliceIdx = (asset.page_number || 1) - 1;
                 const targetImagePath = slicePaths[sliceIdx] || slicePaths[0];
                 const targetPageNumber = slices?.[sliceIdx]?.page_number || slices?.[0]?.page_number;
-                await processSubAsset(targetImagePath, paperId, questionId, partId, asset, `${qNumberStr}_part_${cleanedLabel}_img${i}`, pdfPath, targetPageNumber);
+                await processSubAsset(targetImagePath, paperId, questionId, partId, asset, `${qNumberStr}_part_${cleanedLabel}_img${i}`);
             }
         }
 
@@ -877,19 +877,14 @@ async function processSubAsset(
     questionId: string | null, 
     partId: string | null, 
     asset: any, 
-    assetSuffix: string,
-    pdfPath?: string,
-    pageNumber?: number
+    assetSuffix: string
 ) {
     if (!asset.bounding_box) return;
     try {
         const croppedPath = await cropper.cropAssetFromImage(
             sourceImagePath, 
             asset.bounding_box, 
-            assetSuffix,
-            pdfPath,
-            pageNumber,
-            asset.description
+            assetSuffix
         );
         
         const fileData = await fs.readFile(croppedPath);
@@ -970,6 +965,29 @@ const server = http.createServer(async (req, res) => {
     if (req.url === "/health" && req.method === "GET") {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ status: "ok", isProcessing }));
+        return;
+    }
+
+    if (req.url?.startsWith("/process-job") && req.method === "POST") {
+        const urlObj = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+        const jobId = urlObj.searchParams.get("id");
+        if (!jobId) {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: "Missing job id parameter" }));
+            return;
+        }
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ message: `Triggering processing for job ${jobId}` }));
+        (async () => {
+            const { data: targetJob } = await supabase
+                .from('ingestion_jobs')
+                .select('*, papers(*)')
+                .eq('id', jobId)
+                .single();
+            if (targetJob) {
+                await processJob(targetJob);
+            }
+        })().catch(err => console.error(`Error processing job ${jobId}:`, err));
         return;
     }
 

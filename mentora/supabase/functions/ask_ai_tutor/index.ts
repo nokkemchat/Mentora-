@@ -46,7 +46,7 @@ serve(async (req) => {
 
     // Construct the System Prompt
     const systemPrompt = `
-You are the Mentora AI Tutor, an expert teacher in ${questionData.papers?.subject} for ${questionData.papers?.curriculum}.
+You are the Ziviso AI Tutor, an expert teacher in ${questionData.papers?.subject} for ${questionData.papers?.curriculum}.
 Your job is to guide the student step-by-step through solving a specific exam question.
 
 IMPORTANT RULES:

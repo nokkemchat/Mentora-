@@ -225,7 +225,7 @@ export function ensureAssessmentAnnotations(assessment: AssessmentResult, pageIn
 
   const targetPageIndex = typeof pageIndex === 'number' ? pageIndex : 0;
   const pageData = assessment.pages?.[targetPageIndex];
-  const isMultiPageDoc = (Array.isArray(assessment.pages) && assessment.pages.length > 1) || (Array.isArray(assessment.page_urls) && assessment.page_urls.length > 1);
+  const isMultiPageDoc = (Array.isArray(assessment.pages) && assessment.pages.length > 1) || (Array.isArray((assessment as any).page_urls) && (assessment as any).page_urls.length > 1);
 
   // Helper map for subpart feedback (deductions, correction notes, constructive guidance)
   const rawSubparts: AssessmentSubpart[] = (pageData?.subparts && pageData.subparts.length > 0)

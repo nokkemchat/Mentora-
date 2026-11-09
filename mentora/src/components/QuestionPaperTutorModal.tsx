@@ -140,7 +140,7 @@ export function QuestionPaperTutorModal({
       setTimeout(() => setCopiedMessageId(null), 2000);
       await Share.share({
         message: content,
-        title: 'Mentora AI Tutor Solution'
+        title: 'Ziviso AI Tutor Solution'
       });
     } catch (e) {
       console.warn('Share error:', e);
@@ -1033,7 +1033,7 @@ export function QuestionPaperTutorModal({
                           <Bot size={11} color={colors.primary} />
                         </View>
                         <Text style={[styles.aiSenderName, { color: colors.text }]}>
-                          Mentora Tutor
+                          Ziviso Tutor
                         </Text>
                         <View style={[styles.aiRoleBadge, { backgroundColor: `${colors.primary}10` }]}>
                           <Text style={[styles.aiRoleBadgeText, { color: colors.primary }]}>
@@ -1276,7 +1276,7 @@ export function QuestionPaperTutorModal({
                     <View style={[styles.miniAvatar, { backgroundColor: `${colors.primary}15` }]}>
                       <Bot size={11} color={colors.primary} />
                     </View>
-                    <Text style={[styles.aiSenderName, { color: colors.text }]}>Mentora Tutor</Text>
+                    <Text style={[styles.aiSenderName, { color: colors.text }]}>Ziviso Tutor</Text>
                   </View>
                 </View>
                 <View style={[styles.aiBubble, styles.thinkingBubble, { backgroundColor: colors.surface, borderColor: colors.border }]}>

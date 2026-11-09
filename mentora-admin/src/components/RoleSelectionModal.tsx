@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { BookOpen, GraduationCap, CheckCircle2, Loader2, Sparkles } from 'lucide-react';
 
 export default function RoleSelectionModal() {
   const { showRoleModal, setRole, role } = useAuth();
+  const navigate = useNavigate();
   const [selected, setSelected] = useState<'teacher' | 'student'>(role === 'teacher' ? 'teacher' : 'student');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -15,6 +17,7 @@ export default function RoleSelectionModal() {
     setError('');
     try {
       await setRole(selected);
+      navigate('/papers', { replace: true });
     } catch (err: any) {
       setError(err?.message || 'Failed to update account role');
     } finally {

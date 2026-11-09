@@ -12,7 +12,7 @@ export default function Onboarding() {
   return (
     <View style={styles.container}>
       <View style={styles.content}>
-        <Text style={styles.title}>Welcome to Mentora</Text>
+        <Text style={styles.title}>Welcome to Ziviso</Text>
         <Text style={styles.subtitle}>
           The premier AI-powered learning platform for Zimbabwe.
         </Text>

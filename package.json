@@ -1,0 +1,12 @@
+{
+  "name": "mentora-workspace",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -k -n dashboard,ingestion-agent -c cyan,green \"npm run dev --prefix mentora-admin\" \"npm start --prefix mentora-ingestion-agent\"",
+    "dev:dashboard": "npm run dev --prefix mentora-admin",
+    "dev:agent": "npm start --prefix mentora-ingestion-agent"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

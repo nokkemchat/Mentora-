@@ -1,14 +1,18 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, SafeAreaView, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { spacing, typography, borderRadius, useThemeColors } from '@/constants/theme';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
+import { BlurView } from 'expo-blur';
 
 export default function TeacherDashboardScreen() {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const isLightMode = colors.background === '#F8FAFC';
 
   const [stats, setStats] = useState<any>({
     total_revenue: 0,
@@ -18,6 +22,10 @@ export default function TeacherDashboardScreen() {
     teacher_courses: []
   });
   const [loading, setLoading] = useState(true);
+
+  // Estimated before first layout, then corrected via onLayout so the
+  // scroll content always clears the fixed frosted header.
+  const [headerHeight, setHeaderHeight] = useState(insets.top + 72);
 
   useEffect(() => {
     const fetchDashboard = async () => {
@@ -49,31 +57,22 @@ export default function TeacherDashboardScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={[styles.safeArea, { justifyContent: 'center', alignItems: 'center' }]}>
+      <View style={[styles.safeArea, { justifyContent: 'center', alignItems: 'center' }]}>
         <ActivityIndicator size="large" color={colors.primary} />
-      </SafeAreaView>
+      </View>
     );
   }
 
   const { total_revenue, pending_payout, total_students, average_rating, teacher_courses } = stats;
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <View style={styles.safeArea}>
+      {/* Scrollable content — passes beneath the fixed frosted header */}
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={[styles.content, { paddingTop: headerHeight + 16 }]}
+      >
         
-        {/* Header */}
-        <View style={styles.header}>
-          <Pressable onPress={() => router.back()} style={styles.backNav}>
-            <Feather name="arrow-left" size={24} color={colors.text} />
-          </Pressable>
-          <View style={styles.headerTitleContainer}>
-            <Text style={styles.headerTitle}>Teacher Portal</Text>
-            <View style={styles.proBadge}>
-              <Text style={styles.proBadgeText}>PRO CREATOR</Text>
-            </View>
-          </View>
-        </View>
-
         {/* Financial Summary Card */}
         <View style={styles.financeCard}>
           <Text style={styles.financeLabel}>Total Earnings</Text>
@@ -174,7 +173,34 @@ export default function TeacherDashboardScreen() {
         )}
 
       </ScrollView>
-    </SafeAreaView>
+
+      {/* Fixed Frosted Glass Header — stays pinned while content scrolls beneath */}
+      <View
+        style={[styles.fixedHeader, { paddingTop: insets.top + 4 }]}
+        onLayout={(e) => setHeaderHeight(e.nativeEvent.layout.height)}
+      >
+        <BlurView
+          style={styles.headerBlur}
+          intensity={Platform.OS === 'ios' ? 85 : 100}
+          tint={isLightMode ? 'light' : 'dark'}
+          pointerEvents="none"
+        />
+        <View style={styles.headerHairline} pointerEvents="none" />
+
+        {/* Header */}
+        <View style={styles.header}>
+          <Pressable onPress={() => router.back()} style={styles.backNav}>
+            <Feather name="arrow-left" size={24} color={colors.text} />
+          </Pressable>
+          <View style={styles.headerTitleContainer}>
+            <Text style={styles.headerTitle}>Teacher Portal</Text>
+            <View style={styles.proBadge}>
+              <Text style={styles.proBadgeText}>PRO CREATOR</Text>
+            </View>
+          </View>
+        </View>
+      </View>
+    </View>
   );
 }
 
@@ -182,6 +208,27 @@ const createStyles = (colors: any) => StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  fixedHeader: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: 12,
+    overflow: 'hidden',
+    zIndex: 10,
+  },
+  headerBlur: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  headerHairline: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(127, 127, 127, 0.18)',
   },
   container: {
     flex: 1,
@@ -193,7 +240,7 @@ const createStyles = (colors: any) => StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: spacing.xxl,
+    marginBottom: 0,
   },
   backNav: {
     marginRight: spacing.md,

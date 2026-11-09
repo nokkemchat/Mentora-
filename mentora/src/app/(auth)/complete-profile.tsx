@@ -150,7 +150,7 @@ export default function CompleteProfileScreen() {
         <View style={styles.header}>
           <Text style={styles.title}>Complete Your Profile</Text>
           <Text style={styles.subtitle}>
-            Tell us a bit about yourself so we can personalize your Mentora experience.
+            Tell us a bit about yourself so we can personalize your Ziviso experience.
           </Text>
         </View>
 

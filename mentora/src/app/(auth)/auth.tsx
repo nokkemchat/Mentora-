@@ -157,7 +157,7 @@ export default function AuthScreen() {
         }
       } else if (data.session) {
         // Auto-confirmed: User is logged in immediately
-        setFeedback({ type: 'success', message: 'Account created successfully! Welcome to Mentora.' });
+        setFeedback({ type: 'success', message: 'Account created successfully! Welcome to Ziviso.' });
         // AuthContext will automatically redirect to profile completion or tabs
       } else if (data.user) {
         // Confirmation email sent
@@ -217,7 +217,7 @@ export default function AuthScreen() {
 
     try {
       const redirectUrl = AuthSession.makeRedirectUri({
-        scheme: 'mentora',
+        scheme: 'ziviso',
         path: '(tabs)',
       });
 
@@ -258,7 +258,7 @@ export default function AuthScreen() {
     setResetLoading(true);
     try {
       const redirectUrl = AuthSession.makeRedirectUri({
-        scheme: 'mentora',
+        scheme: 'ziviso',
         path: '(tabs)',
       });
 
@@ -318,8 +318,8 @@ export default function AuthScreen() {
               {isLogin
                 ? 'Sign in to access your AI tutor, courses, and past papers.'
                 : role === 'teacher'
-                ? 'Join Mentora as an Educator to mentor and mark papers.'
-                : 'Join Mentora to unlock AI-powered learning and practice.'}
+                ? 'Join Ziviso as an Educator to mentor and mark papers.'
+                : 'Join Ziviso to unlock AI-powered learning and practice.'}
             </Text>
 
             {role && (

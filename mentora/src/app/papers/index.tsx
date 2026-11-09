@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TextInput, Pressable, ActivityIndicator } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import React, { useState, useEffect, useMemo } from 'react';
+import { View, Text, StyleSheet, ScrollView, TextInput, Pressable, ActivityIndicator, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Stack, useRouter, useLocalSearchParams } from 'expo-router';
-import { Search, ChevronRight, BookOpen, ArrowLeft, FileText, Sparkles, CheckCircle2, ShieldCheck, Lock } from 'lucide-react-native';
+import { BlurView } from 'expo-blur';
+import { Search, ChevronRight, BookOpen, ArrowLeft, FileText, Sparkles, CheckCircle2, ShieldCheck, Lock, User, Calendar } from 'lucide-react-native';
 import { useThemeColors, typography, spacing, borderRadius } from '@/constants/theme';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/context/AuthContext';
@@ -25,6 +26,8 @@ interface PaperItem {
 export default function PastPapersScreen() {
   const router = useRouter();
   const colors = useThemeColors();
+  const isLightMode = colors.background === '#F8FAFC' || colors.background === '#FFFFFF';
+  const styles = useMemo(() => createStyles(isLightMode), [isLightMode]);
   const { user } = useAuth();
   const params = useLocalSearchParams<{ subject?: string; curriculum?: string; level?: string }>();
 
@@ -34,6 +37,11 @@ export default function PastPapersScreen() {
   const [selectedCurriculum, setSelectedCurriculum] = useState<string>(params.curriculum || 'All');
   const [dbPapers, setDbPapers] = useState<PaperItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const insets = useSafeAreaInsets();
+
+  // Estimated before first layout, then corrected via onLayout so the
+  // papers list always clears the fixed frosted header.
+  const [headerHeight, setHeaderHeight] = useState(insets.top + 208);
 
   // Subject filter options
   const defaultSubjects = ['All', 'Mathematics', 'Physics', 'Chemistry', 'Biology', 'Computer Science', 'Geography', 'Economics'];
@@ -126,25 +134,86 @@ export default function PastPapersScreen() {
     }
   });
 
-  // Filter papers
-  const filteredPapers = allPapers.filter((paper) => {
-    const matchesSubject =
-      selectedSubject === 'All' ||
-      paper.subject?.toLowerCase().includes(selectedSubject.toLowerCase()) ||
-      paper.title?.toLowerCase().includes(selectedSubject.toLowerCase());
+  // Base filtered papers (board + search) used to compute Subject Directory counts
+  const baseFilteredPapers = useMemo(() => {
+    return allPapers.filter((paper) => {
+      const matchesCurriculum =
+        selectedCurriculum === 'All' ||
+        paper.curriculum?.toLowerCase() === selectedCurriculum.toLowerCase();
 
-    const matchesCurriculum =
-      selectedCurriculum === 'All' ||
-      paper.curriculum?.toLowerCase() === selectedCurriculum.toLowerCase();
+      const matchesSearch =
+        searchQuery.trim() === '' ||
+        paper.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        paper.subject?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        paper.curriculum?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        String(paper.year || '').includes(searchQuery.trim());
 
-    const matchesSearch =
-      searchQuery.trim() === '' ||
-      paper.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      paper.subject?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      paper.curriculum?.toLowerCase().includes(searchQuery.toLowerCase());
+      return matchesCurriculum && matchesSearch;
+    });
+  }, [allPapers, selectedCurriculum, searchQuery]);
 
-    return matchesSubject && matchesCurriculum && matchesSearch;
-  });
+  // Subject Directory: list of subjects we have papers for + number of question papers in each subject
+  const subjectDirectory = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        subject: string;
+        paperCount: number;
+        curriculums: Set<string>;
+        years: Set<number>;
+        totalQuestions: number;
+      }
+    >();
+
+    baseFilteredPapers.forEach((p) => {
+      const subName = (p.subject || 'General').trim();
+      if (!map.has(subName)) {
+        map.set(subName, {
+          subject: subName,
+          paperCount: 0,
+          curriculums: new Set<string>(),
+          years: new Set<number>(),
+          totalQuestions: 0,
+        });
+      }
+      const entry = map.get(subName)!;
+      entry.paperCount += 1;
+      if (p.curriculum) entry.curriculums.add(p.curriculum);
+      if (p.year && !Number.isNaN(Number(p.year))) entry.years.add(Number(p.year));
+      entry.totalQuestions += Number(p.questions || 0);
+    });
+
+    return Array.from(map.values())
+      .map((item) => {
+        const sortedYears = Array.from(item.years).sort((a, b) => b - a);
+        return {
+          subject: item.subject,
+          paperCount: item.paperCount,
+          curriculums: Array.from(item.curriculums),
+          years: sortedYears,
+          latestYear: sortedYears[0] || null,
+          oldestYear: sortedYears[sortedYears.length - 1] || null,
+          totalQuestions: item.totalQuestions,
+        };
+      })
+      .sort((a, b) => a.subject.localeCompare(b.subject));
+  }, [baseFilteredPapers]);
+
+  const isSubjectSelected = selectedSubject !== 'All';
+
+  // Filter papers for the selected subject & sort starting with the most recent year
+  const filteredPapers = useMemo(() => {
+    return baseFilteredPapers
+      .filter((paper) => {
+        if (selectedSubject === 'All') return true;
+        return (
+          paper.subject?.toLowerCase() === selectedSubject.toLowerCase() ||
+          paper.subject?.toLowerCase().includes(selectedSubject.toLowerCase()) ||
+          paper.title?.toLowerCase().includes(selectedSubject.toLowerCase())
+        );
+      })
+      .sort((a, b) => (Number(b.year) || 0) - (Number(a.year) || 0));
+  }, [baseFilteredPapers, selectedSubject]);
 
   const handleOpenPaper = (paper: PaperItem) => {
     router.push({
@@ -161,6 +230,10 @@ export default function PastPapersScreen() {
   };
 
   const handleBack = () => {
+    if (isSubjectSelected) {
+      setSelectedSubject('All');
+      return;
+    }
     if (router.canGoBack()) {
       router.back();
     } else {
@@ -168,115 +241,33 @@ export default function PastPapersScreen() {
     }
   };
 
-  const pageTitle = params.subject ? `${params.subject} Past Papers` : 'Question Papers & Schemes';
-  const pageSubtitle = params.curriculum
-    ? `${params.curriculum} • Official papers & teacher marking schemes`
-    : 'Public question papers & verified teacher marking schemes';
+  const pageTitle = isSubjectSelected ? `${selectedSubject} Past Papers` : 'Question Paper Subjects';
+  const pageSubtitle = isSubjectSelected
+    ? 'Ordered starting with the most recent exam year'
+    : 'Select a subject to view its question papers & schemes';
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <Stack.Screen options={{ headerShown: false }} />
 
-      {/* Top Navigation Bar */}
-      <View style={[styles.topBar, { backgroundColor: colors.background, borderBottomColor: colors.border }]}>
-        <Pressable
-          onPress={handleBack}
-          style={({ pressed }) => [
-            styles.backButton,
-            { backgroundColor: colors.surface, borderColor: colors.border },
-            pressed && { opacity: 0.7, transform: [{ scale: 0.94 }] },
-          ]}
-          hitSlop={12}
-          accessibilityLabel="Go back"
-        >
-          <ArrowLeft color={colors.text} size={20} />
-        </Pressable>
-        <View style={styles.topBarTitleContainer}>
-          <Text style={[styles.topBarTitle, { color: colors.text }]} numberOfLines={1}>
-            {pageTitle}
-          </Text>
-          <Text style={[styles.topBarSubtitle, { color: colors.textSecondary }]} numberOfLines={1}>
-            {pageSubtitle}
-          </Text>
-        </View>
-        <View style={styles.topBarPlaceholder} />
-      </View>
-
-      {/* Search Header */}
-      <View style={styles.header}>
-        <View style={[styles.searchBar, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <Search color={colors.textSecondary} size={18} />
-          <TextInput
-            style={[styles.searchInput, { color: colors.text }]}
-            placeholder="Search papers, years, or topics..."
-            placeholderTextColor={colors.textSecondary}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-          />
-        </View>
-
-        {/* Curriculum Pills */}
-        <View style={styles.curriculumRow}>
-          {curricula.map((cur) => (
-            <Pressable
-              key={cur}
-              style={[
-                styles.curriculumPill,
-                {
-                  backgroundColor: selectedCurriculum === cur ? colors.primary : colors.surface,
-                  borderColor: selectedCurriculum === cur ? colors.primary : colors.border,
-                },
-              ]}
-              onPress={() => setSelectedCurriculum(cur)}
-            >
-              <Text
-                style={[
-                  styles.curriculumText,
-                  { color: selectedCurriculum === cur ? '#fff' : colors.textSecondary },
-                ]}
-              >
-                {cur === 'All' ? 'All Boards' : cur}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-
-        {/* Subject Filter Pills */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll}>
-          {subjects.map((sub) => (
-            <Pressable
-              key={sub}
-              style={[
-                styles.filterPill,
-                {
-                  backgroundColor: selectedSubject === sub ? colors.primary : colors.surface,
-                  borderColor: selectedSubject === sub ? colors.primary : colors.border,
-                },
-              ]}
-              onPress={() => setSelectedSubject(sub)}
-            >
-              <Text
-                style={[
-                  styles.filterText,
-                  { color: selectedSubject === sub ? '#fff' : colors.textSecondary },
-                ]}
-              >
-                {sub}
-              </Text>
-            </Pressable>
-          ))}
-        </ScrollView>
-      </View>
-
-      {/* Papers List */}
-      <ScrollView style={styles.listContainer} contentContainerStyle={{ paddingBottom: spacing.xxl }}>
+      {/* Papers List — scrolls beneath the fixed frosted header */}
+      <ScrollView
+        style={styles.listContainer}
+        contentContainerStyle={{ paddingBottom: spacing.xxl, paddingTop: headerHeight + 12 }}
+      >
         {/* Banner Explaining Privileges */}
         <View
           style={[
             styles.privilegeBanner,
-            { backgroundColor: colors.surface, borderColor: colors.border },
+            { borderColor: colors.border },
           ]}
         >
+          <BlurView
+            style={styles.cardBlur}
+            intensity={75}
+            tint={isLightMode ? 'light' : 'dark'}
+            pointerEvents="none"
+          />
           <View style={styles.privilegeIconWrap}>
             <ShieldCheck size={20} color={colors.primary} />
           </View>
@@ -286,7 +277,7 @@ export default function PastPapersScreen() {
             </Text>
             <Text style={[styles.privilegeSubtitle, { color: colors.textSecondary }]}>
               {isTeacher
-                ? 'You can view public papers and review marking schemes. Ingest new papers via the Mentora Admin Console.'
+                ? 'You can view public papers and review marking schemes. Ingest new papers via the Ziviso Admin Console.'
                 : 'You have full access to study and practice all verified question papers & teacher marking schemes.'}
             </Text>
           </View>
@@ -294,10 +285,12 @@ export default function PastPapersScreen() {
 
         <View style={styles.sectionHeaderRow}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>
-            {selectedSubject === 'All' ? 'Available Question Papers' : `${selectedSubject} Papers`}
+            {!isSubjectSelected ? 'Available Subjects' : `${selectedSubject} Question Papers`}
           </Text>
           <Text style={[styles.resultsCount, { color: colors.textSecondary }]}>
-            {filteredPapers.length} {filteredPapers.length === 1 ? 'paper' : 'papers'}
+            {!isSubjectSelected
+              ? `${subjectDirectory.length} ${subjectDirectory.length === 1 ? 'subject' : 'subjects'} (${baseFilteredPapers.length} papers)`
+              : `${filteredPapers.length} ${filteredPapers.length === 1 ? 'paper' : 'papers'} • Newest first`}
           </Text>
         </View>
 
@@ -305,8 +298,87 @@ export default function PastPapersScreen() {
           <View style={{ paddingVertical: spacing.xxl, alignItems: 'center' }}>
             <ActivityIndicator size="small" color={colors.primary} />
           </View>
+        ) : !isSubjectSelected ? (
+          subjectDirectory.length === 0 ? (
+            <View style={[styles.emptyCard, { borderColor: colors.border }]}>
+              <BlurView
+                style={styles.cardBlur}
+                intensity={75}
+                tint={isLightMode ? 'light' : 'dark'}
+                pointerEvents="none"
+              />
+              <FileText size={40} color={colors.textSecondary} />
+              <Text style={[styles.emptyTitle, { color: colors.text }]}>No Subjects Found</Text>
+              <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
+                {searchQuery
+                  ? `No subjects matching "${searchQuery}"`
+                  : 'No past paper subjects currently available.'}
+              </Text>
+            </View>
+          ) : (
+            subjectDirectory.map((item) => {
+              const yearRangeLabel =
+                item.years.length === 0
+                  ? 'All Years'
+                  : item.years.length === 1
+                  ? `${item.years[0]}`
+                  : `${item.oldestYear} – ${item.latestYear}`;
+
+              return (
+                <Pressable
+                  key={item.subject}
+                  style={({ pressed }) => [
+                    styles.paperCard,
+                    { borderColor: colors.border },
+                    pressed && { opacity: 0.85 },
+                  ]}
+                  onPress={() => setSelectedSubject(item.subject)}
+                >
+                  <BlurView
+                    style={styles.cardBlur}
+                    intensity={75}
+                    tint={isLightMode ? 'light' : 'dark'}
+                    pointerEvents="none"
+                  />
+                  <View style={[styles.paperIconContainer, { backgroundColor: `${colors.primary}15` }]}>
+                    <BookOpen color={colors.primary} size={22} />
+                  </View>
+                  <View style={styles.paperInfo}>
+                    <Text style={[styles.paperTitle, { color: colors.text }]}>{item.subject}</Text>
+                    <Text style={[styles.paperMeta, { color: colors.textSecondary }]}>
+                      {item.curriculums.join(' • ')} • {yearRangeLabel}
+                    </Text>
+
+                    <View style={styles.badgeContainer}>
+                      <View style={[styles.badge, { backgroundColor: `${colors.primary}18` }]}>
+                        <FileText size={11} color={colors.primary} style={{ marginRight: 4 }} />
+                        <Text style={[styles.badgeText, { color: colors.primary }]}>
+                          {item.paperCount} {item.paperCount === 1 ? 'Question Paper' : 'Question Papers'}
+                        </Text>
+                      </View>
+                      {item.latestYear && (
+                        <View style={[styles.badge, { backgroundColor: '#10B98118' }]}>
+                          <Calendar size={11} color="#10B981" style={{ marginRight: 4 }} />
+                          <Text style={[styles.badgeText, { color: '#10B981' }]}>
+                            Latest: {item.latestYear}
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                  </View>
+                  <ChevronRight color={colors.textSecondary} size={20} />
+                </Pressable>
+              );
+            })
+          )
         ) : filteredPapers.length === 0 ? (
-          <View style={[styles.emptyCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <View style={[styles.emptyCard, { borderColor: colors.border }]}>
+            <BlurView
+              style={styles.cardBlur}
+              intensity={75}
+              tint={isLightMode ? 'light' : 'dark'}
+              pointerEvents="none"
+            />
             <FileText size={40} color={colors.textSecondary} />
             <Text style={[styles.emptyTitle, { color: colors.text }]}>No Question Papers Found</Text>
             <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
@@ -319,7 +391,7 @@ export default function PastPapersScreen() {
                 style={[styles.resetFilterBtn, { backgroundColor: colors.primary }]}
                 onPress={() => setSelectedSubject('All')}
               >
-                <Text style={styles.resetFilterText}>View All Papers</Text>
+                <Text style={styles.resetFilterText}>Back to All Subjects</Text>
               </Pressable>
             )}
           </View>
@@ -329,19 +401,24 @@ export default function PastPapersScreen() {
               key={paper.id}
               style={({ pressed }) => [
                 styles.paperCard,
-                { backgroundColor: colors.surface, borderColor: colors.border },
+                { borderColor: colors.border },
                 pressed && { opacity: 0.85 },
               ]}
               onPress={() => handleOpenPaper(paper)}
             >
+              <BlurView
+                style={styles.cardBlur}
+                intensity={75}
+                tint={isLightMode ? 'light' : 'dark'}
+                pointerEvents="none"
+              />
               <View style={[styles.paperIconContainer, { backgroundColor: `${colors.primary}15` }]}>
                 <BookOpen color={colors.primary} size={22} />
               </View>
               <View style={styles.paperInfo}>
                 <Text style={[styles.paperTitle, { color: colors.text }]}>{paper.title}</Text>
                 <Text style={[styles.paperMeta, { color: colors.textSecondary }]}>
-                  {paper.curriculum} {paper.level ? `• ${paper.level}` : ''}{' '}
-                  {paper.session ? `• ${paper.session}` : ''} {paper.year ? `${paper.year}` : ''}
+                  {paper.year ? `${paper.year}` : ''} {paper.session ? `• ${paper.session}` : ''} • {paper.curriculum} {paper.level ? `• ${paper.level}` : ''}
                 </Text>
 
                 <View style={styles.badgeContainer}>
@@ -367,13 +444,155 @@ export default function PastPapersScreen() {
           ))
         )}
       </ScrollView>
-    </SafeAreaView>
+
+      {/* Fixed Frosted Glass Header — search & filters stay pinned while the list scrolls beneath */}
+      <View
+        style={[styles.fixedHeader, { paddingTop: insets.top }]}
+        onLayout={(e) => setHeaderHeight(e.nativeEvent.layout.height)}
+      >
+        <BlurView
+          style={styles.headerBlur}
+          intensity={Platform.OS === 'ios' ? 85 : 100}
+          tint={isLightMode ? 'light' : 'dark'}
+          pointerEvents="none"
+        />
+        <View style={styles.headerHairline} pointerEvents="none" />
+
+        {/* Top Navigation Bar */}
+        <View style={styles.topBar}>
+          {isSubjectSelected ? (
+            <Pressable
+              onPress={() => setSelectedSubject('All')}
+              style={({ pressed }) => [
+                styles.backButton,
+                { borderColor: colors.border },
+                pressed && { opacity: 0.7, transform: [{ scale: 0.94 }] },
+              ]}
+              hitSlop={12}
+              accessibilityLabel="Back to all subjects"
+            >
+              <ArrowLeft color={colors.text} size={20} />
+            </Pressable>
+          ) : (
+            <View style={styles.topBarPlaceholder} />
+          )}
+          <View style={styles.topBarTitleContainer}>
+            <Text style={[styles.topBarTitle, { color: colors.text }]} numberOfLines={1}>
+              {pageTitle}
+            </Text>
+            <Text style={[styles.topBarSubtitle, { color: colors.textSecondary }]} numberOfLines={1}>
+              {pageSubtitle}
+            </Text>
+          </View>
+          <Pressable
+            onPress={() => router.push('/(tabs)/profile')}
+            style={({ pressed }) => [
+              styles.backButton,
+              { borderColor: colors.border },
+              pressed && { opacity: 0.7, transform: [{ scale: 0.94 }] },
+            ]}
+            hitSlop={12}
+            accessibilityLabel="Profile & Settings"
+          >
+            <User color={colors.text} size={18} />
+          </Pressable>
+        </View>
+
+        {/* Search + Filters */}
+        <View style={styles.header}>
+          <View style={[styles.searchBar, { borderColor: colors.border }]}>
+            <Search color={colors.textSecondary} size={18} />
+            <TextInput
+              style={[styles.searchInput, { color: colors.text }]}
+              placeholder="Search papers, years, or topics..."
+              placeholderTextColor={colors.textSecondary}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+            />
+          </View>
+
+          {/* Curriculum Pills */}
+          <View style={styles.curriculumRow}>
+            {curricula.map((cur) => (
+              <Pressable
+                key={cur}
+                style={[
+                  styles.curriculumPill,
+                  {
+                    backgroundColor: selectedCurriculum === cur ? colors.primary : isLightMode ? 'rgba(255, 255, 255, 0.65)' : 'rgba(255, 255, 255, 0.08)',
+                    borderColor: selectedCurriculum === cur ? colors.primary : colors.border,
+                  },
+                ]}
+                onPress={() => setSelectedCurriculum(cur)}
+              >
+                <Text
+                  style={[
+                    styles.curriculumText,
+                    { color: selectedCurriculum === cur ? '#fff' : colors.textSecondary },
+                  ]}
+                >
+                  {cur === 'All' ? 'All Boards' : cur}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+
+          {/* Subject Filter Pills */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll}>
+            {subjects.map((sub) => (
+              <Pressable
+                key={sub}
+                style={[
+                  styles.filterPill,
+                  {
+                    backgroundColor: selectedSubject === sub ? colors.primary : isLightMode ? 'rgba(255, 255, 255, 0.65)' : 'rgba(255, 255, 255, 0.08)',
+                    borderColor: selectedSubject === sub ? colors.primary : colors.border,
+                  },
+                ]}
+                onPress={() => setSelectedSubject(sub)}
+              >
+                <Text
+                  style={[
+                    styles.filterText,
+                    { color: selectedSubject === sub ? '#fff' : colors.textSecondary },
+                  ]}
+                >
+                  {sub}
+                </Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
+      </View>
+    </View>
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (isLightMode: boolean) => StyleSheet.create({
   container: {
     flex: 1,
+  },
+  fixedHeader: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    overflow: 'hidden',
+    zIndex: 10,
+  },
+  headerBlur: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  headerHairline: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: isLightMode ? 'rgba(15, 23, 42, 0.08)' : 'rgba(255, 255, 255, 0.10)',
+  },
+  cardBlur: {
+    ...StyleSheet.absoluteFillObject,
   },
   topBar: {
     flexDirection: 'row',
@@ -381,7 +600,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: spacing.lg,
     paddingVertical: 12,
-    borderBottomWidth: 1,
   },
   backButton: {
     width: 42,
@@ -390,6 +608,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
+    backgroundColor: isLightMode ? 'rgba(255, 255, 255, 0.65)' : 'rgba(255, 255, 255, 0.08)',
   },
   topBarTitleContainer: {
     flex: 1,
@@ -422,6 +641,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     height: 46,
     marginBottom: spacing.sm,
+    backgroundColor: isLightMode ? 'rgba(255, 255, 255, 0.72)' : 'rgba(255, 255, 255, 0.08)',
   },
   searchInput: {
     flex: 1,
@@ -472,6 +692,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
     marginBottom: spacing.md,
     gap: spacing.sm,
+    overflow: 'hidden',
   },
   privilegeIconWrap: {
     width: 36,
@@ -513,6 +734,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: spacing.xl,
+    overflow: 'hidden',
   },
   emptyTitle: {
     fontSize: typography.sizes.md,
@@ -542,6 +764,7 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.md,
     borderWidth: 1,
     marginBottom: spacing.sm,
+    overflow: 'hidden',
   },
   paperIconContainer: {
     width: 44,

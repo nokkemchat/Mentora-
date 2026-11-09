@@ -539,14 +539,14 @@ export function buildNormalizedLayoutFromAssessment(
     return { regions: [], annotations: [], resolved: [] };
   }
 
-  const isMultiPage = (Array.isArray(assessment.pages) && assessment.pages.length > 1) || (Array.isArray(assessment.page_urls) && assessment.page_urls.length > 1);
+  const isMultiPageDoc = (Array.isArray(assessment.pages) && assessment.pages.length > 1) || (Array.isArray(assessment.page_urls) && assessment.page_urls.length > 1);
   const targetPage = assessment.pages?.[pageIndex];
   const rawSubpartsList = (targetPage?.subparts && targetPage.subparts.length > 0)
     ? targetPage.subparts
-    : (isMultiPage && Array.isArray(assessment.subparts)
+    : (isMultiPageDoc && Array.isArray(assessment.subparts)
         ? assessment.subparts.filter((sp: any) => sp.page_index === pageIndex)
         : assessment.subparts || []);
-  const subpartsList = isMultiPage
+  const subpartsList = isMultiPageDoc
     ? rawSubpartsList.filter((sp: any) => sp.page_index === undefined || sp.page_index === pageIndex)
     : rawSubpartsList;
   const regions: DetectedLayoutRegion[] = [];

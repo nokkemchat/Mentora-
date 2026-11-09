@@ -4,10 +4,12 @@ import {X, Sparkles, Plus, UploadCloud, Search, Trash2, Eye, CheckCircle2,
   AlertCircle, ChevronRight, ChevronLeft, Award, FileText, ArrowUp, 
   ArrowDown, RotateCcw, ZoomIn, ZoomOut, Check, HelpCircle, BookOpen, 
   Users, BarChart3, Clock, CheckCheck, RefreshCw, Layers, Maximize2, Minimize2, PanelRight, 
-  PanelRightClose, Play, Pause, SlidersHorizontal, FolderUp, FileCheck, Loader2, Timer} from 'lucide-react';
+  PanelRightClose, Play, Pause, SlidersHorizontal, FolderUp, FileCheck, Loader2, Timer, Wand2} from 'lucide-react';
 import { renderPdfToPageImages } from '../lib/pdf-parser';
 import { supabase } from '../lib/supabase';
 import MarkedPaperOverlay from './MarkedPaperOverlay';
+import AiMarkingAssistantPanel from './AiMarkingAssistantPanel';
+import { normalizeQuestionNum } from '../lib/aiMarkingAssistant';
 import { ensureAssessmentAnnotations } from '../lib/annotationUtils';
 import { downloadMarkedPaperPdf } from '../lib/markedPaperPdf';
 import { useAuth } from '../context/AuthContext';
@@ -247,6 +249,15 @@ export default function TeacherBulkMarkingModal({ paper, onClose, onPaperUpdated
   const [generatingPages, setGeneratingPages] = useState<Record<number, boolean>>({});
   const [loadingViewerId, setLoadingViewerId] = useState<string | null>(null);
   const [showAnnotationsComments, setShowAnnotationsComments] = useState(true);
+  const [sidebarMode, setSidebarMode] = useState<'explanations' | 'assistant'>('explanations');
+  const [assistantTargetKey, setAssistantTargetKey] = useState<string | null>(null);
+  const latestViewingPaperRef = useRef<MarkedStudentPaper | null>(null);
+  const assessmentRevisionRef = useRef(0);
+  const pageRenderTokenRef = useRef<Record<number, number>>({});
+
+  useEffect(() => {
+    latestViewingPaperRef.current = viewingPaper;
+  }, [viewingPaper]);
 
   // Allow Left/Right arrow keys to flip pages when viewing a marked script
   useEffect(() => {
@@ -354,6 +365,9 @@ export default function TeacherBulkMarkingModal({ paper, onClose, onPaperUpdated
 
   useEffect(() => {
     if (viewingPaper) {
+      assessmentRevisionRef.current += 1;
+      pageRenderTokenRef.current = {};
+      setAssistantTargetKey(null);
       if (viewingPaper.marked_image_url || viewingPaper.assessment_result?.marking_mode === 'ai_image') {
         setViewerMode('marked');
       } else {
@@ -361,6 +375,106 @@ export default function TeacherBulkMarkingModal({ paper, onClose, onPaperUpdated
       }
     }
   }, [viewingPaper?.id]);
+
+  const handleOpenAiTweak = (questionNum?: string | number, partLabel?: string, pageIdx?: number) => {
+    if (isStudent) return;
+    setViewerTab('script');
+    setShowSidebar(true);
+    setSidebarMode('assistant');
+    if (questionNum !== undefined && partLabel) {
+      const qClean = normalizeQuestionNum(questionNum);
+      setAssistantTargetKey(`Q${qClean}::${String(partLabel).trim()}`);
+    }
+    if (typeof pageIdx === 'number' && pageIdx >= 0) {
+      setViewerPageIdx(pageIdx);
+    }
+  };
+
+  const handleApplyAiAssessmentUpdate = async (payload: {
+    total_score: number;
+    max_score: number;
+    percentage: number;
+    assessment_result: any;
+    affectedPages?: number[];
+  }) => {
+    const activePaper = latestViewingPaperRef.current || viewingPaper;
+    if (!activePaper) return;
+    const { total_score, max_score, percentage, assessment_result, affectedPages = [] } = payload;
+
+    // Bump revision immediately so any stale in-flight AI Photo render from BEFORE this tweak is discarded!
+    assessmentRevisionRef.current += 1;
+
+    // Invalidate stale pre-rendered AI marked image on all affected pages so the UI IMMEDIATELY
+    // falls back to the live interactive vector red-ink overlay with the new marks (0ms instant feedback)!
+    if (Array.isArray(assessment_result.pages)) {
+      affectedPages.forEach((pIdx) => {
+        if (assessment_result.pages[pIdx]) {
+          assessment_result.pages[pIdx].marked_image_url = null;
+        }
+      });
+    }
+
+    const hadAiPhotos = Boolean(
+      viewerMode === 'marked' ||
+        activePaper.marked_image_url ||
+        activePaper.assessment_result?.marking_mode === 'ai_image' ||
+        (Array.isArray(activePaper.assessment_result?.pages) &&
+          activePaper.assessment_result.pages.some((p: any) => Boolean(p?.marked_image_url)))
+    );
+
+    const nextTopMarkedUrl = affectedPages.includes(0)
+      ? null
+      : activePaper.marked_image_url ?? null;
+
+    const { error } = await supabase
+      .from('marked_student_papers')
+      .update({
+        total_score,
+        max_score,
+        percentage,
+        marked_image_url: nextTopMarkedUrl,
+        assessment_result,
+      })
+      .eq('id', activePaper.id);
+
+    if (error) {
+      throw new Error(error.message || 'Failed to save revised marking to database.');
+    }
+
+    const updatedPaperObj: MarkedStudentPaper = {
+      ...activePaper,
+      total_score,
+      max_score,
+      percentage,
+      marked_image_url: nextTopMarkedUrl ?? undefined,
+      assessment_result,
+    };
+
+    latestViewingPaperRef.current = updatedPaperObj;
+    setViewingPaper(updatedPaperObj);
+    setMarkedPapers(prev =>
+      prev.map(p =>
+        p.id === activePaper.id
+          ? {
+              ...p,
+              total_score,
+              max_score,
+              percentage,
+              marked_image_url: nextTopMarkedUrl ?? undefined,
+              assessment_result,
+            }
+          : p
+      )
+    );
+    onPaperUpdated?.();
+
+    // Automatically re-render the AI Red-Ink Photo for every modified page so the visual canvas updates automatically!
+    if (hadAiPhotos && affectedPages.length > 0) {
+      affectedPages.forEach((pIdx) => {
+        void handleRegeneratePageMarking(pIdx, updatedPaperObj);
+      });
+    }
+  };
 
   // Clean up object URLs on unmount
   useEffect(() => {
@@ -377,48 +491,7 @@ export default function TeacherBulkMarkingModal({ paper, onClose, onPaperUpdated
     const origImg = pageData?.original_image_url || viewingPaper.page_images?.[viewerPageIdx];
 
     if (!hasMarked && origImg && !generatingPages[viewerPageIdx]) {
-      setGeneratingPages(prev => ({ ...prev, [viewerPageIdx]: true }));
-
-      supabase.functions.invoke('tutor-chat', {
-        body: {
-          action: 'generate_marked_image',
-          assessment: viewingPaper.assessment_result,
-          image_url: origImg,
-          page_index: viewerPageIdx
-        }
-      }).then(async ({ data }) => {
-        if (data?.image_url) {
-          let cleanUrl = data.image_url;
-          if (cleanUrl.startsWith('data:image') || cleanUrl.length > 500) {
-            const uploaded = await uploadBase64ToStorage(cleanUrl, paper.id, viewerPageIdx);
-            if (uploaded) cleanUrl = uploaded;
-          }
-          const updated = { ...viewingPaper };
-          if (!updated.assessment_result.pages) {
-            updated.assessment_result.pages = [];
-          }
-          if (!updated.assessment_result.pages[viewerPageIdx]) {
-            updated.assessment_result.pages[viewerPageIdx] = { original_image_url: origImg };
-          }
-          updated.assessment_result.pages[viewerPageIdx].marked_image_url = cleanUrl;
-          if (viewerPageIdx === 0) {
-            updated.marked_image_url = cleanUrl;
-          }
-          setViewingPaper(updated);
-
-          await supabase
-            .from('marked_student_papers')
-            .update({
-              marked_image_url: updated.marked_image_url,
-              assessment_result: updated.assessment_result
-            })
-            .eq('id', viewingPaper.id);
-        }
-      }).catch(err => {
-        console.warn('generate_marked_image error:', err);
-      }).finally(() => {
-        setGeneratingPages(prev => ({ ...prev, [viewerPageIdx]: false }));
-      });
+      void handleRegeneratePageMarking(viewerPageIdx);
     }
   }, [viewingPaper?.id, viewerPageIdx, viewerMode]);
 
@@ -801,22 +874,47 @@ export default function TeacherBulkMarkingModal({ paper, onClose, onPaperUpdated
     setQueue(prev => prev.filter(item => item.id !== id));
   };
 
-  const handleRegeneratePageMarking = async (pageIdx: number) => {
-    if (!viewingPaper) return;
-    const pageData = viewingPaper.assessment_result?.pages?.[pageIdx];
-    const origImg = pageData?.original_image_url || viewingPaper.page_images?.[pageIdx];
+  const handleRegeneratePageMarking = async (
+    pageIdx: number,
+    explicitPaperSnapshot?: MarkedStudentPaper
+  ) => {
+    const sourcePaper = explicitPaperSnapshot || latestViewingPaperRef.current || viewingPaper;
+    if (!sourcePaper) return;
+    const pageData = sourcePaper.assessment_result?.pages?.[pageIdx];
+    const origImg = pageData?.original_image_url || sourcePaper.page_images?.[pageIdx];
     if (!origImg) return;
+
+    const reqPaperId = sourcePaper.id;
+    const reqRev = assessmentRevisionRef.current;
+    const myToken = (pageRenderTokenRef.current[pageIdx] || 0) + 1;
+    pageRenderTokenRef.current[pageIdx] = myToken;
+
+    const assessmentSnapshot = {
+      ...(sourcePaper.assessment_result || {}),
+      total_score: sourcePaper.total_score,
+      score: sourcePaper.total_score,
+      total_max_score: sourcePaper.max_score,
+      max_score: sourcePaper.max_score,
+    };
 
     setGeneratingPages(prev => ({ ...prev, [pageIdx]: true }));
     try {
       const { data } = await supabase.functions.invoke('tutor-chat', {
         body: {
           action: 'generate_marked_image',
-          assessment: viewingPaper.assessment_result,
+          assessment: assessmentSnapshot,
           image_url: origImg,
           page_index: pageIdx
         }
       });
+
+      // Discard only if a newer render was dispatched for this specific page or paper switched
+      if (
+        (latestViewingPaperRef.current && latestViewingPaperRef.current.id !== reqPaperId) ||
+        pageRenderTokenRef.current[pageIdx] !== myToken
+      ) {
+        return;
+      }
 
       if (data?.image_url) {
         let cleanUrl = data.image_url;
@@ -824,33 +922,57 @@ export default function TeacherBulkMarkingModal({ paper, onClose, onPaperUpdated
           const uploaded = await uploadBase64ToStorage(cleanUrl, paper.id, pageIdx);
           if (uploaded) cleanUrl = uploaded;
         }
-        const updated = { ...viewingPaper };
-        if (!updated.assessment_result.pages) {
-          updated.assessment_result.pages = [];
+
+        // Re-check token after storage upload
+        const latestPaper = latestViewingPaperRef.current || sourcePaper;
+        if (
+          !latestPaper ||
+          latestPaper.id !== reqPaperId ||
+          pageRenderTokenRef.current[pageIdx] !== myToken
+        ) {
+          return;
         }
-        if (!updated.assessment_result.pages[pageIdx]) {
-          updated.assessment_result.pages[pageIdx] = { original_image_url: origImg };
+
+        const clonedAssessment = JSON.parse(JSON.stringify(latestPaper.assessment_result || {}));
+        if (!Array.isArray(clonedAssessment.pages)) {
+          clonedAssessment.pages = [];
         }
-        updated.assessment_result.pages[pageIdx].marked_image_url = cleanUrl;
-        if (pageIdx === 0) {
-          updated.marked_image_url = cleanUrl;
+        if (!clonedAssessment.pages[pageIdx]) {
+          clonedAssessment.pages[pageIdx] = { original_image_url: origImg };
         }
-        setViewingPaper(updated);
+        clonedAssessment.pages[pageIdx].marked_image_url = cleanUrl;
+
+        const nextTopMarkedUrl = pageIdx === 0 ? cleanUrl : latestPaper.marked_image_url;
+        const mergedPaper: MarkedStudentPaper = {
+          ...latestPaper,
+          marked_image_url: nextTopMarkedUrl,
+          assessment_result: clonedAssessment,
+        };
+
+        latestViewingPaperRef.current = mergedPaper;
+        setViewingPaper(mergedPaper);
+        setMarkedPapers(prev =>
+          prev.map(p =>
+            p.id === reqPaperId
+              ? { ...p, marked_image_url: nextTopMarkedUrl, assessment_result: clonedAssessment }
+              : p
+          )
+        );
 
         await supabase
           .from('marked_student_papers')
           .update({
-            marked_image_url: updated.marked_image_url,
-            assessment_result: updated.assessment_result
+            marked_image_url: nextTopMarkedUrl ?? null,
+            assessment_result: clonedAssessment,
           })
-          .eq('id', viewingPaper.id);
-
-        await fetchMarkedPapers();
+          .eq('id', reqPaperId);
       }
     } catch (err) {
       console.warn('handleRegeneratePageMarking error:', err);
     } finally {
-      setGeneratingPages(prev => ({ ...prev, [pageIdx]: false }));
+      if (pageRenderTokenRef.current[pageIdx] === myToken) {
+        setGeneratingPages(prev => ({ ...prev, [pageIdx]: false }));
+      }
     }
   };
 
@@ -2566,6 +2688,28 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                   </button>
                 </div>
 
+                {!isStudent && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (viewerTab === 'script' && showSidebar && sidebarMode === 'assistant') {
+                        setSidebarMode('explanations');
+                      } else {
+                        handleOpenAiTweak();
+                      }
+                    }}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 border ${
+                      viewerTab === 'script' && showSidebar && sidebarMode === 'assistant'
+                        ? 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white border-indigo-400/50 shadow-md shadow-indigo-500/20'
+                        : 'bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-500 dark:text-indigo-300 border-indigo-500/30'
+                    }`}
+                    title="Open AI Co-Examiner to tweak or re-grade specific questions with a prompt"
+                  >
+                    <Wand2 className="w-3.5 h-3.5" />
+                    <span>AI Co-Examiner</span>
+                  </button>
+                )}
+
                 {/* Toggle Explanations Sidebar */}
                 <button
                   onClick={() => setShowSidebar(s => !s)}
@@ -2799,9 +2943,9 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                     <div className="relative w-full h-full flex items-center justify-center">
                       {/* Generation Status Badge */}
                       {viewerMode === 'marked' && isPageGenerating && (
-                        <div className="absolute top-3 right-3 z-20 bg-primary/90 backdrop-blur-md text-white text-xs font-semibold px-3 py-1.5 rounded-full shadow-lg flex items-center gap-2">
+                        <div className="absolute top-3 right-3 z-30 bg-indigo-600/95 backdrop-blur-md text-white text-xs font-semibold px-3.5 py-1.5 rounded-full shadow-xl flex items-center gap-2 border border-white/20 animate-pulse">
                           <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                          <span>Rendering Authentic Teacher Red Ink...</span>
+                          <span>Generating AI Photo (Page {viewerPageIdx + 1})...</span>
                         </div>
                       )}
 
@@ -2887,20 +3031,74 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                   )}
                 </div>
 
-                {/* Right Side: Question-by-Question Explanation Markings */}
+                {/* Right Side: Question-by-Question Explanation Markings & AI Co-Examiner */}
                 {showSidebar && (
-                <div className="w-full md:w-96 lg:w-[440px] bg-surface flex flex-col overflow-y-auto p-4 shrink-0 border-t md:border-t-0 border-border">
-                  <div className="flex items-center justify-between gap-2 mb-3 pb-2 border-b border-border/60">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-text flex items-center gap-2">
-                      <Sparkles className="w-4 h-4 text-primary" />
-                      <span>Question Marking Explanations</span>
-                    </h4>
-                    <span className="text-[11px] font-semibold text-textMuted bg-background px-2.5 py-0.5 rounded-full border border-border">
-                      Page {viewerPageIdx + 1}
-                    </span>
-                  </div>
+                <div className={`w-full md:w-96 lg:w-[440px] bg-surface flex flex-col shrink-0 border-t md:border-t-0 border-border ${
+                  !isStudent && sidebarMode === 'assistant' ? 'overflow-hidden' : 'overflow-y-auto p-4'
+                }`}>
+                  {!isStudent ? (
+                    <div className={`flex items-center justify-between gap-2 shrink-0 ${
+                      sidebarMode === 'assistant'
+                        ? 'px-3.5 py-2.5 border-b border-border/70 bg-surface'
+                        : 'mb-3 pb-2.5 border-b border-border/60'
+                    }`}>
+                      <div className="flex items-center bg-background border border-border rounded-xl p-0.5 flex-1">
+                        <button
+                          type="button"
+                          onClick={() => setSidebarMode('explanations')}
+                          className={`flex-1 flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                            sidebarMode === 'explanations'
+                              ? 'bg-primary text-white shadow-sm'
+                              : 'text-textMuted hover:text-text'
+                          }`}
+                        >
+                          <BookOpen className="w-3.5 h-3.5" />
+                          <span>Breakdown</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSidebarMode('assistant')}
+                          className={`flex-1 flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                            sidebarMode === 'assistant'
+                              ? 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white shadow-sm'
+                              : 'text-textMuted hover:text-indigo-400'
+                          }`}
+                        >
+                          <Wand2 className="w-3.5 h-3.5" />
+                          <span>AI Co-Examiner</span>
+                        </button>
+                      </div>
+                      <span className="text-[11px] font-semibold text-textMuted bg-background px-2.5 py-1 rounded-full border border-border shrink-0">
+                        Page {viewerPageIdx + 1}
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between gap-2 mb-3 pb-2 border-b border-border/60">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-text flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-primary" />
+                        <span>Question Marking Explanations</span>
+                      </h4>
+                      <span className="text-[11px] font-semibold text-textMuted bg-background px-2.5 py-0.5 rounded-full border border-border">
+                        Page {viewerPageIdx + 1}
+                      </span>
+                    </div>
+                  )}
 
-                  {(() => {
+                  {!isStudent && sidebarMode === 'assistant' ? (
+                    <AiMarkingAssistantPanel
+                      viewingPaper={viewingPaper}
+                      paperMeta={paper}
+                      currentPageIdx={viewerPageIdx}
+                      allPageImageUrls={pagesList.map((p: any) => p.original_image_url)}
+                      focusedTargetKey={assistantTargetKey}
+                      onSelectTargetKey={setAssistantTargetKey}
+                      onJumpToPage={setViewerPageIdx}
+                      getOfficialQuestionsContext={getPaperQuestionsContext}
+                      onApplyAssessmentUpdate={handleApplyAiAssessmentUpdate}
+                      onRegeneratePagePhoto={handleRegeneratePageMarking}
+                      generatingPages={generatingPages}
+                    />
+                  ) : (() => {
                     const qSummaries = viewingPaper.assessment_result?.question_summaries || [];
                     
                     // Filter questions that appear on this page if multi-page, or fallback to all questions
@@ -2995,15 +3193,34 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                                             Part {sp.part_label || `(${spIdx + 1})`}
                                           </span>
                                         </span>
-                                        <span className={`px-2 py-0.5 rounded-md font-bold text-[11px] border ${
-                                          isFullMarks
-                                            ? 'bg-success/20 text-success border-success/30'
-                                            : isZeroMarks
-                                            ? 'bg-error/20 text-error border-error/30'
-                                            : 'bg-amber-500/20 text-amber-400 border-amber-500/30'
-                                        }`}>
-                                          {spScore} / {spMax} {spMax === 1 ? 'mark' : 'marks'}
-                                        </span>
+                                        <div className="flex items-center gap-1.5">
+                                          {!isStudent && (
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                handleOpenAiTweak(
+                                                  qs.question_number,
+                                                  sp.part_label || `(${spIdx + 1})`,
+                                                  typeof sp.page_index === 'number' ? sp.page_index : viewerPageIdx
+                                                )
+                                              }
+                                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-500 dark:text-indigo-300 border border-indigo-500/25 transition-colors cursor-pointer"
+                                              title={`Ask AI Co-Examiner to tweak Question ${qs.question_number} Part ${sp.part_label || `(${spIdx + 1})`}`}
+                                            >
+                                              <Wand2 className="w-2.5 h-2.5" />
+                                              <span>Tweak</span>
+                                            </button>
+                                          )}
+                                          <span className={`px-2 py-0.5 rounded-md font-bold text-[11px] border ${
+                                            isFullMarks
+                                              ? 'bg-success/20 text-success border-success/30'
+                                              : isZeroMarks
+                                              ? 'bg-error/20 text-error border-error/30'
+                                              : 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                                          }`}>
+                                            {spScore} / {spMax} {spMax === 1 ? 'mark' : 'marks'}
+                                          </span>
+                                        </div>
                                       </div>
 
                                       {/* Points Awarded (Explanation of Earned Marks) */}
@@ -3165,13 +3382,36 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                             <div className="space-y-3">
                               {qs.subparts.map((sp: any, spIdx: number) => (
                                 <div key={spIdx} className="bg-background/60 border border-border/80 rounded-2xl p-3.5 space-y-2 text-xs">
-                                  <div className="flex items-center justify-between">
+                                  <div className="flex items-center justify-between gap-2">
                                     <span className="font-bold text-primary">
                                       Part {sp.part_label || `(${spIdx + 1})`}
                                     </span>
-                                    <span className="font-bold text-text">
-                                      {sp.score} / {sp.max_score} marks
-                                    </span>
+                                    <div className="flex items-center gap-2">
+                                      {!isStudent && (
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            handleOpenAiTweak(
+                                              qs.question_number,
+                                              sp.part_label || `(${spIdx + 1})`,
+                                              typeof sp.page_index === 'number'
+                                                ? sp.page_index
+                                                : Array.isArray(qs.spanned_pages) && qs.spanned_pages.length > 0
+                                                ? Number(qs.spanned_pages[0]) || 0
+                                                : 0
+                                            )
+                                          }
+                                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-500 dark:text-indigo-300 border border-indigo-500/25 transition-colors cursor-pointer"
+                                          title={`Jump to script & tweak Question ${qs.question_number} Part ${sp.part_label || `(${spIdx + 1})`} with AI`}
+                                        >
+                                          <Wand2 className="w-3 h-3" />
+                                          <span>Tweak with AI</span>
+                                        </button>
+                                      )}
+                                      <span className="font-bold text-text">
+                                        {sp.score} / {sp.max_score} marks
+                                      </span>
+                                    </div>
                                   </div>
 
                                   {/* Marks Awarded Points */}

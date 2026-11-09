@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Platform } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabase';
@@ -22,12 +22,17 @@ export default function TeacherDashboard() {
   const colors = useThemeColors();
   const isLightMode = colors.background === '#F8FAFC';
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const insets = useSafeAreaInsets();
 
   const { user } = useAuth();
   const router = useRouter();
   
   const [courses, setCourses] = useState<Course[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Estimated before first layout, then corrected via onLayout so the
+  // scroll content always clears the fixed frosted header.
+  const [headerHeight, setHeaderHeight] = useState(insets.top + 88);
 
   useEffect(() => {
     if (!user) {
@@ -92,19 +97,12 @@ export default function TeacherDashboard() {
 
   // Render Dashboard
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Header */}
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.greeting}>Welcome, {user?.user_metadata?.first_name || 'Teacher'}!</Text>
-            <Text style={styles.subtitle}>Let's inspire some students today.</Text>
-          </View>
-          <View style={styles.avatarPlaceholder}>
-            <Feather name="users" size={24} color={colors.primary} />
-          </View>
-        </View>
-
+    <View style={styles.container}>
+      {/* Scrollable content — passes beneath the fixed frosted header */}
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingTop: headerHeight + 16 }]}
+        showsVerticalScrollIndicator={false}
+      >
         {/* Stats Overview */}
         <View style={styles.statsContainer}>
           <View style={styles.statCard}>
@@ -186,7 +184,32 @@ export default function TeacherDashboard() {
         </View>
 
       </ScrollView>
-    </SafeAreaView>
+
+      {/* Fixed Frosted Glass Header — greeting stays pinned while content scrolls beneath */}
+      <View
+        style={[styles.fixedHeader, { paddingTop: insets.top + 4 }]}
+        onLayout={(e) => setHeaderHeight(e.nativeEvent.layout.height)}
+      >
+        <BlurView
+          style={styles.headerBlur}
+          intensity={Platform.OS === 'ios' ? 85 : 100}
+          tint={isLightMode ? 'light' : 'dark'}
+          pointerEvents="none"
+        />
+        <View style={styles.headerHairline} pointerEvents="none" />
+
+        {/* Header */}
+        <View style={styles.header}>
+          <View>
+            <Text style={styles.greeting}>Welcome, {user?.user_metadata?.first_name || 'Teacher'}!</Text>
+            <Text style={styles.subtitle}>Let's inspire some students today.</Text>
+          </View>
+          <View style={styles.avatarPlaceholder}>
+            <Feather name="users" size={24} color={colors.primary} />
+          </View>
+        </View>
+      </View>
+    </View>
   );
 }
 
@@ -194,6 +217,27 @@ const createStyles = (colors: any) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  fixedHeader: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: spacing.xl,
+    paddingBottom: 12,
+    overflow: 'hidden',
+    zIndex: 10,
+  },
+  headerBlur: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  headerHairline: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(127, 127, 127, 0.18)',
   },
   content: {
     padding: spacing.xl,
@@ -204,7 +248,7 @@ const createStyles = (colors: any) => StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: spacing.xxl,
+    marginBottom: 0,
   },
   greeting: {
     fontSize: typography.sizes.xl,

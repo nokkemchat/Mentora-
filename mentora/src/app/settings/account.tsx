@@ -243,10 +243,10 @@ export default function AccountSettingsScreen() {
             </View>
             <View style={styles.sectionContent}>
               <View style={styles.planCard}>
-                <Text style={styles.planTitle}>Mentora Basic</Text>
+                <Text style={styles.planTitle}>Ziviso Basic</Text>
                 <Text style={styles.planSubtitle}>Free forever</Text>
               </View>
-              <Pressable style={[styles.saveButton, { backgroundColor: '#8B5CF6' }]} onPress={() => Alert.alert('Mentora Pro', 'Upgrade flow coming soon!')}>
+              <Pressable style={[styles.saveButton, { backgroundColor: '#8B5CF6' }]} onPress={() => Alert.alert('Ziviso Pro', 'Upgrade flow coming soon!')}>
                 <Text style={[styles.saveButtonText, { color: '#fff' }]}>Upgrade to Pro</Text>
               </Pressable>
             </View>

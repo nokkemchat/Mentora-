@@ -48,19 +48,19 @@ serve(async (req) => {
         Authorization: `Bearer ${RESEND_API_KEY}`,
       },
       body: JSON.stringify({
-        from: 'Mentora App <onboarding@resend.dev>', // You can only send to your own email until you verify a domain on Resend Free Tier!
+        from: 'Ziviso App <onboarding@resend.dev>', // You can only send to your own email until you verify a domain on Resend Free Tier!
         to: email,
         subject: 'You have been approved! Here is your Verification Code',
         html: `
           <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-            <h2>Welcome to Mentora, ${name || 'Educator'}!</h2>
+            <h2>Welcome to Ziviso, ${name || 'Educator'}!</h2>
             <p>Your educator profile has been successfully reviewed and approved by our administrators.</p>
             <p>To unlock your dashboard, please enter the following 6-digit verification code in the app:</p>
             <div style="background-color: #f4f4f5; padding: 20px; text-align: center; border-radius: 8px; margin: 24px 0;">
               <h1 style="margin: 0; letter-spacing: 8px; color: #18181b;">${code}</h1>
             </div>
             <p>We're excited to have you on board!</p>
-            <p>- The Mentora Team</p>
+            <p>- The Ziviso Team</p>
           </div>
         `,
       }),

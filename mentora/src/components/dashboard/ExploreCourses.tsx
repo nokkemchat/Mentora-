@@ -1,7 +1,8 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Pressable, ActivityIndicator, Image, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, Pressable, ActivityIndicator, Image, ScrollView, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
+import { BlurView } from 'expo-blur';
 import { supabase } from '@/lib/supabase';
 import { spacing, typography, borderRadius, shadows, useThemeColors } from '@/constants/theme';
 import { MaterialCommunityIcons, Ionicons, Feather } from '@expo/vector-icons';
@@ -345,6 +346,14 @@ export default function ExploreCourses({ searchQuery = '' }: { searchQuery?: str
                   router.push(`/course/${course.id}`);
                 }}
               >
+                {/* iOS-style frosted glass backdrop */}
+                <BlurView
+                  style={styles.cardBlur}
+                  intensity={Platform.OS === 'ios' ? 75 : 100}
+                  tint={isLight ? 'light' : 'dark'}
+                  pointerEvents="none"
+                />
+
                 {/* Top Card Row */}
                 <View style={styles.cardTopRow}>
                   {/* Subject Icon Box - Frosted soft tint with rich icon */}
@@ -459,9 +468,9 @@ const createStyles = (colors: any, isLight: boolean) => StyleSheet.create({
     ...shadows.sm,
   },
   categoryPillInactive: {
-    backgroundColor: isLight ? '#FFFFFF' : colors.surface,
+    backgroundColor: isLight ? 'rgba(255, 255, 255, 0.7)' : 'rgba(255, 255, 255, 0.08)',
     borderWidth: 1,
-    borderColor: isLight ? '#E2E8F0' : colors.border,
+    borderColor: isLight ? 'rgba(15, 23, 42, 0.06)' : 'rgba(255, 255, 255, 0.12)',
   },
   categoryPillText: {
     fontSize: 13,
@@ -478,12 +487,16 @@ const createStyles = (colors: any, isLight: boolean) => StyleSheet.create({
     gap: 14,
   },
   courseCard: {
-    backgroundColor: isLight ? '#FFFFFF' : colors.card,
+    backgroundColor: 'transparent',
     borderRadius: 24,
     padding: 16,
     borderWidth: 1,
-    borderColor: isLight ? '#EDF2F7' : colors.cardBorder,
+    borderColor: isLight ? 'rgba(15, 23, 42, 0.06)' : 'rgba(255, 255, 255, 0.10)',
+    overflow: 'hidden',
     ...shadows.tactile,
+  },
+  cardBlur: {
+    ...StyleSheet.absoluteFillObject,
   },
   cardTopRow: {
     flexDirection: 'row',

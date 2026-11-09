@@ -1,15 +1,15 @@
 {
   "expo": {
-    "name": "mentora",
-    "slug": "mentora",
+    "name": "Ziviso",
+    "slug": "ziviso",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "mentora",
+    "scheme": "ziviso",
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/expo.icon",
-      "bundleIdentifier": "Mentora",
+      "bundleIdentifier": "com.ziviso.app",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -36,7 +36,7 @@
         "android.permission.READ_MEDIA_VIDEO",
         "android.permission.READ_MEDIA_IMAGES"
       ],
-      "package": "com.Mentora"
+      "package": "com.ziviso"
     },
     "web": {
       "output": "static",
@@ -55,9 +55,9 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow Mentora to access your gallery to upload course videos.",
-          "cameraPermission": "Allow Mentora to access your camera to record course videos.",
-          "microphonePermission": "Allow Mentora to access your microphone to record course videos."
+          "photosPermission": "Allow Ziviso to access your gallery to upload course videos.",
+          "cameraPermission": "Allow Ziviso to access your camera to record course videos.",
+          "microphonePermission": "Allow Ziviso to access your microphone to record course videos."
         }
       ]
     ],

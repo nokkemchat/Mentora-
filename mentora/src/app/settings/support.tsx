@@ -19,10 +19,10 @@ const FAQ_DATA = [
   },
   {
     question: "How does the AI Exam Intelligence work?",
-    answer: "Mentora's AI analyzes thousands of past papers to determine which topics appear most frequently. It builds custom mock exams for you based strictly on high-probability questions to maximize your study efficiency."
+    answer: "Ziviso's AI analyzes thousands of past papers to determine which topics appear most frequently. It builds custom mock exams for you based strictly on high-probability questions to maximize your study efficiency."
   },
   {
-    question: "How do I cancel my Mentora Pro subscription?",
+    question: "How do I cancel my Ziviso Pro subscription?",
     answer: "If you have a Pro subscription, go to Account Settings > Subscription, and tap 'Manage Plan'. You can cancel at any time, and you will retain Pro access until the end of your billing cycle."
   },
   {
@@ -45,7 +45,7 @@ export default function SupportScreen() {
   };
 
   const handleEmailSupport = () => {
-    Linking.openURL('mailto:support@mentora.com?subject=Mentora%20Support%20Request');
+    Linking.openURL('mailto:support@ziviso.com?subject=Ziviso%20Support%20Request');
   };
 
   const handleLiveChat = () => {
@@ -159,7 +159,7 @@ export default function SupportScreen() {
             <View style={styles.statusDot} />
             <Text style={styles.statusText}>All systems operational</Text>
           </View>
-          <Text style={styles.versionText}>Mentora App v1.0.0</Text>
+          <Text style={styles.versionText}>Ziviso App v1.0.0</Text>
         </View>
 
       </ScrollView>

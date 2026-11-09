@@ -170,7 +170,7 @@ export default function NotificationsSettingsScreen() {
 
           <View style={[styles.settingRow, styles.lastRow]}>
             <View style={styles.settingTextContainer}>
-              <Text style={styles.settingTitle}>Mentora News & Offers</Text>
+              <Text style={styles.settingTitle}>Ziviso News & Offers</Text>
               <Text style={styles.settingDescription}>Updates, premium discounts, and features.</Text>
             </View>
             <Switch

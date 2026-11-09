@@ -35,32 +35,32 @@ export default function TermsOfServiceScreen() {
             
             <Text style={styles.h1}>1. Acceptance of Terms</Text>
             <Text style={styles.paragraph}>
-              By accessing and using Mentora, you accept and agree to be bound by the terms and provision of this agreement. 
+              By accessing and using Ziviso, you accept and agree to be bound by the terms and provision of this agreement. 
               In addition, when using these particular services, you shall be subject to any posted guidelines or rules applicable to such services.
             </Text>
             
             <Text style={styles.h1}>2. Description of Service</Text>
             <Text style={styles.paragraph}>
-              Mentora provides users with access to a rich collection of educational resources, including AI-driven exam intelligence, video courses, live study rooms, and community forums. 
-              You understand and agree that the service is provided "AS-IS" and that Mentora assumes no responsibility for the timeliness, deletion, mis-delivery, or failure to store any user communications or personalization settings.
+              Ziviso provides users with access to a rich collection of educational resources, including AI-driven exam intelligence, video courses, live study rooms, and community forums. 
+              You understand and agree that the service is provided "AS-IS" and that Ziviso assumes no responsibility for the timeliness, deletion, mis-delivery, or failure to store any user communications or personalization settings.
             </Text>
 
             <Text style={styles.h1}>3. User Conduct</Text>
             <Text style={styles.paragraph}>
               You understand that all information, data, text, software, music, sound, photographs, graphics, video, messages, or other materials ("Content"), whether publicly posted or privately transmitted, are the sole responsibility of the person from which such Content originated. 
-              This means that you, and not Mentora, are entirely responsible for all Content that you upload, post, email, transmit, or otherwise make available via the Service.
+              This means that you, and not Ziviso, are entirely responsible for all Content that you upload, post, email, transmit, or otherwise make available via the Service.
             </Text>
 
-            <Text style={styles.h1}>4. Mentora Pro Subscriptions</Text>
+            <Text style={styles.h1}>4. Ziviso Pro Subscriptions</Text>
             <Text style={styles.paragraph}>
-              Certain premium features (like advanced AI mock exams) require a Mentora Pro subscription. 
+              Certain premium features (like advanced AI mock exams) require a Ziviso Pro subscription. 
               Subscriptions are billed in advance on a monthly or annual basis and are non-refundable for the subscription period they are purchased for. 
               You may cancel your subscription at any time through the Account Settings.
             </Text>
 
             <Text style={styles.h1}>5. Termination</Text>
             <Text style={styles.paragraph}>
-              You agree that Mentora may, under certain circumstances and without prior notice, immediately terminate your Mentora account and access to the Service. 
+              You agree that Ziviso may, under certain circumstances and without prior notice, immediately terminate your Ziviso account and access to the Service. 
               Cause for such termination shall include, but not be limited to: breaches or violations of the Terms of Service or other incorporated agreements or guidelines; requests by law enforcement or other government agencies; a request by you; or unexpected technical or security issues.
             </Text>
           </View>

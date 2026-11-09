@@ -7,6 +7,10 @@ import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { MentoraTabBar } from '@/components/MentoraTabBar';
 
+// V1 focuses exclusively on the Question Papers screen for both Students and Teachers.
+// Flip to `true` in V2 to restore the multi-tab navigation bar (Explore, My Classes, Rooms, Profile).
+const ENABLE_V2_TAB_BAR = false;
+
 export default function TabsLayout() {
   const colors = useThemeColors();
   const { user } = useAuth();
@@ -191,9 +195,9 @@ export default function TabsLayout() {
   return (
     <Tabs
       screenOptions={{ headerShown: false }}
-      tabBar={(props) => <MentoraTabBar {...props} />}
+      tabBar={(props) => (ENABLE_V2_TAB_BAR ? <MentoraTabBar {...props} /> : null)}
     >
-      <Tabs.Screen name="index"   options={{ title: 'Explore' }} />
+      <Tabs.Screen name="index"   options={{ title: 'Past Papers' }} />
       <Tabs.Screen name="my-classes" options={{ title: 'My Classes' }} />
       <Tabs.Screen name="rooms"   options={{ title: 'Rooms' }} />
       <Tabs.Screen name="profile" options={{ title: 'Profile' }} />

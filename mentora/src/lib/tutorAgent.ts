@@ -1766,7 +1766,7 @@ ${subpartsList}`;
         `QUESTION ${q.question_number} [${q.marks} marks] — Topic: ${q.topic}${q.subtopic ? ` (${q.subtopic})` : ''}\nContent / Sub-parts:\n${q.content_text}\n\nOfficial Mark Scheme:\n${q.mark_scheme || 'Standard examination syllabus criteria apply.'}`
       ).join('\n\n---\n\n');
 
-      contextualizedMessage = `You are the Mentora Senior Chief Examiner for "${paperTitle}" (${subject} - ${curriculum}).
+      contextualizedMessage = `You are the Ziviso Senior Chief Examiner for "${paperTitle}" (${subject} - ${curriculum}).
 The student has uploaded an exam answer sheet / working for marking.
 
 EXAM PAPER — ALL QUESTIONS & OFFICIAL MARK SCHEMES:
@@ -1902,7 +1902,7 @@ CONVERSATIONAL TUTORING INSTRUCTION:
 - Use rich, beautiful Markdown formatting with bold for examiner key terms and clean layout. Do NOT use LaTeX display brackets like \\[ ... \\] or $$ ... $$.`;
     } else {
       // Natural conversation / greeting / casual inquiry — DO NOT send question content or mark scheme!
-      contextualizedMessage = `You are the friendly, intelligent Mentora AI Tutor for the past paper "${paperTitle}" (${subject} - ${curriculum}).
+      contextualizedMessage = `You are the friendly, intelligent Ziviso AI Tutor for the past paper "${paperTitle}" (${subject} - ${curriculum}).
 The student is having a natural conversation with you.
 
 CONVERSATION INSTRUCTION:

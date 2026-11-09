@@ -17,8 +17,11 @@ export class Cropper {
         
         if (this.isMac) {
             this.popplerBin = path.join(__dirname, '..', 'vendor', 'pdfrender');
-        } else {
+        } else if (process.platform === 'win32') {
             this.popplerBin = path.join(__dirname, '..', 'vendor', 'poppler', 'poppler-24.02.0', 'Library', 'bin', 'pdftocairo.exe');
+        } else {
+            // Linux (e.g. Render / Docker container)
+            this.popplerBin = 'pdftocairo';
         }
     }
 
@@ -84,9 +87,12 @@ export class Cropper {
 
         // For question slices, use full page width so margins, question numbers, and wide diagrams are never clipped horizontally
         const left = 0;
-        const top = Math.max(0, Math.floor((boundingBox.ymin || 0) * height));
+        const MARGIN_Y = 0.01; // generous 1% padding so question slices don't clip headers or answer lines at page boundaries
+        const rawYmin = Math.max(0, (boundingBox.ymin || 0) - MARGIN_Y);
+        const rawYmax = Math.min(1, (boundingBox.ymax || 1) + MARGIN_Y);
+        const top = Math.max(0, Math.floor(rawYmin * height));
         const cropWidth = width;
-        const cropHeight = Math.min(height - top, Math.max(1, Math.ceil(((boundingBox.ymax || 1) - (boundingBox.ymin || 0)) * height)));
+        const cropHeight = Math.min(height - top, Math.max(1, Math.ceil((rawYmax - rawYmin) * height)));
 
         await sharp(pageImagePath)
             .extract({ left, top, width: cropWidth, height: cropHeight })
@@ -98,103 +104,15 @@ export class Cropper {
         return croppedPath;
     }
 
-        async findFigureAnchorBounds(pdfPath: string, pageNumber: number, hint?: string): Promise<{ ymin: number; xmin: number; ymax: number; xmax: number } | null> {
-        try {
-            const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
-            const dataBuffer = await fs.readFile(pdfPath);
-            const doc = await pdfjs.getDocument({ data: new Uint8Array(dataBuffer) }).promise;
-            if (pageNumber > doc.numPages) return null;
-            const page = await doc.getPage(pageNumber);
-            const content = await page.getTextContent();
-            const items = content.items
-                .map((i: any) => ({ str: (i.str || '').trim(), x: i.transform[4], y: i.transform[5] }))
-                .filter((i: any) => i.str);
-
-            // Universal caption pattern matching Fig. 1, Fig. 1.1, Figure 1, Diagram 1.1 across all exam boards
-            const captionRegex = /^(Fig(\.|s)|Figures*|Diagrams*)s*\d+([.-]\d+)?[a-z]?[:.]?(\s*[\(\[].*?[\)\]])?\s*$/i;
-            const captions = items.filter((i: any) => captionRegex.test(i.str));
-            if (captions.length === 0) return null;
-
-            // Group text items by line (within 3.5 points vertically) so multi-token sentences are cleanly assembled
-            const lines: { y: number; text: string; items: any[] }[] = [];
-            for (const it of items) {
-                let line = lines.find(l => Math.abs(l.y - it.y) < 3.5);
-                if (!line) {
-                    line = { y: it.y, text: '', items: [] };
-                    lines.push(line);
-                }
-                line.items.push(it);
-            }
-            for (const l of lines) {
-                l.items.sort((a, b) => a.x - b.x);
-                l.text = l.items.map(i => i.str).join(' ');
-            }
-
-            let targetCaption = captions[0];
-            if (hint) {
-                const matchFig = hint.match(/(\d+\.\d+|\d+)/);
-                if (matchFig) {
-                    const found = captions.find((c: any) => c.str.includes(matchFig[0]));
-                    if (found) targetCaption = found;
-                } else {
-                    const matchIdx = hint.match(/img(\d+)/i);
-                    if (matchIdx) {
-                        const idx = parseInt(matchIdx[1], 10);
-                        if (captions[idx]) targetCaption = captions[idx];
-                    }
-                }
-            }
-
-            const figLabel = targetCaption.str.replace(/[:.]?$/, '').trim();
-            // Find introductory line above the caption
-            const introLine = lines.find(l => l.y > targetCaption.y && l.text.toLowerCase().includes(figLabel.toLowerCase()) && l.text.length > targetCaption.str.length);
-
-            const pdfH = page.view[3] || 842;
-            let yminPt = introLine ? introLine.y + 14 : targetCaption.y + 240;
-            let ymaxPt = targetCaption.y - 10;
-
-            const ymin = Math.max(0.02, (pdfH - yminPt) / pdfH);
-            const ymax = Math.min(0.98, (pdfH - ymaxPt) / pdfH);
-
-            console.log(`[Universal Anchor Cropper] Successfully anchored ${figLabel} on Page ${pageNumber}: ymin=${ymin.toFixed(3)}, ymax=${ymax.toFixed(3)}`);
-            return { ymin, xmin: 0.03, ymax, xmax: 0.97 };
-        } catch (err) {
-            console.warn("Could not find figure anchor bounds:", err);
-            return null;
-        }
-    }
-
     async cropAssetFromImage(
         sourceImagePath: string,
         rawBoundingBox: any,
-        assetId: string,
-        pdfPath?: string,
-        pageNumber?: number,
-        description?: string
+        assetId: string
     ): Promise<string> {
         await fs.mkdir(this.tempDir, { recursive: true });
         const safeAssetId = assetId.replace(/[^a-zA-Z0-9_-]/g, '_');
         const croppedPath = path.join(this.tempDir, `subasset_${safeAssetId}.png`);
 
-        // 1. Try anchor bounds if pdfPath & pageNumber are provided
-        if (pdfPath && pageNumber) {
-            const anchorBounds = await this.findFigureAnchorBounds(pdfPath, pageNumber, description || assetId);
-            if (anchorBounds) {
-                try {
-                    const fullPagePng = await this.cropAsset(pdfPath, pageNumber, anchorBounds, `anchor_${safeAssetId}`);
-                    await sharp(fullPagePng)
-                        .trim({ background: '#ffffff', threshold: 15 })
-                        .extend({ top: 20, bottom: 20, left: 30, right: 30, background: '#ffffff' })
-                        .toFile(croppedPath);
-                    try { await fs.unlink(fullPagePng); } catch(e) {}
-                    return croppedPath;
-                } catch (anchorErr) {
-                    console.warn("Anchor crop failed, falling back to slice crop:", anchorErr);
-                }
-            }
-        }
-
-        // 2. Fallback: Crop from source image with generous headroom
         const metadata = await sharp(sourceImagePath).metadata();
         const width = metadata.width || 2480;
         const height = metadata.height || 3508;
@@ -213,36 +131,156 @@ export class Cropper {
         }
 
         ymin = Math.max(0, Math.min(1, ymin));
-        xmin = Math.max(0, Math.min(1, xmin));
         ymax = Math.max(0, Math.min(1, ymax));
-        xmax = Math.max(0, Math.min(1, xmax));
-
-        // Horizontal: Expand widely (20% on each side)
-        const cropXmin = Math.max(0.02, xmin - 0.20);
-        const cropXmax = Math.min(0.98, xmax + 0.20);
-
-        // Vertical: Expand upward by 15% headroom so top rims/meniscus/apparatus are NEVER cut off!
-        const cropYmin = Math.max(0.01, ymin - 0.15);
-        const cropYmax = Math.min(0.99, ymax + 0.04);
-
-        const left = Math.max(0, Math.floor(cropXmin * width));
-        const top = Math.max(0, Math.floor(cropYmin * height));
-        const cropWidth = Math.min(width - left, Math.max(1, Math.ceil((cropXmax - cropXmin) * width)));
-        const cropHeight = Math.min(height - top, Math.max(1, Math.ceil((cropYmax - cropYmin) * height)));
-
-        try {
-            await sharp(sourceImagePath)
-                .extract({ left, top, width: cropWidth, height: cropHeight })
-                .trim({ background: '#ffffff', threshold: 20 })
-                .extend({ top: 20, bottom: 20, left: 30, right: 30, background: '#ffffff' })
-                .toFile(croppedPath);
-        } catch (trimErr) {
-            await sharp(sourceImagePath)
-                .extract({ left, top, width: cropWidth, height: cropHeight })
-                .toFile(croppedPath);
+        if (ymin >= ymax) {
+            ymin = 0;
+            ymax = 1;
         }
 
+        // Full width of the paper across the visual band:
+        // Always extract the full page width (left = 0, cropWidth = width) so no formulas,
+        // bonds, apparatus, annotations, or labels are EVER cut off horizontally.
+        const left = 0;
+        const cropWidth = width;
+
+        // Auto-fit vertical boundary detection with smart whitespace cushions
+        // Ensures no top curve of test tubes, beaker rims, table borders, atom labels,
+        // or captions are clipped, while safely excluding question text above and below.
+        const bounds = await this.computeSmartVerticalBounds(sourceImagePath, ymin, ymax);
+
+        await sharp(sourceImagePath)
+            .extract({ left, top: bounds.top, width: cropWidth, height: bounds.height })
+            .toFile(croppedPath);
+
         return croppedPath;
+    }
+
+    async computeSmartVerticalBounds(
+        sourceImagePath: string,
+        ymin: number,
+        ymax: number
+    ): Promise<{ top: number; height: number; width: number }> {
+        const image = sharp(sourceImagePath);
+        const metadata = await image.metadata();
+        const width = metadata.width || 2480;
+        const height = metadata.height || 3508;
+
+        try {
+            const raw = await image.raw().toBuffer();
+            const channels = metadata.channels || 4;
+
+            // Count dark pixels per horizontal row across 5% to 95% of page width
+            // to ignore any marginal binding marks, edge punch-holes or scanning artifacts.
+            const xStart = Math.round(width * 0.05);
+            const xEnd = Math.round(width * 0.95);
+            const rowDarkCounts = new Uint32Array(height);
+            for (let y = 0; y < height; y++) {
+                let count = 0;
+                const rowOffset = y * width;
+                for (let x = xStart; x < xEnd; x++) {
+                    const idx = (rowOffset + x) * channels;
+                    if (raw[idx] < 225 || raw[idx + 1] < 225 || raw[idx + 2] < 225) {
+                        count++;
+                    }
+                }
+                rowDarkCounts[y] = count;
+            }
+
+            const initialTop = Math.max(0, Math.min(height - 1, Math.floor(ymin * height)));
+            const initialBottom = Math.max(0, Math.min(height - 1, Math.ceil(ymax * height)));
+
+            const MAX_SCAN_WINDOW = Math.max(50, Math.round(height * 0.12)); // up to 12% vertical scan window
+            const NOISE_THRESHOLD = 3;
+
+            // 1. Precise Diagram Top:
+            let diagramTop = initialTop;
+            if (rowDarkCounts[diagramTop] > NOISE_THRESHOLD) {
+                // ymin was inside content (cut off the top of the diagram) -> scan UP until whitespace
+                const limit = Math.max(0, initialTop - MAX_SCAN_WINDOW);
+                while (diagramTop > limit && rowDarkCounts[diagramTop] > NOISE_THRESHOLD) {
+                    diagramTop--;
+                }
+            } else {
+                // ymin was in whitespace -> scan DOWN to find where diagram actually begins
+                const limit = Math.min(initialBottom, initialTop + MAX_SCAN_WINDOW);
+                while (diagramTop < limit && rowDarkCounts[diagramTop] <= NOISE_THRESHOLD) {
+                    diagramTop++;
+                }
+            }
+
+            // Find where preceding text ends above diagramTop
+            let textAboveEnd = Math.max(0, diagramTop - 1);
+            while (textAboveEnd > 0 && rowDarkCounts[textAboveEnd] <= NOISE_THRESHOLD) {
+                textAboveEnd--;
+            }
+
+            // 2. Precise Diagram Bottom:
+            let diagramBottom = initialBottom;
+            if (rowDarkCounts[diagramBottom] > NOISE_THRESHOLD) {
+                // ymax was inside content -> scan DOWN until whitespace
+                const limit = Math.min(height - 1, initialBottom + MAX_SCAN_WINDOW);
+                while (diagramBottom < limit && rowDarkCounts[diagramBottom] > NOISE_THRESHOLD) {
+                    diagramBottom++;
+                }
+            } else {
+                // ymax was in whitespace -> scan UP to find content bottom
+                const limit = Math.max(diagramTop, initialBottom - MAX_SCAN_WINDOW);
+                while (diagramBottom > limit && rowDarkCounts[diagramBottom] <= NOISE_THRESHOLD) {
+                    diagramBottom--;
+                }
+            }
+
+            // Check for figure caption below the drawing:
+            // Drawings (like apparatus or circuits) often have a gap of 50-250px between the drawing
+            // and the caption (e.g. "Fig. 1.1", "Fig. 4"). If initialBottom or the scan window indicates
+            // a single-line caption band directly below before the next subpart, extend diagramBottom.
+            const captionScanLimit = Math.min(height - 1, Math.max(initialBottom + 50, diagramBottom + Math.round(height * 0.08)));
+            let scanForCaption = diagramBottom + 1;
+            while (scanForCaption < captionScanLimit && rowDarkCounts[scanForCaption] <= NOISE_THRESHOLD) {
+                scanForCaption++;
+            }
+            if (scanForCaption < captionScanLimit && rowDarkCounts[scanForCaption] > NOISE_THRESHOLD) {
+                let captionBottom = scanForCaption;
+                while (captionBottom < height - 1 && rowDarkCounts[captionBottom] > NOISE_THRESHOLD) {
+                    captionBottom++;
+                }
+                const captionHeight = captionBottom - scanForCaption;
+                // Single-line caption is typically < 3.5% of page height
+                if (captionHeight < Math.round(height * 0.035)) {
+                    if (initialBottom >= scanForCaption - Math.round(height * 0.03)) {
+                        diagramBottom = captionBottom;
+                    }
+                }
+            }
+
+            // Find where subsequent text begins below diagramBottom
+            let textBelowStart = Math.min(height - 1, diagramBottom + 1);
+            while (textBelowStart < height - 1 && rowDarkCounts[textBelowStart] <= NOISE_THRESHOLD) {
+                textBelowStart++;
+            }
+
+            // Generous vertical breathing room: ~25-45px depending on image resolution
+            const DESIRED_PADDING = Math.max(25, Math.round(height * 0.012));
+
+            const topGap = diagramTop - textAboveEnd;
+            const topPad = topGap > 6 ? Math.min(DESIRED_PADDING, Math.max(8, Math.floor(topGap / 2))) : 0;
+            const finalTop = Math.max(textAboveEnd + 1, diagramTop - topPad);
+
+            const bottomGap = textBelowStart - diagramBottom;
+            const bottomPad = bottomGap > 6 ? Math.min(DESIRED_PADDING, Math.max(8, Math.floor(bottomGap / 2))) : 0;
+            const finalBottom = Math.min(textBelowStart - 1, diagramBottom + bottomPad);
+
+            const cropHeight = Math.max(10, finalBottom - finalTop);
+
+            return { top: finalTop, height: cropHeight, width };
+        } catch (scanErr) {
+            console.warn("Smart vertical boundary scanner encountered error, falling back to padded bounding box:", scanErr);
+            const MARGIN_Y = 0.015;
+            const top = Math.max(0, Math.floor((ymin - MARGIN_Y) * height));
+            const bottom = Math.min(height, Math.ceil((ymax + MARGIN_Y) * height));
+            const cropHeight = Math.max(1, bottom - top);
+            return { top, height: cropHeight, width };
+        }
     }
 
     async addGridToImage(imagePath: string, outputPath: string): Promise<string> {

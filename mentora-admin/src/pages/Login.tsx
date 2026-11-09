@@ -19,7 +19,7 @@ export default function Login() {
 
   useEffect(() => {
     if (session) {
-      navigate('/');
+      navigate('/papers', { replace: true });
     }
   }, [session, navigate]);
 
@@ -64,7 +64,7 @@ export default function Login() {
 
       // If sign up works and session is created immediately
       if (data.session) {
-        navigate('/');
+        navigate('/papers', { replace: true });
       } else {
         setError('Account created! Please check your email or log in.');
         setIsSignUp(false);
@@ -82,7 +82,7 @@ export default function Login() {
         return;
       }
       
-      navigate('/');
+      navigate('/papers', { replace: true });
     }
   };
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Filter, Plus, Edit, Trash2, Eye, BarChart2, BookOpen, ChevronDown, ChevronUp, UploadCloud, FileText, ExternalLink, FileCheck, Sparkles, RefreshCw, CheckCircle2, GraduationCap, Calendar, ArrowUpDown, SlidersHorizontal, LayoutGrid, List, X as CloseIcon } from 'lucide-react';
+import { Search, Filter, Plus, Edit, Trash2, Eye, BarChart2, BookOpen, ChevronDown, ChevronUp, ChevronRight, ArrowLeft, FolderOpen, UploadCloud, FileText, ExternalLink, FileCheck, Sparkles, RefreshCw, CheckCircle2, GraduationCap, Calendar, ArrowUpDown, SlidersHorizontal, LayoutGrid, List, X as CloseIcon } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import PaperFormModal from '../components/PaperFormModal';
 import BulkUploadModal from '../components/BulkUploadModal';
@@ -245,8 +245,18 @@ export default function Papers() {
     }
   };
 
-  const filteredPapers = papers.filter(paper => {
-    // Multi-token search across subject, year, paper_number, curriculum, session, variant, grade_level
+  const handleSelectSubject = (subjectName: string) => {
+    setSubjectFilter(subjectName);
+    setSortBy('year_desc'); // Always show most recent year first when opening a subject
+    setGroupBy('year');
+  };
+
+  const handleBackToSubjects = () => {
+    setSubjectFilter('All');
+  };
+
+  // Papers matching search + board + year (used to build the Subject Directory counts)
+  const baseFilteredPapers = papers.filter(paper => {
     if (search.trim()) {
       const tokens = search.toLowerCase().trim().split(/\s+/);
       const searchCorpus = [
@@ -266,34 +276,94 @@ export default function Papers() {
       const allTokensMatch = tokens.every(token => searchCorpus.includes(token));
       if (!allTokensMatch) return false;
     }
-    
+
     const matchesCurriculum = curriculumFilter === 'All' || paper.curriculum === curriculumFilter;
-    const matchesSubject = subjectFilter === 'All' || paper.subject === subjectFilter;
     const matchesYear = yearFilter === 'All' || paper.year?.toString() === yearFilter;
-    
-    return matchesCurriculum && matchesSubject && matchesYear;
+    return matchesCurriculum && matchesYear;
+  });
+
+  // Build Subject Directory summary (each subject + number of question papers + years)
+  const subjectDirectory = React.useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        subject: string;
+        paperCount: number;
+        curriculums: Set<string>;
+        years: Set<number>;
+        totalQuestions: number;
+        totalSolutions: number;
+        totalMarked: number;
+      }
+    >();
+
+    baseFilteredPapers.forEach((p) => {
+      const subName = (p.subject || 'Other').trim();
+      if (!map.has(subName)) {
+        map.set(subName, {
+          subject: subName,
+          paperCount: 0,
+          curriculums: new Set<string>(),
+          years: new Set<number>(),
+          totalQuestions: 0,
+          totalSolutions: 0,
+          totalMarked: 0,
+        });
+      }
+      const entry = map.get(subName)!;
+      entry.paperCount += 1;
+      if (p.curriculum) entry.curriculums.add(p.curriculum);
+      if (p.year && !Number.isNaN(Number(p.year))) entry.years.add(Number(p.year));
+      entry.totalQuestions += Number(p.question_count || 0);
+      entry.totalSolutions += Number(p.solution_count || 0);
+      entry.totalMarked += Number(p.marked_count || 0);
+    });
+
+    return Array.from(map.values())
+      .map((item) => {
+        const sortedYears = Array.from(item.years).sort((a, b) => b - a);
+        return {
+          subject: item.subject,
+          paperCount: item.paperCount,
+          curriculums: Array.from(item.curriculums),
+          years: sortedYears,
+          latestYear: sortedYears[0] || null,
+          oldestYear: sortedYears[sortedYears.length - 1] || null,
+          totalQuestions: item.totalQuestions,
+          totalSolutions: item.totalSolutions,
+          totalMarked: item.totalMarked,
+        };
+      })
+      .sort((a, b) => a.subject.localeCompare(b.subject));
+  }, [baseFilteredPapers]);
+
+  const isSubjectSelected = subjectFilter !== 'All';
+
+  const filteredPapers = baseFilteredPapers.filter(paper => {
+    const matchesSubject = subjectFilter === 'All' || paper.subject === subjectFilter;
+    return matchesSubject;
   }).sort((a, b) => {
     if (sortBy === 'year_desc') {
-      const diff = (b.year || 0) - (a.year || 0);
+      const diff = (Number(b.year) || 0) - (Number(a.year) || 0);
       if (diff !== 0) return diff;
       const sDiff = (a.subject || '').localeCompare(b.subject || '');
       if (sDiff !== 0) return sDiff;
-      return (a.paper_number || 0) - (b.paper_number || 0);
+      return (Number(a.paper_number) || 0) - (Number(b.paper_number) || 0);
     }
     if (sortBy === 'year_asc') {
-      const diff = (a.year || 0) - (b.year || 0);
+      const diff = (Number(a.year) || 0) - (Number(b.year) || 0);
       if (diff !== 0) return diff;
       const sDiff = (a.subject || '').localeCompare(b.subject || '');
       if (sDiff !== 0) return sDiff;
-      return (a.paper_number || 0) - (b.paper_number || 0);
+      return (Number(a.paper_number) || 0) - (Number(b.paper_number) || 0);
     }
     if (sortBy === 'subject_asc') {
       const sDiff = (a.subject || '').localeCompare(b.subject || '');
       if (sDiff !== 0) return sDiff;
-      return (b.year || 0) - (a.year || 0);
+      return (Number(b.year) || 0) - (Number(a.year) || 0);
     }
     if (sortBy === 'questions_desc') {
-      return (b.question_count || 0) - (a.question_count || 0);
+      return (Number(b.question_count) || 0) - (Number(a.question_count) || 0);
     }
     return 0;
   });
@@ -374,45 +444,70 @@ export default function Papers() {
         />
       {/* Clean, Compact Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5">
-          <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
-            Past Papers
-          </h1>
-          <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-700 border border-indigo-500/20 dark:bg-indigo-400/15 dark:text-indigo-100 dark:border-indigo-300/30">
-            {filteredPapers.length}
-          </span>
+        <div className="flex items-center gap-2.5 flex-wrap">
+          {isSubjectSelected ? (
+            <>
+              <button
+                type="button"
+                onClick={handleBackToSubjects}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-white/85 hover:bg-white text-slate-800 border border-slate-200/90 hover:border-indigo-300 dark:bg-slate-900/75 dark:hover:bg-slate-800/90 dark:text-slate-100 dark:border-white/15 dark:hover:border-indigo-300/40 shadow-2xs transition-all cursor-pointer active:scale-95"
+                title="Back to all subjects"
+              >
+                <ArrowLeft className="w-3.5 h-3.5 text-indigo-600 dark:text-sky-300" />
+                <span>All Subjects</span>
+              </button>
+              <ChevronRight className="w-4 h-4 text-slate-400 dark:text-slate-500 hidden sm:block" />
+              <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
+                {subjectFilter}
+              </h1>
+              <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-700 border border-indigo-500/20 dark:bg-indigo-400/15 dark:text-indigo-100 dark:border-indigo-300/30">
+                {filteredPapers.length} {filteredPapers.length === 1 ? 'Paper' : 'Papers'}
+              </span>
+            </>
+          ) : (
+            <>
+              <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
+                Question Paper Subjects
+              </h1>
+              <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-700 border border-indigo-500/20 dark:bg-indigo-400/15 dark:text-indigo-100 dark:border-indigo-300/30">
+                {subjectDirectory.length} {subjectDirectory.length === 1 ? 'Subject' : 'Subjects'}
+              </span>
+            </>
+          )}
         </div>
 
         <div className="flex items-center gap-2 self-end sm:self-auto flex-wrap">
-          {/* View Mode Toggle: Grid Cards vs Table */}
-          <div className="flex items-center bg-white/80 dark:bg-slate-900/70 backdrop-blur-md border border-slate-200/90 dark:border-white/15 rounded-xl p-1 gap-1 shadow-xs">
-            <button
-              type="button"
-              onClick={() => setViewMode('grid')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                viewMode === 'grid'
-                  ? 'bg-gradient-to-b from-indigo-500 to-indigo-600 text-white shadow-sm shadow-indigo-500/30'
-                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
-              }`}
-              title="Card Grid View"
-            >
-              <LayoutGrid className="w-3.5 h-3.5" />
-              <span>Cards</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode('table')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                viewMode === 'table'
-                  ? 'bg-gradient-to-b from-indigo-500 to-indigo-600 text-white shadow-sm shadow-indigo-500/30'
-                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
-              }`}
-              title="Table View"
-            >
-              <List className="w-3.5 h-3.5" />
-              <span>Table</span>
-            </button>
-          </div>
+          {/* View Mode Toggle: Grid Cards vs Table (shown when viewing a subject's papers) */}
+          {isSubjectSelected && (
+            <div className="flex items-center bg-white/80 dark:bg-slate-900/70 backdrop-blur-md border border-slate-200/90 dark:border-white/15 rounded-xl p-1 gap-1 shadow-xs">
+              <button
+                type="button"
+                onClick={() => setViewMode('grid')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                  viewMode === 'grid'
+                    ? 'bg-gradient-to-b from-indigo-500 to-indigo-600 text-white shadow-sm shadow-indigo-500/30'
+                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                }`}
+                title="Card Grid View"
+              >
+                <LayoutGrid className="w-3.5 h-3.5" />
+                <span>Cards</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('table')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                  viewMode === 'table'
+                    ? 'bg-gradient-to-b from-indigo-500 to-indigo-600 text-white shadow-sm shadow-indigo-500/30'
+                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                }`}
+                title="Table View"
+              >
+                <List className="w-3.5 h-3.5" />
+                <span>Table</span>
+              </button>
+            </div>
+          )}
 
           {!isStudent && (
             <>
@@ -442,7 +537,11 @@ export default function Papers() {
           <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-300/80" />
           <input
             type="text"
-            placeholder="Search by subject, year (e.g. '2024 Math', 'Cambridge P2')..."
+            placeholder={
+              isSubjectSelected
+                ? `Search inside ${subjectFilter} papers (e.g. '2024', 'Paper 2', 'May/June')...`
+                : "Search for a subject or exam paper (e.g. 'Mathematics', 'Chemistry', '2024')..."
+            }
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full pl-9 pr-8 py-2.5 bg-white/85 dark:bg-slate-900/75 backdrop-blur-md border border-slate-200/90 dark:border-white/15 rounded-xl text-xs sm:text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-400 focus:outline-none focus:border-indigo-500 dark:focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/15 transition-all"
@@ -461,6 +560,18 @@ export default function Papers() {
 
         {/* Single Compact Scrollable Filter Strip */}
         <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
+          {/* Quick Subject Switcher Pills when inside a subject */}
+          {isSubjectSelected && (
+            <button
+              type="button"
+              onClick={handleBackToSubjects}
+              className="shrink-0 inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-xl cursor-pointer border bg-white/80 dark:bg-slate-900/70 hover:bg-white dark:hover:bg-slate-800/85 text-slate-700 dark:text-slate-200 border-slate-200/90 dark:border-white/15 backdrop-blur-md transition-all"
+            >
+              <FolderOpen className="w-3.5 h-3.5 text-indigo-500 dark:text-sky-300" />
+              <span>All Subjects ({subjectDirectory.length})</span>
+            </button>
+          )}
+
           {/* Board Pill */}
           <div className="relative shrink-0">
             <select
@@ -498,18 +609,25 @@ export default function Papers() {
             <ChevronDown className={`w-3 h-3 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none ${yearFilter !== 'All' ? 'text-indigo-600 dark:text-indigo-200' : 'text-slate-400 dark:text-slate-300'}`} />
           </div>
 
-          {/* Subject Pill */}
+          {/* Subject Jump Pill */}
           <div className="relative shrink-0">
             <select
               value={subjectFilter}
-              onChange={(e) => setSubjectFilter(e.target.value)}
-              className={`appearance-none text-xs font-semibold pl-3 pr-7 py-1.5 rounded-xl cursor-pointer border backdrop-blur-md transition-all max-w-[150px] truncate ${
+              onChange={(e) => {
+                const val = e.target.value;
+                if (val === 'All') {
+                  handleBackToSubjects();
+                } else {
+                  handleSelectSubject(val);
+                }
+              }}
+              className={`appearance-none text-xs font-semibold pl-3 pr-7 py-1.5 rounded-xl cursor-pointer border backdrop-blur-md transition-all max-w-[180px] truncate ${
                 subjectFilter !== 'All'
                   ? 'bg-indigo-500/12 dark:bg-indigo-400/20 border-indigo-500/40 dark:border-indigo-300/45 text-indigo-700 dark:text-indigo-100 font-bold'
                   : 'bg-white/80 dark:bg-slate-900/70 hover:bg-white dark:hover:bg-slate-800/85 text-slate-700 dark:text-slate-200 border-slate-200/90 dark:border-white/15'
               }`}
             >
-              <option value="All">Subject: All</option>
+              <option value="All">Subject: Choose Subject</option>
               {uniqueSubjects.map((sub) => (
                 <option key={sub as string} value={sub as string}>{sub as string}</option>
               ))}
@@ -517,34 +635,21 @@ export default function Papers() {
             <ChevronDown className={`w-3 h-3 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none ${subjectFilter !== 'All' ? 'text-indigo-600 dark:text-indigo-200' : 'text-slate-400 dark:text-slate-300'}`} />
           </div>
 
-          {/* Grouping Pill */}
-          <div className="relative shrink-0">
-            <select
-              value={groupBy}
-              onChange={(e) => setGroupBy(e.target.value as any)}
-              className="appearance-none bg-white/80 dark:bg-slate-900/70 hover:bg-white dark:hover:bg-slate-800/85 text-slate-700 dark:text-slate-200 text-xs font-semibold pl-3 pr-7 py-1.5 rounded-xl cursor-pointer border border-slate-200/90 dark:border-white/15 backdrop-blur-md transition-all"
-            >
-              <option value="year">Group: Year</option>
-              <option value="subject">Group: Subject</option>
-              <option value="none">Group: Flat</option>
-            </select>
-            <ChevronDown className="w-3 h-3 text-slate-400 dark:text-slate-300 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
-          </div>
-
-          {/* Sort Pill */}
-          <div className="relative shrink-0">
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as any)}
-              className="appearance-none bg-white/80 dark:bg-slate-900/70 hover:bg-white dark:hover:bg-slate-800/85 text-slate-700 dark:text-slate-200 text-xs font-semibold pl-3 pr-7 py-1.5 rounded-xl cursor-pointer border border-slate-200/90 dark:border-white/15 backdrop-blur-md transition-all"
-            >
-              <option value="year_desc">Sort: Newest Year</option>
-              <option value="year_asc">Sort: Oldest Year</option>
-              <option value="subject_asc">Sort: Subject A-Z</option>
-              <option value="questions_desc">Sort: Questions</option>
-            </select>
-            <ChevronDown className="w-3 h-3 text-slate-400 dark:text-slate-300 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
-          </div>
+          {/* Sort Pill (shown when inside a subject) */}
+          {isSubjectSelected && (
+            <div className="relative shrink-0">
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as any)}
+                className="appearance-none bg-white/80 dark:bg-slate-900/70 hover:bg-white dark:hover:bg-slate-800/85 text-slate-700 dark:text-slate-200 text-xs font-semibold pl-3 pr-7 py-1.5 rounded-xl cursor-pointer border border-slate-200/90 dark:border-white/15 backdrop-blur-md transition-all"
+              >
+                <option value="year_desc">Sort: Newest Year First</option>
+                <option value="year_asc">Sort: Oldest Year First</option>
+                <option value="questions_desc">Sort: Most Questions</option>
+              </select>
+              <ChevronDown className="w-3 h-3 text-slate-400 dark:text-slate-300 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+            </div>
+          )}
 
           {/* Reset Action Pill */}
           {hasActiveFilters && (
@@ -565,23 +670,167 @@ export default function Papers() {
       <div className="flex items-center justify-between text-xs px-1">
         <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/75 dark:bg-slate-900/65 backdrop-blur-md border border-slate-200/80 dark:border-white/12 text-slate-600 dark:text-slate-300 shadow-2xs">
           <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 dark:bg-cyan-300 shadow-[0_0_6px_rgba(103,232,249,0.75)]" />
-          <span>
-            Found <strong className="text-slate-900 dark:text-white font-bold">{filteredPapers.length}</strong> {filteredPapers.length === 1 ? 'exam paper' : 'exam papers'}
-            {search ? ` matching "${search}"` : ''}
-          </span>
+          {isSubjectSelected ? (
+            <span>
+              Showing <strong className="text-slate-900 dark:text-white font-bold">{filteredPapers.length}</strong>{' '}
+              {filteredPapers.length === 1 ? 'question paper' : 'question papers'} in{' '}
+              <strong className="text-indigo-600 dark:text-sky-300 font-bold">{subjectFilter}</strong>
+              {search ? ` matching "${search}"` : ''}
+            </span>
+          ) : (
+            <span>
+              Select a subject below • <strong className="text-slate-900 dark:text-white font-bold">{subjectDirectory.length}</strong>{' '}
+              {subjectDirectory.length === 1 ? 'subject' : 'subjects'} ({baseFilteredPapers.length} total question papers)
+            </span>
+          )}
         </span>
         <span className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/75 dark:bg-slate-900/65 backdrop-blur-md border border-slate-200/80 dark:border-white/12 text-slate-600 dark:text-slate-300 shadow-2xs">
           <ArrowUpDown className="w-3 h-3 text-indigo-500 dark:text-indigo-300" />
-          <span>Arranged by <strong className="text-slate-800 dark:text-slate-100 font-semibold">{groupBy === 'year' ? 'Exam Year' : groupBy === 'subject' ? 'Subject' : 'Default'}</strong></span>
+          <span>
+            {isSubjectSelected ? (
+              <>
+                Ordered by <strong className="text-slate-800 dark:text-slate-100 font-semibold">{sortBy === 'year_asc' ? 'Oldest Year First' : 'Most Recent Year First'}</strong>
+              </>
+            ) : (
+              <>
+                Click any subject to view its papers
+              </>
+            )}
+          </span>
         </span>
       </div>
 
-      {/* Main Papers Content: Grid Cards or Streamlined Table */}
+      {/* Main Content: Level 1 = Subject Directory, Level 2 = Selected Subject's Question Papers */}
       {loading ? (
         <div className="papers-surface rounded-3xl p-12 text-center text-sm flex flex-col items-center justify-center gap-3">
           <RefreshCw className="w-8 h-8 text-indigo-500 dark:text-sky-300 animate-spin" />
           <p className="font-semibold text-slate-900 dark:text-white">Loading question papers...</p>
         </div>
+      ) : !isSubjectSelected ? (
+        subjectDirectory.length === 0 ? (
+          <div className="papers-surface rounded-3xl p-12 text-center text-sm space-y-3 flex flex-col items-center justify-center">
+            <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 dark:bg-indigo-400/15 border border-indigo-500/20 dark:border-indigo-300/30 flex items-center justify-center text-indigo-600 dark:text-indigo-200 shadow-inner">
+              <BookOpen className="w-7 h-7" />
+            </div>
+            <div>
+              <p className="font-bold text-slate-900 dark:text-white text-base">No subjects found</p>
+              <p className="text-xs text-slate-500 dark:text-slate-300 mt-1">Try adjusting your search keywords or board filters.</p>
+            </div>
+            {hasActiveFilters && (
+              <button
+                onClick={resetFilters}
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-indigo-500/12 hover:bg-indigo-500/20 text-indigo-700 dark:bg-indigo-400/20 dark:hover:bg-indigo-400/30 dark:text-indigo-100 border border-indigo-500/25 dark:border-indigo-300/35 cursor-pointer mt-2 transition-all"
+              >
+                Clear All Filters
+              </button>
+            )}
+          </div>
+        ) : (
+          /* ========================================================================= */
+          /* LEVEL 1: SUBJECT DIRECTORY CARDS (Click a Subject -> View Papers)         */
+          /* ========================================================================= */
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {subjectDirectory.map((item) => {
+              const yearRangeLabel =
+                item.years.length === 0
+                  ? 'All Years'
+                  : item.years.length === 1
+                  ? `${item.years[0]}`
+                  : `${item.oldestYear} – ${item.latestYear}`;
+
+              return (
+                <button
+                  key={item.subject}
+                  type="button"
+                  onClick={() => handleSelectSubject(item.subject)}
+                  className="papers-card-surface rounded-3xl p-5 text-left flex flex-col justify-between gap-4 group cursor-pointer hover:-translate-y-0.5 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+                >
+                  {/* Top Row: Subject Icon + Name + Question Paper Count Badge */}
+                  <div className="flex items-start justify-between gap-3 w-full">
+                    <div className="flex items-start gap-3.5 min-w-0">
+                      <div className="w-12 h-12 rounded-2xl flex items-center justify-center bg-gradient-to-br from-indigo-500/15 to-sky-500/10 dark:from-indigo-400/20 dark:to-cyan-400/15 border border-indigo-500/25 dark:border-indigo-300/30 text-indigo-600 dark:text-sky-200 shrink-0 shadow-inner group-hover:scale-105 transition-transform">
+                        <BookOpen className="w-6 h-6" />
+                      </div>
+                      <div className="min-w-0">
+                        <h3 className="font-bold text-slate-900 dark:text-white text-lg leading-snug truncate group-hover:text-indigo-600 dark:group-hover:text-sky-300 transition-colors">
+                          {item.subject}
+                        </h3>
+                        <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                          {item.curriculums.map((curr) => (
+                            <span
+                              key={curr}
+                              className={`px-2 py-0.5 rounded-md text-[11px] font-semibold border ${
+                                curr === 'Cambridge'
+                                  ? 'bg-sky-500/10 text-sky-700 border-sky-500/25 dark:bg-sky-400/15 dark:text-sky-200 dark:border-sky-300/30'
+                                  : 'bg-amber-500/10 text-amber-700 border-amber-500/25 dark:bg-amber-400/15 dark:text-amber-200 dark:border-amber-300/30'
+                              }`}
+                            >
+                              {curr}
+                            </span>
+                          ))}
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100/90 dark:bg-white/[0.07] border border-slate-200/80 dark:border-white/12 text-slate-600 dark:text-slate-200 tabular-nums">
+                            <Calendar className="w-3 h-3 text-indigo-500 dark:text-sky-300" />
+                            <span>{yearRangeLabel}</span>
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Number of Question Papers Pill */}
+                    <div className="shrink-0 text-right">
+                      <span className="inline-flex flex-col items-end px-3 py-1.5 rounded-2xl bg-indigo-500/10 dark:bg-indigo-400/18 border border-indigo-500/25 dark:border-indigo-300/35">
+                        <span className="text-base font-extrabold text-indigo-700 dark:text-white leading-none tabular-nums">
+                          {item.paperCount}
+                        </span>
+                        <span className="text-[10px] font-semibold text-indigo-600/90 dark:text-indigo-200 mt-0.5">
+                          {item.paperCount === 1 ? 'Paper' : 'Papers'}
+                        </span>
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Stats Strip */}
+                  <div className="w-full rounded-2xl p-3 bg-slate-50/85 dark:bg-slate-950/45 border border-slate-200/80 dark:border-white/10 grid grid-cols-2 gap-2 text-xs">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="w-7 h-7 rounded-lg bg-indigo-500/10 dark:bg-sky-400/15 flex items-center justify-center text-indigo-600 dark:text-sky-300 shrink-0">
+                        <FileText className="w-3.5 h-3.5" />
+                      </div>
+                      <div className="min-w-0">
+                        <span className="text-[10px] text-slate-500 dark:text-slate-400 block font-medium">Question Papers</span>
+                        <span className="font-semibold text-slate-900 dark:text-white truncate block text-xs">
+                          {item.paperCount} {item.paperCount === 1 ? 'Question Paper' : 'Question Papers'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="w-7 h-7 rounded-lg bg-emerald-500/12 text-emerald-600 dark:bg-emerald-400/18 dark:text-emerald-300 flex items-center justify-center shrink-0">
+                        <FileCheck className="w-3.5 h-3.5" />
+                      </div>
+                      <div className="min-w-0">
+                        <span className="text-[10px] text-slate-500 dark:text-slate-400 block font-medium">Extracted Bank</span>
+                        <span className="font-semibold text-slate-900 dark:text-white truncate block text-xs">
+                          {item.totalQuestions} Questions
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Bottom CTA Bar */}
+                  <div className="w-full pt-2 border-t border-slate-200/80 dark:border-white/10 flex items-center justify-between text-xs">
+                    <span className="text-slate-500 dark:text-slate-300 font-medium">
+                      {item.latestYear ? `Latest paper: ${item.latestYear}` : 'Click to open subject'}
+                    </span>
+                    <span className="inline-flex items-center gap-1 font-bold text-indigo-600 dark:text-sky-300 group-hover:translate-x-0.5 transition-transform">
+                      <span>Open Subject</span>
+                      <ChevronRight className="w-4 h-4" />
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )
       ) : filteredPapers.length === 0 ? (
         <div className="papers-surface rounded-3xl p-12 text-center text-sm space-y-3 flex flex-col items-center justify-center">
           <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 dark:bg-indigo-400/15 border border-indigo-500/20 dark:border-indigo-300/30 flex items-center justify-center text-indigo-600 dark:text-indigo-200 shadow-inner">

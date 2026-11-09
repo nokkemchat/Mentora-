@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Platform } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { spacing, typography, borderRadius, useThemeColors } from '@/constants/theme';
@@ -13,10 +13,15 @@ export default function RoomsScreen() {
   const isLightMode = colors.background === '#F8FAFC';
   const styles = useMemo(() => createStyles(colors), [colors]);
   const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   const [publicRooms, setPublicRooms] = useState<any[]>([]);
   const [schoolRooms, setSchoolRooms] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Estimated before first layout, then corrected via onLayout so the
+  // scroll content always clears the fixed frosted header.
+  const [headerHeight, setHeaderHeight] = useState(insets.top + 92);
 
   useEffect(() => {
     const failsafe = setTimeout(() => setLoading(false), 1500);
@@ -92,19 +97,13 @@ export default function RoomsScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top']}>
+    <View style={styles.safeArea}>
       <GlobalWatermark />
-      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.headerTitle}>Study Rooms</Text>
-            <Text style={styles.headerSubtitle}>Join peers and study together</Text>
-          </View>
-          <Pressable style={styles.createButton}>
-            <Feather name="plus" size={24} color={colors.background} />
-          </Pressable>
-        </View>
-
+      {/* Scrollable content — passes beneath the fixed frosted header */}
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={[styles.content, { paddingTop: headerHeight + 16 }]}
+      >
         {/* School Rooms Section */}
         {schoolRooms.length > 0 && (
           <View style={styles.section}>
@@ -126,7 +125,31 @@ export default function RoomsScreen() {
         </View>
 
       </ScrollView>
-    </SafeAreaView>
+
+      {/* Fixed Frosted Glass Header — stays pinned while content scrolls beneath */}
+      <View
+        style={[styles.fixedHeader, { paddingTop: insets.top + 4 }]}
+        onLayout={(e) => setHeaderHeight(e.nativeEvent.layout.height)}
+      >
+        <BlurView
+          style={styles.headerBlur}
+          intensity={Platform.OS === 'ios' ? 85 : 100}
+          tint={isLightMode ? 'light' : 'dark'}
+          pointerEvents="none"
+        />
+        <View style={styles.headerHairline} pointerEvents="none" />
+
+        <View style={styles.header}>
+          <View>
+            <Text style={styles.headerTitle}>Study Rooms</Text>
+            <Text style={styles.headerSubtitle}>Join peers and study together</Text>
+          </View>
+          <Pressable style={styles.createButton}>
+            <Feather name="plus" size={24} color={colors.background} />
+          </Pressable>
+        </View>
+      </View>
+    </View>
   );
 }
 
@@ -134,6 +157,27 @@ const createStyles = (colors: any) => StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  fixedHeader: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: spacing.xl,
+    paddingBottom: 12,
+    overflow: 'hidden',
+    zIndex: 10,
+  },
+  headerBlur: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  headerHairline: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(127, 127, 127, 0.18)',
   },
   container: {
     flex: 1,
@@ -146,7 +190,7 @@ const createStyles = (colors: any) => StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: spacing.xxxl,
+    marginBottom: 0,
   },
   headerTitle: {
     fontSize: typography.sizes.xxl,

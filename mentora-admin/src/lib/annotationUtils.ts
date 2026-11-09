@@ -164,8 +164,17 @@ export function reconcileAssessment(assessment: AssessmentResult, officialMaxSco
     const max = Number(sp.max_score) || 1;
     sp.score = Math.max(0, Math.min(Number(sp.score) || 0, max));
   });
-  const computedScore = subparts.reduce((sum: number, sp: any) => sum + (Number(sp.score) || 0), 0);
-  const computedSubpartsMax = subparts.reduce((sum: number, sp: any) => sum + (Number(sp.max_score) || 0), 0);
+  const qSummaries: any[] = Array.isArray((assessment as any).question_summaries)
+    ? (assessment as any).question_summaries
+    : [];
+  const isMultiQuestionBooklet = qSummaries.length > 0 && subparts.length === 0;
+
+  const computedScore = isMultiQuestionBooklet
+    ? Number(assessment.total_score ?? assessment.score ?? qSummaries.reduce((s: number, q: any) => s + (Number(q.score) || 0), 0))
+    : subparts.reduce((sum: number, sp: any) => sum + (Number(sp.score) || 0), 0);
+  const computedSubpartsMax = isMultiQuestionBooklet
+    ? qSummaries.reduce((s: number, q: any) => s + (Number(q.max_score) || 0), 0)
+    : subparts.reduce((sum: number, sp: any) => sum + (Number(sp.max_score) || 0), 0);
 
   // Preserve official question max score from paper repository if provided, or current total_max_score
   const effectiveMaxScore = officialMaxMarks(assessment, officialMaxScore, computedSubpartsMax);
@@ -430,21 +439,44 @@ function finalizeAnnotationsList(
   });
 
   // Re-anchor each badge directly to the student answer line (line_y) of its subpart
+  // and keep badge text & marks strictly aligned with the subpart's current score
   badges.forEach((b) => {
     const bKey = (b.subpart_label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
     const matchedSp = subpartsList.find((sp: any) => {
       const spKey = (sp.part_label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
       return spKey === bKey || spKey.endsWith(bKey) || bKey.endsWith(spKey);
     });
-    if (matchedSp && typeof matchedSp.line_y === 'number' && matchedSp.line_y >= 40) {
-      const targetY = Math.max(35, Math.min(matchedSp.line_y - 12, 920));
-      if (b.box_2d) {
-        const h = Math.max(25, b.box_2d[2] - b.box_2d[0]);
-        b.box_2d[0] = targetY;
-        b.box_2d[2] = targetY + h;
+    if (matchedSp) {
+      const spScore = Number(matchedSp.score ?? 0);
+      const spMax = Number(matchedSp.max_score ?? 1);
+      b.text = `(${spScore}/${spMax})`;
+      b.comment = spScore > 0
+        ? matchedSp.marks_awarded?.[0] || `Part ${matchedSp.part_label}: ${spScore}/${spMax} marks`
+        : matchedSp.deductions?.[0] || `Part ${matchedSp.part_label}: 0/${spMax} marks`;
+
+      // If marks were awarded, purge any stale cross marks belonging to this subpart
+      if (spScore > 0) {
+        for (let idx = otherMarks.length - 1; idx >= 0; idx--) {
+          const m = otherMarks[idx];
+          if (m.type === 'cross' || m.text === '✗') {
+            const mKey = (m.subpart_label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+            if (mKey === bKey || mKey.endsWith(bKey) || bKey.endsWith(mKey)) {
+              otherMarks.splice(idx, 1);
+            }
+          }
+        }
       }
-      if (b.bbox) {
-        b.bbox.y = targetY / 1000;
+
+      if (typeof matchedSp.line_y === 'number' && matchedSp.line_y >= 40) {
+        const targetY = Math.max(35, Math.min(matchedSp.line_y - 12, 920));
+        if (b.box_2d) {
+          const h = Math.max(25, b.box_2d[2] - b.box_2d[0]);
+          b.box_2d[0] = targetY;
+          b.box_2d[2] = targetY + h;
+        }
+        if (b.bbox) {
+          b.bbox.y = targetY / 1000;
+        }
       }
     }
   });

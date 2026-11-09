@@ -109,7 +109,7 @@ function parsePartLabel(raw: string): { label: string; canonical: string } | nul
  * ('N <Capital>...' or 'N (a)...'), part lines ('(a) text ... [4]'), and
  * accumulate multi-line part text until the next part/question.
  */
-export function parseSkeleton(pages: string[]): SkeletonQuestion {
+export function parseSkeleton(pages: string[]): PaperSkeleton {
     const questions: SkeletonQuestion[] = [];
     const sectionOf = (line: string): string | null => {
         const m = line.match(/^\s*SECTION\s+([A-Z])/i);

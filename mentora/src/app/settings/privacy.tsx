@@ -35,7 +35,7 @@ export default function PrivacyPolicyScreen() {
             
             <Text style={styles.h1}>1. Information We Collect</Text>
             <Text style={styles.paragraph}>
-              Mentora collects information you provide directly to us when you create an account, such as your name, email address, and academic syllabus (e.g., ZIMSEC, Cambridge). We also collect performance data, such as quiz scores and mock exam results, to power our AI Exam Intelligence.
+              Ziviso collects information you provide directly to us when you create an account, such as your name, email address, and academic syllabus (e.g., ZIMSEC, Cambridge). We also collect performance data, such as quiz scores and mock exam results, to power our AI Exam Intelligence.
             </Text>
             
             <Text style={styles.h1}>2. How We Use Your Information</Text>
@@ -45,7 +45,7 @@ export default function PrivacyPolicyScreen() {
 
             <Text style={styles.h1}>3. Information Sharing</Text>
             <Text style={styles.paragraph}>
-              Mentora does not sell your personal data to third parties. We may share aggregated, non-personally identifiable information publicly and with our partners (such as overall pass rates by syllabus). If you participate in Live Rooms or the Career Hub, your profile information (like your username) will be visible to other members.
+              Ziviso does not sell your personal data to third parties. We may share aggregated, non-personally identifiable information publicly and with our partners (such as overall pass rates by syllabus). If you participate in Live Rooms or the Career Hub, your profile information (like your username) will be visible to other members.
             </Text>
 
             <Text style={styles.h1}>4. Data Security</Text>

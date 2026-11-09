@@ -390,7 +390,7 @@ function buildSubpartGradingPrompt(
   rows: string[],
   marksAvailable: number | null
 ): string {
-  return `You are the Mentora Senior Chief Examiner marking ONE SUBPART of Question ${qNum} of the target paper.
+  return `You are the Ziviso Senior Chief Examiner marking ONE SUBPART of Question ${qNum} of the target paper.
 
 TARGET SUBPART: (${subpartLabel}) — marks available: ${marksAvailable ?? 'as printed in the scheme'}.
 OFFICIAL RUBRIC ROWS FOR THIS SUBPART (the menu of awardable points / level descriptors):
@@ -818,7 +818,7 @@ async function groundEvaluatedMarks(
     };
   });
 
-  const groundingPrompt = `You are the Mentora Visual Grounding & Spatial Positioning Agent.
+  const groundingPrompt = `You are the Ziviso Visual Grounding & Spatial Positioning Agent.
 The Senior Chief Examiner has evaluated Question ${qNum}.
 Your SOLE TASK is visual OCR localization on this student's exam sheet.
 DO NOT re-grade or change scores. Focus 100% on pinpointing the precise pixel coordinates [ymin, xmin, ymax, xmax] (0-1000 integer scale, top-left [0,0] to bottom-right [1000,1000]).
@@ -895,7 +895,7 @@ Return only JSON.`;
   try {
     const res = await executeChatCompletion(apiKey, modelCandidates, {
       messages: [
-        { role: "system", content: "You are the Mentora Visual Grounding & Spatial Positioning Agent. Output strictly valid JSON." },
+        { role: "system", content: "You are the Ziviso Visual Grounding & Spatial Positioning Agent. Output strictly valid JSON." },
         {
           role: "user",
           content: [
@@ -1454,7 +1454,7 @@ OFFICIAL MARK SCHEME STATUS:
 - ANTI-INVENTED-TARGET RULE (CRITICAL): NEVER invent specific numeric target values (angles, voltages, currents, wavelengths, etc.) that are not stated in the provided question content or context. If the student's working is mathematically and scientifically correct, AWARD the mark (Benefit of the Doubt). Do NOT deduct marks for rounding differences (e.g. 12.5° vs 12°), and do NOT reject a correct answer against a target value you invented yourself.
 ======================================================================`;
 
-  return `You are the Mentora Senior Chief Examiner and Master Pedagogical Teacher.
+  return `You are the Ziviso Senior Chief Examiner and Master Pedagogical Teacher.
 You evaluate student answers under the guiding philosophy:
 "MARK LIKE AN EXAMINER, EXPLAIN LIKE A TEACHER, AND ANNOTATE LIKE A PROFESSIONAL TEACHER."
 
@@ -2158,7 +2158,7 @@ ${ms}
 
       // PASS 1: Pedagogical Examiner Agent (focused marking with gpt-6-luna)
       console.log(`Single-page: Running Pass 1 (Pedagogical Examiner Agent with gpt-6-luna)...`);
-      const singleTargetedPrompt = `You are the Mentora Senior Chief Examiner and Master Pedagogical Teacher.
+      const singleTargetedPrompt = `You are the Ziviso Senior Chief Examiner and Master Pedagogical Teacher.
 You evaluate student exam answers under the guiding philosophy:
 "MARK LIKE AN EXAMINER, EXPLAIN LIKE A TEACHER, AND ANNOTATE LIKE A PROFESSIONAL TEACHER."
 
@@ -2250,7 +2250,7 @@ Return strictly valid JSON matching this schema:
 Return only JSON.`;
 
       const messages: any[] = [
-        { role: "system", content: "You are the Mentora Senior Chief Examiner. Mark every subpart strictly according to the official mark scheme with vision accuracy. Output strictly valid JSON." }
+        { role: "system", content: "You are the Ziviso Senior Chief Examiner. Mark every subpart strictly according to the official mark scheme with vision accuracy. Output strictly valid JSON." }
       ];
 
       if (singleImageUrl) {
@@ -2480,7 +2480,7 @@ Return only JSON.`;
     const activeTopic = context?.topic || "";
     const hasOfficialScheme = !!(activeMarkScheme && activeMarkScheme.trim().length > 15 && !activeMarkScheme.includes("Method Mark (M1): Accurate application"));
 
-    const systemPrompt = `You are the Mentora Question Paper AI Tutor, a friendly, intelligent, and expert human-like tutor for ${subject} (${curriculum}).
+    const systemPrompt = `You are the Ziviso Question Paper AI Tutor, a friendly, intelligent, and expert human-like tutor for ${subject} (${curriculum}).
 You are actively helping a student working through the exam paper: "${paperTitle}".
 
 ACTIVE CONTEXT:

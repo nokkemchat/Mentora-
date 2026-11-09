@@ -33,6 +33,7 @@ export interface SlicedPaper {
         variant: string;
     };
     answer_instructions?: string;
+    total_questions_count?: number;
     answer_rules?: AnswerRules;
     questions: SlicedQuestion[];
 }
@@ -420,6 +421,17 @@ Each input image has an overlaid coordinate grid with:
 - Blue vertical lines marking X from 0.05 to 0.95 (e.g., X:0.10, X:0.20, X:0.30...)
 Use these grid markings to read the exact fractional coordinates (0.0 to 1.0) of each visual asset.
 
+CRITICAL BOUNDING BOX EXTRACTION RULES FOR VISUAL ASSETS:
+1. COMPLETE INCLUSION (DO NOT CUT OFF ANY PART OF THE DIAGRAM):
+   - The bounding_box MUST completely enclose ALL components of the visual figure:
+     * In reaction schemes and chemical structures: MUST include ALL reactants, atoms, bonds, displayed formulas on the far left (e.g., the complete ethene molecule C=C and all hydrogens), all reaction arrows, conditions/catalysts, all intermediate and final products on the right, and the caption below (e.g., "Fig. 4.1").
+     * In apparatus/experiments: MUST include all flasks, tubes, stands, stoppers, labels, pointer arrows, and liquids from top to bottom and left to right.
+     * In tables: MUST include all borders, headers, and rows.
+     * In graphs: MUST include axes, axis titles, units, and curves/data points.
+2. STRICT EXCLUSION OF PROMPT TEXT AND ANSWER LINES:
+   - NEVER include the printed question text above the diagram (e.g., "4 (a) Fig. 4.1 shows how an organic compound, Q, is produced from ethene."). ymin must start strictly BELOW the question text sentence.
+   - NEVER include sub-question labels, questions, or answer dotted lines below the diagram (e.g., "(i) Name..."). ymax must end immediately below the figure caption.
+
 VISUAL ASSET PLACEMENT RULES:
 1. QUESTION STEM APPARATUS / DIAGRAMS (Root "visual_assets"):
    - ONLY a diagram, table, or figure that appears BEFORE or ABOVE sub-question (a) AND is introduced by the question stem text belongs to the question STEM. Place it in the root "visual_assets" array.
@@ -430,7 +442,8 @@ VISUAL ASSET PLACEMENT RULES:
 
 STRICT BOUNDING BOX RULES:
 1. COMPLETE VERTICAL COVERAGE (NEVER CUT OFF APPARATUS TOPS):
-   - For ymin: Must encompass the introductory figure sentence (e.g., "Fig. 1.1 shows the ball falling through the oil.") OR start cleanly above the topmost rim, meniscus, opening, or stand of the apparatus/container. Under NO circumstance start halfway down or cut off the top of a test tube, beaker, circuit, or object.
+   - For ymin: Must start cleanly above the topmost rim, meniscus, opening, atom, bond, or stand of the apparatus/container/structure, and strictly BELOW the introductory question prompt text. Under NO circumstance start halfway down or cut off the top of a test tube, beaker, circuit, molecule, or object.
+   - For ymax: Must end immediately below the figure caption (e.g. "Fig. 1.1") or bottom-most label, and strictly ABOVE any sub-questions like "(i)", "(a)", or answer lines.
    - For ymax: Must include the figure caption line (e.g., "Fig. 1.1", "Fig. 3.1") located directly below the drawing.
    - STRICTLY STOP BEFORE SUBQUESTIONS: Do NOT include question text like "(a) Define acceleration", dotted answer lines, or mark numbers "[1]". The visual asset stops immediately below the "Fig. X.X" caption!
 2. COMPLETE HORIZONTAL COVERAGE (NEVER CUT OFF LABELS/ARROWS):
