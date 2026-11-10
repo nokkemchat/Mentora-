@@ -23,6 +23,35 @@ function normalizeQNum(qStr: string): string {
     .trim();
 }
 
+function toText(val: any): string {
+  if (typeof val === "string") return val;
+  if (Array.isArray(val)) {
+    return val
+      .map((item) => {
+        if (typeof item === "string") return item;
+        if (item && typeof item === "object") {
+          const subpart = item.subpart || item.part || item.question || item.number || "";
+          const mark = item.mark || item.mark_code || item.marks || "";
+          const criteria = item.criteria || item.answer || item.text || item.description || item.official_mark_scheme || "";
+          if (mark || criteria) {
+            const markStr = mark ? (String(mark).startsWith("[") ? String(mark) : `[${mark}]`) : "";
+            return `${subpart ? subpart + " " : ""}${markStr ? markStr + " " : ""}${criteria}`.trim();
+          }
+          return Object.values(item).filter(Boolean).join(" ");
+        }
+        return String(item ?? "");
+      })
+      .filter(Boolean)
+      .join("\n");
+  }
+  if (val && typeof val === "object") {
+    return Object.entries(val)
+      .map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : v}`)
+      .join("\n");
+  }
+  return val != null ? String(val) : "";
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -192,11 +221,11 @@ Return ONLY raw JSON:
         const rawContent = aiData.choices?.[0]?.message?.content || "{}";
         const parsed = JSON.parse(rawContent);
         return {
-          question_number: parsed.question_number || String(q.question_number),
-          official_mark_scheme: parsed.official_mark_scheme || "",
-          ai_worked_solution: parsed.ai_worked_solution || "",
-          common_mistakes: parsed.common_mistakes || "",
-          examiner_tips: parsed.examiner_tips || "",
+          question_number: String(parsed.question_number || q.question_number),
+          official_mark_scheme: toText(parsed.official_mark_scheme),
+          ai_worked_solution: toText(parsed.ai_worked_solution),
+          common_mistakes: toText(parsed.common_mistakes),
+          examiner_tips: toText(parsed.examiner_tips),
         };
       } catch (qErr) {
         console.error(`Rubric extraction error for Q${q.question_number}:`, qErr);
@@ -248,8 +277,9 @@ Return ONLY raw JSON:
     const rubricDetails: Array<{ question_number: string; rubric_rows: number; rubric_marks_total: number; official_marks: number | null; marks_match: boolean }> = [];
 
     // Count total marks in a structured rubric by summing its [MARKCODE] tokens (B1/C1/A1/M1...)
-    const countRubricMarks = (rubric: string): { rows: number; total: number } => {
-      const rows = rubric.split("\n").filter((l: string) => /\[[A-Z]\s*\d+\s*(?:×\s*\d+)?\]/.test(l));
+    const countRubricMarks = (rubric: any): { rows: number; total: number } => {
+      const text = toText(rubric);
+      const rows = text.split("\n").filter((l: string) => /\[[A-Z]\s*\d+\s*(?:×\s*\d+)?\]/.test(l));
       let total = 0;
       for (const row of rows) {
         const marksMatch = row.match(/\[[A-Z]\s*(\d+)\s*(?:×\s*(\d+))?\]/);
@@ -273,8 +303,13 @@ Return ONLY raw JSON:
         continue;
       }
 
+      const cleanRubric = toText(sol.official_mark_scheme);
+      const cleanSolution = toText(sol.ai_worked_solution);
+      const cleanMistakes = toText(sol.common_mistakes);
+      const cleanTips = toText(sol.examiner_tips);
+
       // Verify: the rubric's marking points should sum to the question's official marks
-      const rubricCount = countRubricMarks(sol.official_mark_scheme || "");
+      const rubricCount = countRubricMarks(cleanRubric);
       const officialMarks = targetQ.marks ? Number(targetQ.marks) : null;
       const marksMatch = officialMarks === null ? true : rubricCount.total === officialMarks;
       if (!marksMatch) {
@@ -293,10 +328,10 @@ Return ONLY raw JSON:
         .upsert(
           {
             question_id: targetQ.id,
-            official_mark_scheme: sol.official_mark_scheme || "",
-            ai_worked_solution: sol.ai_worked_solution || "",
-            common_mistakes: sol.common_mistakes || "",
-            examiner_tips: sol.examiner_tips || "",
+            official_mark_scheme: cleanRubric,
+            ai_worked_solution: cleanSolution,
+            common_mistakes: cleanMistakes,
+            examiner_tips: cleanTips,
           },
           { onConflict: "question_id" }
         );

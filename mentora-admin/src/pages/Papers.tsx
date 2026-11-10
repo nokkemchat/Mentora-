@@ -122,7 +122,16 @@ export default function Papers() {
       const { data, error } = await supabase.functions.invoke('process-marking-scheme', {
         body: { paper_id: paperId, mark_scheme_url: msUrl }
       });
-      if (error) throw error;
+      if (error) {
+        let serverMsg = error.message;
+        try {
+          if (error.context && typeof error.context.json === 'function') {
+            const body = await error.context.json();
+            if (body?.error) serverMsg = body.error;
+          }
+        } catch (_) {}
+        throw new Error(serverMsg);
+      }
       alert(`Marking scheme processed successfully! ${data?.solutions_saved || ''} solutions mapped.`);
       await fetchPapers();
     } catch (err: any) {
