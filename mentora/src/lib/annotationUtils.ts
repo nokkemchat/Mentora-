@@ -365,6 +365,19 @@ export function ensureAssessmentAnnotations(assessment: AssessmentResult, pageIn
     }
   }
 
+  // === Filter out foreign/mismatched annotations from another question ===
+  finalResult = finalResult.filter((a: any) => {
+    const comment = (a.comment || a.teacher_correction || a.text || '').toLowerCase();
+    if (comment.includes('corresponds to question') || 
+        comment.includes('answers for question') || 
+        comment.includes('pertains to question') || 
+        comment.includes('instead of question') ||
+        comment.includes('no work for question')) {
+      return false;
+    }
+    return true;
+  });
+
   return finalResult;
 }
 

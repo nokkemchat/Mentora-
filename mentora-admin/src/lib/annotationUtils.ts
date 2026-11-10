@@ -361,6 +361,19 @@ export function ensureAssessmentAnnotations(assessment: AssessmentResult, pageIn
     }
   }
 
+  // === Filter out foreign/mismatched annotations from another question ===
+  finalResult = finalResult.filter((a: any) => {
+    const comment = (a.comment || a.teacher_correction || a.text || '').toLowerCase();
+    if (comment.includes('corresponds to question') || 
+        comment.includes('answers for question') || 
+        comment.includes('pertains to question') || 
+        comment.includes('instead of question') ||
+        comment.includes('no work for question')) {
+      return false;
+    }
+    return true;
+  });
+
   // === Booklet-total relocation (legacy markings) ===
   // Older markings stored the "Booklet Total" stamp on the LAST page (bottom-right).
   // It belongs at the TOP-LEFT of the FIRST page: strip it from wherever it was
@@ -384,12 +397,24 @@ export function ensureAssessmentAnnotations(assessment: AssessmentResult, pageIn
   // Stacked upward so multiple questions on one page never overlap.
   const hasStoredQuestionStamps = finalResult.some((a: any) => /^Q\d+\s*:/.test(a.text || ''));
   if (!hasStoredQuestionStamps) {
-    const questionsForPage = ((assessment as any).question_summaries || []).filter((qs: any) =>
-      !qs.unattempted &&
-      qs.unmatched !== true &&
-      (Number(qs.max_score) || 0) > 0 &&
-      (qs.spanned_pages || []).includes(targetPageIndex)
-    );
+    const questionsForPage = ((assessment as any).question_summaries || []).filter((qs: any) => {
+      if (qs.unattempted || qs.unmatched === true || (Number(qs.max_score) || 0) <= 0) return false;
+      if (!(qs.spanned_pages || []).includes(targetPageIndex)) return false;
+      // If all subparts of this question on this page are foreign question notices or unattempted, exclude it!
+      const pageSubparts = (qs.subparts || []).filter((sp: any) => sp.page_index === targetPageIndex);
+      if (pageSubparts.length > 0) {
+        const allForeign = pageSubparts.every((sp: any) => {
+          const note = (sp.teacher_correction_note || sp.deductions?.[0] || '').toLowerCase();
+          return note.includes('corresponds to question') ||
+                 note.includes('answers for question') ||
+                 note.includes('pertains to question') ||
+                 note.includes('instead of question') ||
+                 note.includes('no work for question');
+        });
+        if (allForeign) return false;
+      }
+      return true;
+    });
     questionsForPage.forEach((qs: any, qIdx: number) => {
       const bottomOffset = 2.5 + qIdx * 3.5; // % of page height, stacked upward
       finalResult.push({

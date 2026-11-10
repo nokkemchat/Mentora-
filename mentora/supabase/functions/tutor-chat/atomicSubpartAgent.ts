@@ -604,6 +604,8 @@ export async function evaluateBookletAtomically(
   }
 
   const tasks: TaskWithContext[] = [];
+  const unattemptedQuestions: any[] = [];
+  const hasFingerprintCoverage = Array.isArray(layout?.page_fingerprints) && layout.page_fingerprints.length > 0;
 
   officialPaperQuestions.forEach((oq: any, qIdx: number) => {
     const qNum = String(oq.question_number || (qIdx + 1)).trim();
@@ -613,14 +615,68 @@ export async function evaluateBookletAtomically(
 
     const subparts = extractQuestionSubparts(qNum, qMarks, ms, dbParts);
 
-    // Look for any known page for this question as fallback
-    let fallbackPageIndex = -1;
+    // Look for any known page for this question
+    let matchedPageIndex = -1;
     if (layout?.page_fingerprints) {
       const matchedPage = layout.page_fingerprints.find((fp: any) =>
         Array.isArray(fp.detected_questions) && fp.detected_questions.includes(qNum)
       );
-      if (matchedPage) fallbackPageIndex = matchedPage.raw_page_index;
+      if (matchedPage) matchedPageIndex = matchedPage.raw_page_index;
     }
+
+    // Check if any subparts have explicit locations from fingerprinter layout
+    let subpartLocated = false;
+    subparts.forEach((sp) => {
+      const subKey = `${qNum}:${sp.canonical_label}`;
+      if (layout?.subpart_locations?.has(subKey)) {
+        subpartLocated = true;
+      }
+    });
+
+    // If booklet pages were fingerprinted and this question was NOT detected anywhere in the booklet:
+    // This question was NOT attempted by the candidate (e.g. skipped optional question in Section B).
+    // NEVER fall back to an arbitrary page (which dumps unattempted questions on top of other questions)!
+    if (hasFingerprintCoverage && matchedPageIndex < 0 && !subpartLocated) {
+      console.log(`[AtomicBookletEvaluator] Question ${qNum} not present on any page in booklet — marking as unattempted.`);
+      unattemptedQuestions.push({
+        identified_question_number: qNum,
+        question_number: qNum,
+        identified_topic: oq.topic || "Examination Script",
+        score: 0,
+        total_score: 0,
+        max_score: qMarks,
+        total_max_score: qMarks,
+        percentage: 0,
+        subparts: subparts.map(sp => ({
+          question_number: qNum,
+          part_label: sp.part_label,
+          canonical_label: sp.canonical_label,
+          score: 0,
+          max_score: sp.marks,
+          line_y: 500,
+          page_index: -1,
+          student_answer_detected: "",
+          marks_awarded: [],
+          deductions: [`Question ${qNum} not attempted`],
+          teacher_correction_note: "",
+          constructive_correction: "",
+          mistake_details: "Unattempted",
+          marking_points: [],
+          unattempted: true
+        })),
+        spanned_pages: [],
+        start_page: null,
+        end_page: null,
+        overall_feedback: `Question ${qNum} was not attempted in this submission.`,
+        examiner_model_solution: "",
+        recommended_next_step: "",
+        unattempted: true,
+        model_used: "unattempted-detector"
+      });
+      return;
+    }
+
+    let fallbackPageIndex = matchedPageIndex;
     if (fallbackPageIndex < 0) {
       fallbackPageIndex = Math.min(canonicalImages.length - 1, Math.max(0, qIdx));
     }
@@ -692,10 +748,23 @@ export async function evaluateBookletAtomically(
 
     grandTotalScore += finalQScore;
 
-    const spannedPages = Array.from(new Set(deduplicatedSubparts.map(sp => sp.page_index)))
+    const validSubparts = deduplicatedSubparts.filter((sp) => {
+      if ((sp as any).unattempted || sp.page_index < 0) return false;
+      const note = (sp.teacher_correction_note || "").toLowerCase();
+      if (note.includes("corresponds to question") ||
+          note.includes("instead of question") ||
+          note.includes("pertains to question") ||
+          note.includes("no work for question")) {
+        return false;
+      }
+      return true;
+    });
+
+    const spannedPages = Array.from(new Set(validSubparts.map(sp => sp.page_index)))
       .filter((p: number) => !isNaN(p) && p >= 0 && p < canonicalImages.length);
 
-    const safeSpanned = spannedPages.length > 0 ? spannedPages : [0];
+    const safeSpanned = spannedPages;
+    const isUnattempted = safeSpanned.length === 0 && finalQScore === 0;
 
     const allDeductions = deduplicatedSubparts.flatMap(sp => sp.deductions).filter(Boolean);
     const feedbackStr = allDeductions.length > 0
@@ -713,13 +782,21 @@ export async function evaluateBookletAtomically(
       percentage: qMax > 0 ? Math.round((finalQScore / qMax) * 100) : 0,
       subparts: deduplicatedSubparts,
       spanned_pages: safeSpanned,
-      start_page: Math.min(...safeSpanned),
-      end_page: Math.max(...safeSpanned),
+      start_page: safeSpanned.length > 0 ? Math.min(...safeSpanned) : null,
+      end_page: safeSpanned.length > 0 ? Math.max(...safeSpanned) : null,
       overall_feedback: feedbackStr,
       examiner_model_solution: "",
       recommended_next_step: "",
+      unattempted: isUnattempted,
       model_used: "atomic-subpart-engine"
     });
+  });
+
+  const combinedEvaluations = [...questionEvaluations, ...unattemptedQuestions];
+  combinedEvaluations.sort((a, b) => {
+    const na = parseInt(String(a.question_number).replace(/\D/g, ''), 10) || 0;
+    const nb = parseInt(String(b.question_number).replace(/\D/g, ''), 10) || 0;
+    return na - nb;
   });
 
   const finalPercentage = grandTotalMax > 0
@@ -727,7 +804,7 @@ export async function evaluateBookletAtomically(
     : 0;
 
   return {
-    questionEvaluations,
+    questionEvaluations: combinedEvaluations,
     allSubparts: evaluatedSubparts,
     grandTotalScore,
     grandTotalMax,
@@ -761,10 +838,22 @@ export function synthesizeBookletAnnotations(
     });
   }
 
-  // Group subparts by page index
+  // Group subparts by page index (only including valid, attempted subparts)
   const subpartsByPage = new Map<number, AtomicSubpartOutput[]>();
   subparts.forEach((sp) => {
     const p = sp.page_index;
+    if (typeof p !== 'number' || p < 0 || p >= canonicalImages.length) return;
+    if ((sp as any).unattempted) return;
+
+    // Filter out annotations that are explicit mismatch notices from another question
+    const note = (sp.teacher_correction_note || "").toLowerCase();
+    const isForeignQuestion = 
+      note.includes("corresponds to question") ||
+      note.includes("instead of question") ||
+      note.includes("pertains to question") ||
+      note.includes("no work for question");
+    if (isForeignQuestion) return; // Do not stamp annotations on the wrong question's page!
+
     if (!subpartsByPage.has(p)) subpartsByPage.set(p, []);
     subpartsByPage.get(p)!.push(sp);
   });

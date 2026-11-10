@@ -110,7 +110,7 @@ INSTRUCTIONS:
 1. PRINTED PAGE NUMBER:
    - Identify the printed page number on the sheet if visible (e.g. at the top or bottom of the page).
 2. QUESTIONS DETECTED:
-   - Identify all question numbers printed on this sheet (e.g. Question 1, 2, ..., 10).
+   - Identify all question numbers printed or handwritten by the student on this sheet (e.g. Question 1, 2, ..., 12, '12 (a)', 'Q4', etc.).
    - ONLY match questions from the TARGET QUESTIONS list above.
 3. SUBPARTS DETECTED:
    - Identify every subpart printed or attempted on this sheet (e.g. (a), (b)(i), (b)(ii), (c), etc.).

@@ -131,8 +131,18 @@ export async function generateMarkedImageFile({
     }
 
     // 7. Paint each red ink annotation onto the bitmap.
-    // ONLY render annotations the AI actually returned — never synthesize fallback positions.
-    const activeAnnotations = annotations && annotations.length > 0 ? annotations : [];
+    // ONLY render annotations for this page — filter out unattempted / foreign question notices.
+    const activeAnnotations = (annotations && annotations.length > 0 ? annotations : []).filter((ann) => {
+      const comment = ((ann as any).comment || ann.text || '').toLowerCase();
+      if (comment.includes('corresponds to question') || 
+          comment.includes('answers for question') || 
+          comment.includes('pertains to question') || 
+          comment.includes('instead of question') ||
+          comment.includes('no work for question')) {
+        return false;
+      }
+      return true;
+    });
 
     activeAnnotations.forEach((ann, idx) => {
       let ymin = 120 + idx * 95;
