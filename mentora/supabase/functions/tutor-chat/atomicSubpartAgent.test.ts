@@ -314,6 +314,42 @@ async function main() {
     `Multi-level nested & detached DB subparts deduplicated cleanly (got ${nestedSubparts.map(s => `${s.canonical_label}:${s.marks}`).join(',')})`
   );
 
+  // [7] Anti-hallucination guard strips copied scheme text that is absent from pageTranscript
+  const fabricatedChat = async () => ({
+    ok: true,
+    data: {
+      choices: [{
+        message: {
+          content: JSON.stringify({
+            student_answer_detected: '$294.60',
+            transcription_notes: 'Hourly calculation',
+            answer_line_y: 800,
+            verdicts: [
+              { criterion_index: 0, satisfied: true, evidence: '30 ÷ 100 × 11.5' },
+              { criterion_index: 1, satisfied: true, evidence: '$59.80' }
+            ],
+            teacher_correction_note: '',
+            constructive_correction: ''
+          })
+        }
+      }]
+    }
+  });
+  const guardOut = await evaluateSubpartAtomically(
+    {
+      questionNumber: '1',
+      partLabel: '(e)',
+      canonicalLabel: 'e',
+      marksAvailable: 3,
+      officialMarkScheme: '(e) [M1] 30 ÷ 100 × 11.5 oe\n(e) [B2] 59.8 seen',
+      canonicalPageIndex: 0,
+      pageImageUrl: 'data:image/jpeg;base64,GUARD_IMG',
+      pageTranscript: 'Weekly pay: Wednesday 18:00 - 22:00 = 4 × $14.95 = $59.80, Friday 5.5 × $11.50 = $63.25, Total = $294.60.'
+    },
+    fabricatedChat
+  );
+  assert(guardOut.score === 2 && guardOut.verdicts?.[0]?.satisfied === false, `Stripped ungrounded scheme quote (30 ÷ 100 × 11.5) while keeping grounded $59.80 -> score 2 (got ${guardOut.score})`);
+
   console.log(`\n══════════════════════════════════════`);
   console.log(`RESULTS: ${passed} passed, ${failed} failed`);
   console.log(`══════════════════════════════════════\n`);

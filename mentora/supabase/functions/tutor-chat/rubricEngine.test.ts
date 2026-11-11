@@ -20,7 +20,8 @@ import {
   ParsedRubric,
   isAlgebraicMatch,
   isVerdictContradicted,
-  verdictNeedsModeratorAudit
+  verdictNeedsModeratorAudit,
+  isFabricatedSchemeQuote
 } from './rubricEngine.ts';
 
 let passed = 0, failed = 0;
@@ -394,6 +395,28 @@ const BRACKET_LEVEL_SCHEME = `
 const bracketRub = parseRubric('b', BRACKET_LEVEL_SCHEME);
 const bracketRes = computeSubpartScore(bracketRub, [{ criterionIndex: 1, satisfied: true, evidence: 'Clear explanation' }], 6);
 assert(bracketRes.score === 6, `extracts bracketed [6] mark value in level descriptor (got ${bracketRes.score})`);
+
+console.log('\n[24] LATEX FRACTION SCALAR SUPPORT & FABRICATED SCHEME QUOTE GUARD:');
+const FRAC_SCHEME = `
+(a) [A1] 105/360 oe
+`;
+const fracRub = parseRubric('a', FRAC_SCHEME);
+assert(isVerdictContradicted(fracRub.criteria[0], '\\frac{105}{360}') === false, 'accepts LaTeX \\frac{105}{360} for 105/360 oe');
+assert(isVerdictContradicted(fracRub.criteria[0], '\\dfrac{7}{24}') === false, 'accepts equivalent reduced LaTeX \\dfrac{7}{24}');
+
+const sampleTranscript = 'Weekly pay: Wednesday 4 × $14.95 = $59.80, Friday 5.5 × $11.50 = $63.25, Sunday 5 hours × $11.50 = $57.50, Total = $294.60.';
+assert(
+  isFabricatedSchemeQuote('(4+4+5.5+5.5+5)×11.5 + (4+4)× (30 ÷ 100 × 11.5) oe', '(4+4+5.5+5.5+5)×11.5 + (4+4)× (30 ÷ 100 × 11.5)', sampleTranscript) === true,
+  'rejects fabricated mark-scheme formula not present in candidate transcript'
+);
+assert(
+  isFabricatedSchemeQuote('4 + 4 + 5.5 + 5.5 + 5 oe', '4 + 4 + 5.5 + 5.5 + 5', sampleTranscript) === false,
+  'preserves genuine numeric components that appear in candidate transcript'
+);
+assert(
+  isFabricatedSchemeQuote('-3.7 -2.7', '-3.7', 'From graph x ≈ -2.7 and x ≈ 3.7 so solutions are -2.7 and 3.7 (more context to satisfy transcript length check).') === true,
+  'rejects sign-flipped -3.7 copied from scheme when transcript has +3.7 and -2.7'
+);
 
 console.log(`\n══════════════════════════════════════`);
 console.log(`FINAL: ${passed} passed, ${failed} failed`);

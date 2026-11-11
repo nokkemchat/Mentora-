@@ -595,12 +595,19 @@ function parseScalarTargets(criterionText: string): ParsedNumericTargets | null 
   return singles.length > 0 || ranges.length > 0 ? { singles, ranges } : null;
 }
 
-/** Extracts numeric values (including simple fractions and HH:MM compact forms) from student evidence. */
+/** Extracts numeric values (including LaTeX/simple fractions and HH:MM compact forms) from student evidence. */
 function extractEvidenceNumbers(evidence: string): {
   numbers: number[];
   hasArithmeticDerivation: boolean;
 } {
-  const s = String(evidence || '').replace(/[\u2013\u2014\u2212]/g, '-').trim();
+  // Normalize Unicode minus signs and LaTeX fractions (\frac{a}{b}, \dfrac{a}{b}, \tfrac{a}{b})
+  const s = String(evidence || '')
+    .replace(/[\u2013\u2014\u2212]/g, '-')
+    .replace(/\\(?:d|t)?frac\s*\{([^}]+)\}\s*\{([^}]+)\}/g, '$1/$2')
+    .replace(/\\times/g, '×')
+    .replace(/\\div/g, '÷')
+    .replace(/[\s]+/g, ' ')
+    .trim();
   const hasArithmeticDerivation =
     /(?:\d|\))\s*[+*×÷^\\]\s*(?:\d|\(|[a-z])/i.test(s) ||
     /(?:\d|\))\s+-\s+(?:\d|\()/.test(s) ||
@@ -690,6 +697,67 @@ export function verdictNeedsModeratorAudit(row: RubricCriterion, evidence: strin
       });
       if (!hasAnyMatch) return true;
     }
+  }
+
+  return false;
+}
+
+/**
+ * Detects fabricated evidence where an LLM copied the mark-scheme criterion itself
+ * (including its exact numbers/formula) instead of quoting actual text from the
+ * candidate's canonical page transcript.
+ */
+export function isFabricatedSchemeQuote(
+  criterionText: string,
+  evidence: string,
+  pageTranscript?: string
+): boolean {
+  const ev = String(evidence || '').trim();
+  const tr = String(pageTranscript || '').trim();
+  const crit = String(criterionText || '').trim();
+  if (!ev || !crit || tr.length < 80) return false;
+
+  const normEv = normalizeMathExpression(ev);
+  const normCrit = normalizeMathExpression(crit);
+  const normTr = normalizeMathExpression(tr);
+
+  // If the normalized expression itself already appears verbatim in the transcript, it's genuine
+  if (normEv.length >= 3 && normTr.includes(normEv)) return false;
+
+  // Check whether the evidence closely mirrors the mark-scheme criterion
+  const evWords = stemmedContentWords(ev);
+  const critWords = stemmedContentWords(crit);
+  const evNums = extractEvidenceNumbers(ev).numbers;
+  const critNums = extractEvidenceNumbers(crit).numbers;
+
+  const mirrorsFormula =
+    normEv.length >= 4 &&
+    (normCrit === normEv || normCrit.includes(normEv) || (normCrit.length >= 6 && normEv.includes(normCrit)));
+  const wordHitRatio = evWords.length > 0
+    ? evWords.filter((w) => critWords.includes(w)).length / evWords.length
+    : 0;
+  const numHitRatio = evNums.length > 0
+    ? evNums.filter((n) => critNums.some((cn) => Math.abs(n - cn) <= 1e-5)).length / evNums.length
+    : 0;
+
+  const mirrorsCriterion =
+    evNums.length > 0
+      ? mirrorsFormula || (numHitRatio >= 0.85 && (evWords.length === 0 || wordHitRatio >= 0.6))
+      : normEv === normCrit && ev.length >= 25;
+
+  if (!mirrorsCriterion) return false;
+
+  // Now check if evidence is ungrounded in the transcript
+  if (evNums.length > 0) {
+    const trNums = extractEvidenceNumbers(tr).numbers;
+    const missingAnyNum = evNums.some((n) => !trNums.some((tn) => Math.abs(n - tn) <= 1e-5));
+    return missingAnyNum;
+  }
+
+  if (evWords.length > 0) {
+    const trLower = tr.toLowerCase();
+    const hasAnyWord = evWords.some((w) => trLower.includes(w.slice(0, Math.min(4, w.length))));
+    return !hasAnyWord;
   }
 
   return false;

@@ -22,6 +22,7 @@ import {
   canonicalLabel,
   isCalculationCriterion,
   verdictNeedsModeratorAudit,
+  isFabricatedSchemeQuote,
   ParsedRubric,
   RubricCriterion
 } from "./rubricEngine.ts";
@@ -582,6 +583,30 @@ OUTPUT STRICTLY VALID JSON (prefer Unicode math symbols × ÷ → ° ≤ ≥ π 
     const parsed = pass1.parsed;
     const res = pass1.res;
     if (parsed) {
+      const requiresVisualVerification = rubric.criteria.some((c: RubricCriterion) =>
+        /\b(?:graph|curve|plot|plotted|diagram|bar\s*chart|histogram|pie\s*chart|stem\s*and\s*leaf|bearing|scale\s*drawing|grid|shaded|triangle|polygon|sketch|table|drawn)\b/i.test(`${c.text} ${c.guidance || ''}`)
+      );
+
+      // Strip fabricated quotes where an LLM copied the mark scheme verbatim instead of the script
+      const sanitizePassVerdicts = (verdicts: any[]) => {
+        if (!hasStructuredCriteria || requiresVisualVerification || !pageTranscript || pageTranscript.trim().length < 80) {
+          return;
+        }
+        for (const v of verdicts) {
+          if (v?.satisfied !== true) continue;
+          const crit = rubric.criteria.find((c: RubricCriterion) => c.index === Number(v.criterion_index));
+          if (!crit) continue;
+          const ev = String(v.evidence || '');
+          if (isFabricatedSchemeQuote(crit.text, ev, pageTranscript)) {
+            console.log(`[AntiHallucination] Rejected ungrounded scheme quote on Q${questionNumber}${partLabel} criterion ${crit.index}: "${ev.slice(0, 60)}"`);
+            v.satisfied = false;
+            v.evidence = '';
+          }
+        }
+      };
+
+      if (Array.isArray(parsed.verdicts)) sanitizePassVerdicts(parsed.verdicts);
+
       // Check if any Pass 1 verdict looks mismatched against its criterion (e.g. wrong coordinate,
       // wrong numeric value, or mismatched single-word term) so it always gets moderated.
       const hasAuditFlag = hasStructuredCriteria && Array.isArray(parsed.verdicts) &&
@@ -603,9 +628,6 @@ OUTPUT STRICTLY VALID JSON (prefer Unicode math symbols × ÷ → ° ≤ ≥ π 
           hasAuditFlag);
 
       if (needsConsensus) {
-        const requiresVisualVerification = rubric.criteria.some((c: RubricCriterion) =>
-          /\b(?:graph|curve|plot|plotted|diagram|bar\s*chart|histogram|pie\s*chart|stem\s*and\s*leaf|bearing|scale\s*drawing|grid|shaded|triangle|polygon|sketch|table|drawn)\b/i.test(`${c.text} ${c.guidance || ''}`)
-        );
         const useTextVerifier = !requiresVisualVerification && Boolean(pageTranscript && pageTranscript.trim().length >= 80);
         const verifierContent: any[] = useTextVerifier
           ? [{
@@ -627,6 +649,7 @@ OUTPUT STRICTLY VALID JSON (prefer Unicode math symbols × ÷ → ° ≤ ≥ π 
         const parsed2 = pass2.parsed;
 
         if (parsed2 && Array.isArray(parsed2.verdicts)) {
+          sanitizePassVerdicts(parsed2.verdicts);
           const map1 = new Map<number, { satisfied: boolean; evidence: string }>();
           const map2 = new Map<number, { satisfied: boolean; evidence: string }>();
           parsed.verdicts.forEach((v: any) =>
@@ -657,6 +680,7 @@ OUTPUT STRICTLY VALID JSON (prefer Unicode math symbols × ÷ → ° ≤ ≥ π 
             const parsed3 = pass3.parsed;
             const map3 = new Map<number, { satisfied: boolean; evidence: string }>();
             if (parsed3 && Array.isArray(parsed3.verdicts)) {
+              sanitizePassVerdicts(parsed3.verdicts);
               parsed3.verdicts.forEach((v: any) =>
                 map3.set(Number(v.criterion_index), { satisfied: v.satisfied === true && Boolean(String(v.evidence || '').trim()), evidence: String(v.evidence || '').trim() })
               );
