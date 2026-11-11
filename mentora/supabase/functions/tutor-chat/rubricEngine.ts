@@ -659,10 +659,12 @@ export function computeSubpartScore(
   };
 }
 
-/** Extract a level's mark value from a descriptor like "Level 4: ... — 7–9". */
+/** Extract a level's mark value from a descriptor like "Level 4: ... — 7–9" or "... [6]". */
 function extractLevelValue(levelText: string): number | null {
   const range = levelText.match(/(\d{1,2})\s*[–-]\s*(\d{1,2})/);
   if (range) return parseInt(range[2], 10); // top of the range when the level is satisfied
+  const bracketed = levelText.match(/[\[\(]\s*(\d{1,2})(?:\s*marks?)?\s*[\]\)]/i);
+  if (bracketed) return parseInt(bracketed[1], 10);
   const single = levelText.match(/(\d{1,2})\s*(?:marks?|$)/i);
   return single ? parseInt(single[1], 10) : null;
 }
