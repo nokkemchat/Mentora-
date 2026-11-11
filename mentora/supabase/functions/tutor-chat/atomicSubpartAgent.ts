@@ -21,10 +21,96 @@ import {
   computeSubpartScore,
   canonicalLabel,
   isCalculationCriterion,
+  verdictNeedsModeratorAudit,
   ParsedRubric,
   RubricCriterion
 } from "./rubricEngine.ts";
 import { getSubpartSortWeight } from "./pageFingerprinter.ts";
+
+/**
+ * Parses a JSON object from an LLM completion string, recovering cleanly from
+ * markdown code fences, stray surrounding prose, trailing commas, and unescaped
+ * LaTeX backslashes inside string literals (e.g. "\times", "\frac", "\$").
+ */
+export function safeParseJsonObject(raw: unknown): any | null {
+  if (typeof raw !== "string") return null;
+  let text = raw.trim();
+  if (!text) return null;
+
+  text = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+  try {
+    return JSON.parse(text);
+  } catch {
+    // Extract outermost balanced JSON object ignoring braces inside quoted strings
+    const start = text.indexOf("{");
+    if (start === -1) return null;
+    let depth = 0;
+    let inStr = false;
+    let esc = false;
+    let end = -1;
+    for (let i = start; i < text.length; i++) {
+      const ch = text[i];
+      if (esc) { esc = false; continue; }
+      if (ch === "\\") { esc = true; continue; }
+      if (ch === '"') { inStr = !inStr; continue; }
+      if (!inStr) {
+        if (ch === "{") depth++;
+        else if (ch === "}") {
+          depth--;
+          if (depth === 0) { end = i; break; }
+        }
+      }
+    }
+    const candidate = end !== -1 ? text.slice(start, end + 1) : text.slice(start);
+    try {
+      return JSON.parse(candidate);
+    } catch {
+      // Repair invalid backslash escapes (e.g. \$, \times -> keep \\, fix lone \ followed by non-JSON escape char)
+      // plus trailing commas before } or ].
+      const repaired = candidate
+        .replace(/\\(?!["\\/bfnrt]|u[0-9a-fA-F]{4})/g, "\\\\")
+        .replace(/,\s*([}\]])/g, "$1");
+      try {
+        return JSON.parse(repaired);
+      } catch {
+        return null;
+      }
+    }
+  }
+}
+
+/**
+ * Invokes a chat completion with bounded retries whenever the gateway returns an
+ * empty choice or unparseable JSON (eliminates transient 0-mark crashes in batch runs).
+ */
+async function invokeJsonChat(
+  callChatCompletion: (messages: any[], temperature?: number, seed?: number) => Promise<any>,
+  messages: any[],
+  baseSeed: number,
+  maxAttempts = 3,
+  validator?: (parsed: any) => boolean,
+  retryDelayMs = 200
+): Promise<{ parsed: any | null; res: any; error: string }> {
+  let lastRes: any = null;
+  let lastErr = "";
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (attempt > 0 && retryDelayMs > 0) {
+      await new Promise((r) => setTimeout(r, retryDelayMs * attempt));
+    }
+    lastRes = await callChatCompletion(messages, 0.0, baseSeed + attempt);
+    const content = lastRes?.data?.choices?.[0]?.message?.content;
+    if (lastRes?.ok && typeof content === "string" && content.trim()) {
+      const parsed = safeParseJsonObject(content);
+      if (parsed && (!validator || validator(parsed))) {
+        return { parsed, res: lastRes, error: "" };
+      }
+      lastErr = `Malformed or incomplete JSON content: ${content.substring(0, 180)}`;
+    } else {
+      lastErr = lastRes?.error || (lastRes ? JSON.stringify(lastRes).substring(0, 200) : "Empty completion response");
+    }
+  }
+  return { parsed: null, res: lastRes, error: lastErr };
+}
 
 export interface SubpartDefinition {
   part_label: string;          // e.g. "(a)", "(b)(i)", "(b)(ii)"
@@ -76,12 +162,13 @@ export async function getOrExtractPageTranscript(
   try {
     const prompt = `Transcribe ALL candidate handwritten or typed work visible on this answer sheet VERBATIM.
 STRICT RULES:
-1. Reproduce the candidate's exact sentences, numbers, formulas, and question/subpart labels (e.g. "3(a)", "(b)", "(c)") in top-to-bottom reading order.
+1. Reproduce the candidate's exact sentences, numbers, formulas, diagrams/tables/axis labels, and question/subpart labels (e.g. "3(a)", "(b)", "(c)") in top-to-bottom reading order.
 2. Do NOT fix grammar, paraphrase, summarize, or invent text. Include margin scratch work labeled [Margin].
 3. Ignore pre-printed exam instructions/headers unless needed to show which question/subpart is being answered.
-4. Output strictly valid JSON: { "transcript": "string" }`;
+4. Output strictly valid JSON: { "transcript": "string" }. Use Unicode math symbols (×, ÷, →, °, ≤, ≥, π, √) or properly double-escape backslashes so JSON stays valid.`;
 
-    const res = await callChatCompletion(
+    const { parsed } = await invokeJsonChat(
+      callChatCompletion,
       [
         { role: "system", content: "You are a precise exam script transcriber. Output strictly valid JSON." },
         {
@@ -92,25 +179,19 @@ STRICT RULES:
           ]
         }
       ],
-      0.0,
-      42
+      42,
+      3,
+      (obj) => typeof obj?.transcript === "string" && obj.transcript.trim().length > 0
     );
 
-    if (res?.ok && res?.data?.choices?.[0]?.message?.content) {
-      const clean = res.data.choices[0].message.content
-        .replace(/^```(?:json)?\s*/i, "")
-        .replace(/\s*```$/i, "")
-        .trim();
-      const parsed = JSON.parse(clean);
-      const transcript = String(parsed?.transcript || "").trim();
-      if (transcript) {
-        if (pageTranscriptCache.size >= MAX_TRANSCRIPT_CACHE) {
-          const oldestKey = pageTranscriptCache.keys().next().value;
-          if (oldestKey) pageTranscriptCache.delete(oldestKey);
-        }
-        pageTranscriptCache.set(cacheKey, transcript);
-        return transcript;
+    const transcript = String(parsed?.transcript || "").trim();
+    if (transcript) {
+      if (pageTranscriptCache.size >= MAX_TRANSCRIPT_CACHE) {
+        const oldestKey = pageTranscriptCache.keys().next().value;
+        if (oldestKey) pageTranscriptCache.delete(oldestKey);
       }
+      pageTranscriptCache.set(cacheKey, transcript);
+      return transcript;
     }
   } catch (err) {
     console.warn("[CanonicalTranscription] Failed to extract page transcript, falling back to direct image:", err);
@@ -200,11 +281,17 @@ export function extractQuestionSubparts(
       // If this part is a parent container for other subparts, skip it!
       if (p.id && parentIds.has(p.id)) continue;
 
-      let fullLabel = p.part_label || "";
-      if (p.parent_part_id && byId.has(p.parent_part_id)) {
-        const parent = byId.get(p.parent_part_id);
-        fullLabel = `${parent.part_label}.${p.part_label}`;
+      // Walk full parent_part_id chain (e.g. a -> vi -> a) so nested DB subparts don't detach
+      const labelSegments: string[] = [String(p.part_label || "").trim()];
+      const visitedIds = new Set<string>(p.id ? [p.id] : []);
+      let curParentId = p.parent_part_id;
+      while (curParentId && byId.has(curParentId) && !visitedIds.has(curParentId)) {
+        visitedIds.add(curParentId);
+        const parent = byId.get(curParentId);
+        if (parent?.part_label) labelSegments.unshift(String(parent.part_label).trim());
+        curParentId = parent?.parent_part_id;
       }
+      const fullLabel = labelSegments.filter(Boolean).join(".");
 
       const canon = canonicalLabel(fullLabel);
       if (!canon) continue;
@@ -236,14 +323,17 @@ export function extractQuestionSubparts(
     }
   }
 
-  // 4. Detached child merging:
-  // If "i" exists without parent prefix, but "a.i" exists, merge/delete "i"
+  // 4. Detached child merging (any depth):
+  // If "i" or "vi.a" exists without its top parent prefix, but "a.i" or "a.vi.a" exists, merge/delete the detached entry
   for (const k of Array.from(subpartsMap.keys())) {
-    if (!k.includes(".")) {
-      const parentWithChild = Array.from(subpartsMap.keys()).find(other => other.endsWith("." + k));
-      if (parentWithChild) {
-        subpartsMap.delete(k);
+    const parentWithChild = Array.from(subpartsMap.keys()).find(other => other !== k && other.endsWith("." + k));
+    if (parentWithChild) {
+      const detached = subpartsMap.get(k);
+      const qualified = subpartsMap.get(parentWithChild);
+      if (detached && qualified && detached.marks > 1 && qualified.marks <= 1) {
+        qualified.marks = detached.marks;
       }
+      subpartsMap.delete(k);
     }
   }
 
@@ -363,11 +453,12 @@ CRITICAL RULES FOR ATOMIC SUBPART MARKING:
 3. STRICT MATHEMATICAL & ALGEBRAIC EQUIVALENCE:
    - For algebraic expressions: check variables and signs strictly! Do NOT credit mismatched expressions (e.g., "(x - 3)(x + 3)" does NOT satisfy "(x - 3)(2y + 5)").
    - For calculus: setting "dy/dx = 0" does NOT satisfy "set dy/dx = 10" or "their dy/dx = 10" unless explicitly permitted by the mark scheme.
-   - For numerical accuracy (A) and independent (B) marks: verify numbers against the scheme or acceptable range. Accept standard rounding or equivalent fractions.
+   - For numerical accuracy (A), independent (B), coordinate, and exact mathematical-term marks: verify exact numbers, signs, coordinates, and mathematical terms strictly! NEVER mark "satisfied": true if the student's written value, coordinate, angle classification, or transformation name differs from the criterion — unless the criterion permits "oe" (or equivalent numeric/algebraic form, e.g. a combined rate or simplified fraction) or explicitly grants "FT" (follow-through consistent with the candidate's stated previous value).
 4. DISTINCT EVIDENCE PER CRITERION & NO INFERENTIAL STRETCHING:
    - Mark a criterion "satisfied": true ONLY if the candidate's response EXPLICITLY states or directly demonstrates that specific criterion. Never infer an unstated motive, conclusion, or institution from a tangential or generic sentence.
    - Do NOT reuse the exact same claim or phrase across multiple overlapping criteria. However, if a compound sentence genuinely packs two distinct facts/points (e.g. two Biology steps or two History events in one sentence), BOTH may be credited provided you quote ONLY the specific minimal clause or phrase matching each criterion.
    - For each criterion (by index 0..N-1): if satisfied, quote ONLY the exact minimal clause, phrase, or expression proving that specific criterion (NOT the entire surrounding sentence); if not satisfied, "evidence" MUST be "".
+   - Keep JSON valid: prefer Unicode math symbols (×, ÷, →, °, ≤, ≥, π, √) or properly double-escaped backslashes inside JSON strings.
 5. ANSWER LINE COORDINATE & STUDENT DETECTED ANSWER:
    - "answer_line_y": estimate the 0-1000 vertical coordinate where the printed answer line or student's final answer sits on the page.
    - "student_answer_detected": transcribe the student's final answer or conclusion.
@@ -427,9 +518,6 @@ export async function evaluateSubpartAtomically(
     .map(([group, memberIndices]) => ({ group, memberIndices }));
 
   const hasStructuredCriteria = rubric.criteria.length > 0;
-  const hasCalcCriteria = rubric.criteria.some(
-    (c: RubricCriterion) => isCalculationCriterion(c.code, c.text)
-  );
 
   let prompt = "";
   if (hasStructuredCriteria) {
@@ -456,7 +544,7 @@ INSTRUCTIONS:
 3. Identify candidate ink only (ignore pre-printed text/diagrams).
 4. Provide score (0 to ${marksAvailable}), list marks awarded and deductions, and locate the vertical answer_line_y (0-1000).
 
-OUTPUT STRICTLY VALID JSON:
+OUTPUT STRICTLY VALID JSON (prefer Unicode math symbols × ÷ → ° ≤ ≥ π √ or escape backslashes as \\\\):
 {
   "score": number,
   "student_answer_detected": "string",
@@ -473,42 +561,52 @@ OUTPUT STRICTLY VALID JSON:
     { type: "image_url", image_url: { url: pageImageUrl, detail: "high" } }
   ];
 
-  const parseJsonContent = (res: any): any | null => {
-    const raw = res?.data?.choices?.[0]?.message?.content;
-    if (!res?.ok || !raw) return null;
-    try {
-      const clean = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-      return JSON.parse(clean);
-    } catch {
-      return null;
-    }
+  const isValidSubpartPayload = (obj: any): boolean => {
+    if (!obj || typeof obj !== 'object') return false;
+    return hasStructuredCriteria ? Array.isArray(obj.verdicts) : typeof obj.score === 'number';
   };
 
   let evalError = "";
   try {
-    const res = await callChatCompletion(
+    const pass1 = await invokeJsonChat(
+      callChatCompletion,
       [
         { role: "system", content: "You are the Senior Chief Examiner evaluating ONE subquestion. Output strictly valid JSON." },
         { role: "user", content: userContent }
       ],
-      0.0,
-      42
+      42,
+      3,
+      isValidSubpartPayload
     );
 
-    const parsed = parseJsonContent(res);
+    const parsed = pass1.parsed;
+    const res = pass1.res;
     if (parsed) {
-      // Consensus stabilization for qualitative / multi-criterion / level-based subparts:
-      // Run a fast verification pass (text-only when canonical transcript is available) and break ties
-      // by majority vote (2 of 3) only if Pass 1 and Pass 2 disagree on any criterion verdict.
+      // Check if any Pass 1 verdict looks mismatched against its criterion (e.g. wrong coordinate,
+      // wrong numeric value, or mismatched single-word term) so it always gets moderated.
+      const hasAuditFlag = hasStructuredCriteria && Array.isArray(parsed.verdicts) &&
+        rubric.criteria.some((crit: RubricCriterion) => {
+          const v = parsed.verdicts.find((x: any) => Number(x.criterion_index) === crit.index);
+          return v?.satisfied === true && verdictNeedsModeratorAudit(crit, String(v.evidence || ''));
+        });
+
+      // Consensus stabilization:
+      // Run an independent verification pass on qualitative/menu/level subparts, multi-mark or
+      // multi-criterion calculation subparts, or any subpart flagged by the literal audit guard.
       const needsConsensus =
         hasStructuredCriteria &&
         Array.isArray(parsed.verdicts) &&
         (rubric.schemeType === 'menu' ||
           rubric.schemeType === 'levels' ||
-          (!hasCalcCriteria && rubric.criteria.length >= 4));
+          rubric.criteria.length >= 2 ||
+          marksAvailable >= 2 ||
+          hasAuditFlag);
 
       if (needsConsensus) {
-        const useTextVerifier = Boolean(pageTranscript && pageTranscript.trim().length >= 80);
+        const requiresVisualVerification = rubric.criteria.some((c: RubricCriterion) =>
+          /\b(?:graph|curve|plot|plotted|diagram|bar\s*chart|histogram|pie\s*chart|stem\s*and\s*leaf|bearing|scale\s*drawing|grid|shaded|triangle|polygon|sketch|table|drawn)\b/i.test(`${c.text} ${c.guidance || ''}`)
+        );
+        const useTextVerifier = !requiresVisualVerification && Boolean(pageTranscript && pageTranscript.trim().length >= 80);
         const verifierContent: any[] = useTextVerifier
           ? [{
               type: "text",
@@ -516,15 +614,17 @@ OUTPUT STRICTLY VALID JSON:
             }]
           : userContent;
 
-        const res2 = await callChatCompletion(
+        const pass2 = await invokeJsonChat(
+          callChatCompletion,
           [
-            { role: "system", content: "You are an independent Senior Moderator verifying criterion verdicts for ONE subquestion. Output strictly valid JSON." },
+            { role: "system", content: "You are an independent Senior Moderator verifying criterion verdicts for ONE subquestion. Enforce strict literal mathematical, coordinate, and evidence rules. Output strictly valid JSON." },
             { role: "user", content: verifierContent }
           ],
-          0.0,
-          101
+          101,
+          2,
+          isValidSubpartPayload
         );
-        const parsed2 = parseJsonContent(res2);
+        const parsed2 = pass2.parsed;
 
         if (parsed2 && Array.isArray(parsed2.verdicts)) {
           const map1 = new Map<number, { satisfied: boolean; evidence: string }>();
@@ -544,15 +644,17 @@ OUTPUT STRICTLY VALID JSON:
 
           if (hasDisagreement) {
             console.log(`[Consensus] Disagreement detected on Q${questionNumber}${partLabel} — invoking 3rd tie-breaker pass.`);
-            const res3 = await callChatCompletion(
+            const pass3 = await invokeJsonChat(
+              callChatCompletion,
               [
-                { role: "system", content: "You are the Chief Moderator breaking a marking tie on ONE subquestion. Enforce strict direct-evidence rules. Output strictly valid JSON." },
+                { role: "system", content: "You are the Chief Moderator breaking a marking tie on ONE subquestion. Enforce strict direct-evidence and literal mathematical accuracy rules. Output strictly valid JSON." },
                 { role: "user", content: verifierContent }
               ],
-              0.0,
-              202
+              202,
+              2,
+              isValidSubpartPayload
             );
-            const parsed3 = parseJsonContent(res3);
+            const parsed3 = pass3.parsed;
             const map3 = new Map<number, { satisfied: boolean; evidence: string }>();
             if (parsed3 && Array.isArray(parsed3.verdicts)) {
               parsed3.verdicts.forEach((v: any) =>
@@ -604,11 +706,12 @@ OUTPUT STRICTLY VALID JSON:
         finalScore = scoring.score;
         overlapCapped = scoring.cappedByOverlap;
         const dupCollapsedSet = new Set(scoring.duplicateEvidenceIndices || []);
+        const contradictedSet = new Set(scoring.contradictedIndices || []);
 
         // Build point-by-point marking records
         rubric.criteria.forEach((crit: RubricCriterion) => {
           const v = parsed.verdicts.find((x: any) => Number(x.criterion_index) === crit.index);
-          const isSatisfied = v?.satisfied === true && Boolean(v?.evidence?.trim()) && !dupCollapsedSet.has(crit.index);
+          const isSatisfied = v?.satisfied === true && Boolean(v?.evidence?.trim()) && !dupCollapsedSet.has(crit.index) && !contradictedSet.has(crit.index);
           const isWaived = scoring.waivedFallbacks.includes(crit.index) || dupCollapsedSet.has(crit.index);
 
           markingPoints.push({
@@ -662,7 +765,7 @@ OUTPUT STRICTLY VALID JSON:
         verdicts: parsed.verdicts
       };
     } else {
-      evalError = res?.error || (res ? JSON.stringify(res).substring(0, 200) : "No response from callChatCompletion");
+      evalError = pass1.error || res?.error || (res ? JSON.stringify(res).substring(0, 200) : "No response from callChatCompletion");
       console.warn(`[AtomicEvaluation] Failed for Q${questionNumber}${partLabel}: ${evalError}`);
     }
   } catch (err: any) {

@@ -531,6 +531,170 @@ function areEvidenceSnippetsSameClaim(evA: string, evB: string): boolean {
   return (minLen >= 3 && containment >= 0.78) || jaccard >= 0.70;
 }
 
+interface ParsedNumericTargets {
+  singles: number[];
+  ranges: Array<[number, number]>;
+}
+
+/**
+ * Extracts pure standalone numeric/fraction targets or tolerance ranges from an
+ * exact numeric criterion (e.g. "52", "-5", "25.2[0]", "1/3 cao", "36.9 or 36.86 to 36.87",
+ * "59.8 (or 119.6) or 63.25"). Returns null if the criterion requires algebraic symbols,
+ * words/reasons, units conversions, or multi-step expressions.
+ */
+function parseScalarTargets(criterionText: string): ParsedNumericTargets | null {
+  let s = String(criterionText || '')
+    // Expand Cambridge optional digits like "25.2[0]" -> "25.2 or 25.20"
+    .replace(/(\d+(?:\.\d+)?)\[(\d+)\]/g, '$1')
+    // Strip bracketed optional signs/prefixes like "[1 : ]" or "[$]"
+    .replace(/\[[^\]]*\]/g, ' ')
+    // Replace "(or ...)" parentheticals with " or "
+    .replace(/\(\s*or\s+([^)]+)\)/gi, ' or $1 ')
+    // Strip trailing/inline rubric qualifiers
+    .replace(/\b(?:oe|cao|isw|soi|seen|allow|accept|correct|both|either|answers?|figs?|to\s+\d+\s*(?:d\.?p\.?|s\.?f\.?)|hours?|minutes?|mins?|hrs?|seconds?|secs?|cm|mm|km|m|kg|g|ml|l|euros?|\$)\b/gi, ' ')
+    .replace(/[°$£€%]/g, ' ')
+    .replace(/[\u2013\u2014\u2212]/g, '-')
+    .trim();
+
+  if (!s) return null;
+  // Must not contain remaining alphabetic words (other than "or" / "to") or algebraic operators
+  const withoutConnectors = s.replace(/\b(?:or|to)\b/gi, ' ');
+  if (/[a-z=<>±√π×÷^*+]/i.test(withoutConnectors)) return null;
+  if (/\d\s*-\s*\d/.test(withoutConnectors)) return null; // subtraction expression like "10 - 3.55"
+
+  const singles: number[] = [];
+  const ranges: Array<[number, number]> = [];
+  const parts = s.split(/\s+or\s+|,/i).map(p => p.trim()).filter(Boolean);
+  if (parts.length === 0) return null;
+
+  const parseToken = (tok: string): number | null => {
+    const frac = tok.match(/^(-?\d+(?:\.\d+)?)\s*\/\s*(-?\d+(?:\.\d+)?)$/);
+    if (frac) {
+      const den = parseFloat(frac[2]);
+      return den !== 0 ? parseFloat(frac[1]) / den : null;
+    }
+    if (/^-?\d+(?:\.\d+)?$/.test(tok)) {
+      return parseFloat(tok);
+    }
+    return null;
+  };
+
+  for (const p of parts) {
+    const rangeMatch = p.match(/^(-?\d+(?:\.\d+)?)\s+to\s+(-?\d+(?:\.\d+)?)$/i);
+    if (rangeMatch) {
+      const a = parseFloat(rangeMatch[1]);
+      const b = parseFloat(rangeMatch[2]);
+      ranges.push([Math.min(a, b), Math.max(a, b)]);
+      continue;
+    }
+    const v = parseToken(p);
+    if (v === null || isNaN(v)) return null;
+    singles.push(v);
+  }
+
+  return singles.length > 0 || ranges.length > 0 ? { singles, ranges } : null;
+}
+
+/** Extracts numeric values (including simple fractions and HH:MM compact forms) from student evidence. */
+function extractEvidenceNumbers(evidence: string): {
+  numbers: number[];
+  hasArithmeticDerivation: boolean;
+} {
+  const s = String(evidence || '').replace(/[\u2013\u2014\u2212]/g, '-').trim();
+  const hasArithmeticDerivation =
+    /(?:\d|\))\s*[+*×÷^\\]\s*(?:\d|\(|[a-z])/i.test(s) ||
+    /(?:\d|\))\s+-\s+(?:\d|\()/.test(s) ||
+    /[a-z]\s*[+\-*/×÷^]|[+\-*/×÷^]\s*[a-z]/i.test(s);
+
+  const numbers: number[] = [];
+  // Handle simple fractions first e.g. 1/3, -2/5
+  const fracRe = /(-?\d+(?:\.\d+)?)\s*\/\s*(-?\d+(?:\.\d+)?)/g;
+  let m: RegExpExecArray | null;
+  while ((m = fracRe.exec(s)) !== null) {
+    const den = parseFloat(m[2]);
+    if (den !== 0) numbers.push(parseFloat(m[1]) / den);
+  }
+  // Handle HH:MM time notation as equivalent compact integer (e.g. "17:05" -> 1705)
+  const timeRe = /\b(\d{1,2}):(\d{2})\b/g;
+  while ((m = timeRe.exec(s)) !== null) {
+    numbers.push(parseInt(m[1] + m[2], 10));
+  }
+  // Standard signed scalars
+  const numRe = /(?<![a-z0-9.])(-?\d+(?:\.\d+)?)/gi;
+  while ((m = numRe.exec(s)) !== null) {
+    const val = parseFloat(m[1]);
+    if (!isNaN(val)) numbers.push(val);
+  }
+  return { numbers, hasArithmeticDerivation };
+}
+
+/**
+ * Deterministically rejects clear scalar mismatches on strict non-FT accuracy/independent
+ * criteria (e.g. criterion "52" matched to "75°", or "-5" matched to "centre (1, 1)").
+ */
+export function isVerdictContradicted(row: RubricCriterion, evidence: string): boolean {
+  if (!evidence || !evidence.trim()) return false;
+  if (row.isLevel || row.isFallback) return false;
+  if (!/^[AB]\d*(?:DEP)?$/i.test(row.code)) return false;
+  if (/\b(?:ft|follow\s*through|their|seen\s*from|dep)\b/i.test(`${row.code} ${row.text} ${row.guidance || ''}`)) {
+    return false;
+  }
+
+  const targets = parseScalarTargets(row.text);
+  if (!targets) return false;
+
+  const ev = extractEvidenceNumbers(evidence);
+  if (ev.numbers.length === 0 || ev.hasArithmeticDerivation) return false;
+
+  const matchesAny = ev.numbers.some((n) => {
+    if (targets.singles.some((t) => Math.abs(n - t) <= 1e-5)) return true;
+    if (targets.ranges.some(([lo, hi]) => n >= lo - 1e-6 && n <= hi + 1e-6)) return true;
+    return false;
+  });
+
+  return !matchesAny;
+}
+
+/**
+ * Flags verdicts that warrant independent 2-of-3 moderator consensus verification:
+ * - Contradicted numeric targets,
+ * - Coordinate mismatches even on FT criteria (e.g. "(1, 28)" vs "(1, 4)"),
+ * - Short non-numeric classification terms (1–2 words) whose evidence shares zero stemmed tokens.
+ */
+export function verdictNeedsModeratorAudit(row: RubricCriterion, evidence: string): boolean {
+  if (!evidence || !evidence.trim()) return false;
+  if (isVerdictContradicted(row, evidence)) return true;
+
+  // Coordinate pair comparison: criterion "(a, b)" vs evidence "(c, d)"
+  const coordCrit = row.text.match(/\(\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\)/);
+  const coordEv = evidence.match(/\(\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\)/);
+  if (coordCrit && coordEv) {
+    if (parseFloat(coordCrit[1]) !== parseFloat(coordEv[1]) || parseFloat(coordCrit[2]) !== parseFloat(coordEv[2])) {
+      return true;
+    }
+  }
+
+  // Short exact label / classification term (1-2 alphabetic words, e.g. "Translation", "obtuse", "alternate")
+  if (!row.isLevel && /^[AB]\d*$/i.test(row.code) && !/\d/.test(row.text)) {
+    const critWords = String(row.text || '')
+      .toLowerCase()
+      .replace(/[^a-z\s]/g, ' ')
+      .trim()
+      .split(/\s+/)
+      .filter(w => w.length >= 4 && !STOPWORDS.has(w) && !SCHEME_BOILERPLATE.has(w));
+    if (critWords.length >= 1 && critWords.length <= 2) {
+      const evLower = String(evidence || '').toLowerCase();
+      const hasAnyMatch = critWords.some((cw) => {
+        const prefix = cw.slice(0, Math.min(4, cw.length));
+        return evLower.includes(prefix);
+      });
+      if (!hasAnyMatch) return true;
+    }
+  }
+
+  return false;
+}
+
 /**
  * DETERMINISTIC SCORE COMPUTATION from validated marking decisions.
  * Takes the LLM's per-criterion "satisfied" verdicts and computes the final
@@ -554,12 +718,24 @@ export function computeSubpartScore(
   cappedAtMax: boolean;
   waivedFallbacks: number[];
   duplicateEvidenceIndices: number[];
+  contradictedIndices: number[];
 } {
   const verdictByIndex = new Map<number, boolean>();
   const evidenceByIndex = new Map<number, string>();
+  const contradictedIndices: number[] = [];
   for (const v of satisfied || []) {
     verdictByIndex.set(v.criterionIndex, !!v.satisfied);
     if (v.evidence) evidenceByIndex.set(v.criterionIndex, String(v.evidence).trim());
+  }
+
+  for (const r of rubric.criteria) {
+    if (verdictByIndex.get(r.index)) {
+      const ev = evidenceByIndex.get(r.index) || '';
+      if (isVerdictContradicted(r, ev)) {
+        verdictByIndex.set(r.index, false);
+        contradictedIndices.push(r.index);
+      }
+    }
   }
 
   // 1. Level-based: award the highest satisfied level value directly
@@ -578,7 +754,8 @@ export function computeSubpartScore(
       cappedByOverlap: 0,
       cappedAtMax: best > marksAvailable,
       waivedFallbacks: [],
-      duplicateEvidenceIndices: []
+      duplicateEvidenceIndices: [],
+      contradictedIndices
     };
   }
 
@@ -655,7 +832,8 @@ export function computeSubpartScore(
     cappedByOverlap: Math.max(0, cappedByOverlap),
     cappedAtMax: awarded > marksAvailable,
     waivedFallbacks,
-    duplicateEvidenceIndices
+    duplicateEvidenceIndices,
+    contradictedIndices
   };
 }
 

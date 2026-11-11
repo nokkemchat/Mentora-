@@ -18,7 +18,9 @@ import {
   computeSubpartScore,
   canonicalLabel,
   ParsedRubric,
-  isAlgebraicMatch
+  isAlgebraicMatch,
+  isVerdictContradicted,
+  verdictNeedsModeratorAudit
 } from './rubricEngine.ts';
 
 let passed = 0, failed = 0;
@@ -357,6 +359,41 @@ const bioSameSentenceVerdicts = [
 const bioRes = computeSubpartScore(bioRub, bioSameSentenceVerdicts, 3);
 assert(bioRes.score === 2, `two distinct Biology facts in 1 compound sentence → 2 marks, NOT collapsed (got ${bioRes.score})`);
 assert(bioRes.duplicateEvidenceIndices.length === 0, `no false duplicate flagged when rubric criteria are distinct facts`);
+
+console.log('\n[22] MATHEMATICAL SCALAR CONTRADICTION & MODERATOR AUDIT GUARDS:');
+const MATH_GUARD_SCHEME = `
+(a) [B1] 52
+(b) [A1] 36.9 or 36.86 to 36.87
+(c) [B1] 25.2[0]
+(d) [B1FT] (1,28)
+(e) [B1] Translation
+`;
+const gA = parseRubric('a', MATH_GUARD_SCHEME);
+const gB = parseRubric('b', MATH_GUARD_SCHEME);
+const gC = parseRubric('c', MATH_GUARD_SCHEME);
+const gD = parseRubric('d', MATH_GUARD_SCHEME);
+const gE = parseRubric('e', MATH_GUARD_SCHEME);
+
+assert(isVerdictContradicted(gA.criteria[0], '75°') === true, 'rejects 75° when exact B1 criterion is 52');
+assert(isVerdictContradicted(gA.criteria[0], '52°') === false, 'accepts 52° for B1 criterion 52');
+assert(isVerdictContradicted(gB.criteria[0], '36.87') === false, 'accepts 36.87 inside range 36.86 to 36.87');
+assert(isVerdictContradicted(gC.criteria[0], '$25.20') === false, 'accepts $25.20 for optional-zero target 25.2[0]');
+assert(isVerdictContradicted(gD.criteria[0], '(1, 4)') === false, 'does NOT auto-reject B1FT coordinate in case FT applies');
+assert(verdictNeedsModeratorAudit(gD.criteria[0], '(1, 4)') === true, 'flags coordinate mismatch on FT criterion for moderator audit');
+assert(verdictNeedsModeratorAudit(gE.criteria[0], 'enlargement') === true, 'flags single-word term mismatch ("enlargement" vs "Translation") for moderator audit');
+assert(verdictNeedsModeratorAudit(gE.criteria[0], 'translation by vector') === false, 'does not flag valid matching term');
+
+const contradictedScore = computeSubpartScore(gA, [{ criterionIndex: 0, satisfied: true, evidence: '75°' }], 1);
+assert(contradictedScore.score === 0 && contradictedScore.contradictedIndices.includes(0), 'contradicted scalar verdict yields 0 score and records index');
+
+console.log('\n[23] LEVEL TABLE BRACKETED MARK EXTRACTION:');
+const BRACKET_LEVEL_SCHEME = `
+(b) [LEVEL 0] No creditable response. [0]
+(b) [LEVEL 4] Explains two reasons clearly. [6]
+`;
+const bracketRub = parseRubric('b', BRACKET_LEVEL_SCHEME);
+const bracketRes = computeSubpartScore(bracketRub, [{ criterionIndex: 1, satisfied: true, evidence: 'Clear explanation' }], 6);
+assert(bracketRes.score === 6, `extracts bracketed [6] mark value in level descriptor (got ${bracketRes.score})`);
 
 console.log(`\n══════════════════════════════════════`);
 console.log(`FINAL: ${passed} passed, ${failed} failed`);

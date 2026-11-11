@@ -1989,12 +1989,12 @@ ${ms}
             });
           };
 
-          // Prepare ChatCompletion caller for atomic subpart agents (temperature 0, seed 42)
+          // Prepare ChatCompletion caller for atomic subpart agents (temperature 0 by default, explicit seed forwarded for retries/consensus)
           const callSubpartChat = async (messages: any[], temperature = 0.0, seed = 42) => {
             return await executeChatCompletion(openaiApiKey, pass2Candidates, {
               messages,
-              temperature: 0.0,
-              seed: 42,
+              temperature,
+              seed,
               response_format: { type: "json_object" }
             });
           };

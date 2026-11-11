@@ -3,7 +3,8 @@ import {
   runWithConcurrencyLimit,
   synthesizeBookletAnnotations,
   evaluateSubpartAtomically,
-  getOrExtractPageTranscript
+  getOrExtractPageTranscript,
+  safeParseJsonObject
 } from './atomicSubpartAgent.ts';
 
 let passed = 0, failed = 0;
@@ -242,6 +243,76 @@ async function main() {
   assert(evalCallCount === 3, `Disagreement between Pass 1 & 2 invoked 3rd tie-breaker (got ${evalCallCount} calls)`);
   assert(evalOut.score === 1, `2-of-3 rejected borderline c2 AND deduplicated duplicate quote on c1 -> score 1 (got ${evalOut.score})`);
   assert(evalOut.marking_points.filter(p => p.is_earned).length === 1, `Only 1 marking_point earned matches final score 1`);
+
+  console.log('\n[6] Safe JSON repair, transient empty-response retry & nested DB subpart merge:');
+  const latexRaw = 'Here is the JSON:\n```json\n{"transcript": "Cost = \\$6.30 \\div 10, angle \\approx 36.9°",}\n```';
+  const repairedJson = safeParseJsonObject(latexRaw);
+  assert(repairedJson !== null && typeof repairedJson.transcript === 'string' && repairedJson.transcript.includes('36.9'), 'safeParseJsonObject recovers fenced JSON with unescaped LaTeX and trailing comma');
+
+  // Transient empty content on attempt 0 recovers on retry attempt 1 + runs consensus Pass 2 on multi-mark Maths subpart
+  let retryCalls = 0;
+  const mockRetryMathChat = async (_msgs: any[], _temp?: number, seed?: number) => {
+    retryCalls++;
+    if (retryCalls === 1) {
+      return { ok: true, data: { choices: [{ message: { content: '' } }] } };
+    }
+    return {
+      ok: true,
+      data: {
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              student_answer_detected: '$5.67',
+              transcription_notes: '9 × $6.30 = $56.70, $56.70 ÷ 10 = $5.67',
+              answer_line_y: 130,
+              verdicts: [
+                { criterion_index: 0, satisfied: true, evidence: '9 × $6.30 ÷ 10' },
+                { criterion_index: 1, satisfied: true, evidence: '$5.67' }
+              ],
+              teacher_correction_note: '',
+              constructive_correction: '',
+              seed_seen: seed
+            })
+          }
+        }]
+      }
+    };
+  };
+  const mathRetryOut = await evaluateSubpartAtomically(
+    {
+      questionNumber: '1',
+      partLabel: '(a)(ii)',
+      canonicalLabel: 'a.ii',
+      marksAvailable: 2,
+      officialMarkScheme: '(a)(ii) [M1] [9 × 6.3 ÷ 10] oe\n(a)(ii) [A1] 5.67',
+      canonicalPageIndex: 0,
+      pageImageUrl: 'data:image/jpeg;base64,MATH_RETRY_IMG',
+      pageTranscript: '9 × $6.30 = $56.70\n$56.70 ÷ 10 = $5.67'
+    },
+    mockRetryMathChat
+  );
+  assert(mathRetryOut.score === 2 && retryCalls === 3, `Recovered from empty Pass 1 and ran Pass 2 Maths consensus -> 2/2 in 3 calls (score=${mathRetryOut.score}, calls=${retryCalls})`);
+
+  const NESTED_SCHEME = `
+(a)(vi)(a) [B1] 375
+(a)(vi)(a) [B1] 600
+(a)(vi)(b) [B1] Bar chart drawn with linear scale
+`;
+  const NESTED_DB_PARTS: any[] = [
+    { id: 'p-a', parent_part_id: null, part_label: 'a', marks: 10 },
+    { id: 'p-vi', parent_part_id: 'p-a', part_label: 'vi', marks: null },
+    { id: 'p-via', parent_part_id: 'p-vi', part_label: 'a', marks: 2 },
+    { id: 'p-vib', parent_part_id: 'p-vi', part_label: 'b', marks: 3 },
+    { id: 'p-detached-via', parent_part_id: null, part_label: 'vi.a', marks: 2 },
+    { id: 'p-detached-vib', parent_part_id: null, part_label: 'vi.b', marks: 3 }
+  ];
+  const nestedSubparts = extractQuestionSubparts('2', 16, NESTED_SCHEME, NESTED_DB_PARTS);
+  assert(
+    nestedSubparts.length === 2 &&
+    nestedSubparts.map(s => s.canonical_label).join(',') === 'a.vi.a,a.vi.b' &&
+    nestedSubparts[1].marks === 3,
+    `Multi-level nested & detached DB subparts deduplicated cleanly (got ${nestedSubparts.map(s => `${s.canonical_label}:${s.marks}`).join(',')})`
+  );
 
   console.log(`\n══════════════════════════════════════`);
   console.log(`RESULTS: ${passed} passed, ${failed} failed`);
