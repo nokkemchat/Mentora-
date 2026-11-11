@@ -245,10 +245,10 @@ export default function MarkedPaperOverlay({
               );
             }
 
-            // 4. Inline Tick (Placed AFTER or SUPERSCRIPT above the student's formula / working step)
+            // 4. Inline Tick (Placed AFTER or SUPERSCRIPT above the student's formula / working step, clear of right-margin score badges)
             if (ann.type === 'tick' || ann.type === 'inline_tick') {
-              // Position tick slightly superscript above the baseline so it never collides with numbers
-              const leftPct = Math.min(Math.max(leftEndPct + 1.2, leftStartPct + 6), 84);
+              // Position tick slightly superscript above the baseline and clear of right-margin badges (x >= 84%)
+              const leftPct = Math.min(Math.max(leftEndPct + 1.2, leftStartPct + 6), 78);
               const elevatedTopPct = Math.max(topPct - 1.8, 1.5);
 
               return (

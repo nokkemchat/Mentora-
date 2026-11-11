@@ -127,8 +127,59 @@ export function sanitizeAndMergeSubparts(subparts: any[], annotations?: any[]): 
   return cleaned;
 }
 
+const MISSING_OR_FOREIGN_TEXT_PATTERNS = [
+  'corresponds to question',
+  'answers for question',
+  'pertains to question',
+  'instead of question',
+  'no work for question',
+  'entirely different question',
+  'different question',
+  'missing from the provided',
+  'missing from the submitted',
+  'missing from this image',
+  'missing from this page',
+  'not present on',
+  'not visible in',
+  'not found in the image',
+  'not found on this page',
+  'subquestion not found',
+  'subpart not found',
+  'not attempted or is missing',
+  'no candidate response',
+  'no response visible',
+  'cannot be seen',
+  'wrong page'
+];
+
+export function isMissingOrForeignAnnotationText(raw?: string): boolean {
+  const text = (raw || '').toLowerCase();
+  if (!text) return false;
+  return MISSING_OR_FOREIGN_TEXT_PATTERNS.some((p) => text.includes(p));
+}
+
 export function reconcileAssessment(assessment: AssessmentResult, officialMaxScore?: number): AssessmentResult {
   if (!assessment) return assessment;
+
+  // Deduplicate question_summaries (e.g., when unattempted questions appeared twice)
+  if (Array.isArray((assessment as any).question_summaries)) {
+    const dedupQMap = new Map<string, any>();
+    (assessment as any).question_summaries.forEach((qs: any) => {
+      const qKey = String(qs.question_number ?? qs.identified_question_number ?? '').trim();
+      if (!qKey) return;
+      const existing = dedupQMap.get(qKey);
+      if (!existing) {
+        dedupQMap.set(qKey, qs);
+      } else {
+        const existingValid = !existing.unattempted || (Number(existing.score) || 0) > 0 || (existing.spanned_pages?.length || 0) > 0;
+        const curValid = !qs.unattempted || (Number(qs.score) || 0) > 0 || (qs.spanned_pages?.length || 0) > 0;
+        if (curValid && !existingValid) {
+          dedupQMap.set(qKey, qs);
+        }
+      }
+    });
+    (assessment as any).question_summaries = Array.from(dedupQMap.values());
+  }
 
   // Sanitize subparts on root and on every page to merge any hallucinated fragments
   if (Array.isArray(assessment.subparts)) {
@@ -361,15 +412,34 @@ export function ensureAssessmentAnnotations(assessment: AssessmentResult, pageIn
     }
   }
 
-  // === Filter out foreign/mismatched annotations from another question ===
+  // === Filter out foreign/mismatched or missing-work annotations ===
+  const missingSubpartKeys = new Set<string>();
+  finalResult.forEach((a: any) => {
+    const combined = `${a.comment || ''} ${a.teacher_correction || ''} ${a.text || ''}`;
+    if (isMissingOrForeignAnnotationText(combined) && a.subpart_label) {
+      missingSubpartKeys.add(String(a.subpart_label).toLowerCase().replace(/[^a-z0-9]/g, ''));
+    }
+  });
+  subpartsList.forEach((sp: any) => {
+    if ((Number(sp.score) || 0) === 0) {
+      const combined = `${sp.teacher_correction_note || ''} ${sp.constructive_correction || ''} ${(sp.deductions || []).join(' ')}`;
+      if (isMissingOrForeignAnnotationText(combined) && sp.part_label) {
+        missingSubpartKeys.add(String(sp.part_label).toLowerCase().replace(/[^a-z0-9]/g, ''));
+      }
+    }
+  });
+
   finalResult = finalResult.filter((a: any) => {
-    const comment = (a.comment || a.teacher_correction || a.text || '').toLowerCase();
-    if (comment.includes('corresponds to question') || 
-        comment.includes('answers for question') || 
-        comment.includes('pertains to question') || 
-        comment.includes('instead of question') ||
-        comment.includes('no work for question')) {
+    if (a.type === 'total_header') return true;
+    const combined = `${a.comment || ''} ${a.teacher_correction || ''} ${a.text || ''}`;
+    if (isMissingOrForeignAnnotationText(combined)) {
       return false;
+    }
+    const key = (a.subpart_label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (key && missingSubpartKeys.has(key)) {
+      const txt = String(a.text || '');
+      const hasNonZeroBadge = txt.includes('/') && !txt.includes('0/');
+      if (!hasNonZeroBadge) return false;
     }
     return true;
   });
@@ -400,16 +470,12 @@ export function ensureAssessmentAnnotations(assessment: AssessmentResult, pageIn
     const questionsForPage = ((assessment as any).question_summaries || []).filter((qs: any) => {
       if (qs.unattempted || qs.unmatched === true || (Number(qs.max_score) || 0) <= 0) return false;
       if (!(qs.spanned_pages || []).includes(targetPageIndex)) return false;
-      // If all subparts of this question on this page are foreign question notices or unattempted, exclude it!
+      // If all subparts of this question on this page are foreign/missing notices or unattempted, exclude it!
       const pageSubparts = (qs.subparts || []).filter((sp: any) => sp.page_index === targetPageIndex);
       if (pageSubparts.length > 0) {
         const allForeign = pageSubparts.every((sp: any) => {
-          const note = (sp.teacher_correction_note || sp.deductions?.[0] || '').toLowerCase();
-          return note.includes('corresponds to question') ||
-                 note.includes('answers for question') ||
-                 note.includes('pertains to question') ||
-                 note.includes('instead of question') ||
-                 note.includes('no work for question');
+          const note = `${sp.teacher_correction_note || ''} ${sp.deductions?.[0] || ''}`;
+          return isMissingOrForeignAnnotationText(note);
         });
         if (allForeign) return false;
       }
@@ -430,6 +496,39 @@ export function ensureAssessmentAnnotations(assessment: AssessmentResult, pageIn
         page_index: targetPageIndex
       });
     });
+  }
+
+  // === Keep right-margin badges & notes clear of bottom-right per-question total stamps ===
+  const bottomTotals = finalResult.filter(
+    (a: any) => a.type === 'total_header' && Array.isArray(a.box_2d) && a.box_2d[0] >= 600
+  );
+  if (bottomTotals.length > 0) {
+    const topTotalY = Math.min(...bottomTotals.map((t: any) => t.box_2d[0]));
+    const maxSafeBottomY = Math.max(200, topTotalY - 18);
+    const rightMarginBadges = finalResult
+      .filter(
+        (a: any) =>
+          a.type !== 'total_header' &&
+          Array.isArray(a.box_2d) &&
+          (a.type === 'mark_badge' || (String(a.text || '').includes('/') && a.box_2d[1] >= 650))
+      )
+      .sort((a: any, b: any) => a.box_2d[0] - b.box_2d[0]);
+
+    // Walk backward from the bottom-most badge so stacked badges stay above bottom totals without colliding
+    let ceilingY = maxSafeBottomY;
+    for (let i = rightMarginBadges.length - 1; i >= 0; i--) {
+      const b = rightMarginBadges[i];
+      const h = Math.max(24, b.box_2d[2] - b.box_2d[0]);
+      if (b.box_2d[2] > ceilingY) {
+        b.box_2d[2] = ceilingY;
+        b.box_2d[0] = Math.max(20, ceilingY - h);
+        if (b.bbox) {
+          b.bbox.y = b.box_2d[0] / 1000;
+          b.bbox.height = h / 1000;
+        }
+      }
+      ceilingY = Math.max(40, b.box_2d[0] - 8);
+    }
   }
 
   return finalResult;
