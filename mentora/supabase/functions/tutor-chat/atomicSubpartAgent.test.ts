@@ -1,6 +1,9 @@
 import {
   extractQuestionSubparts,
-  runWithConcurrencyLimit
+  runWithConcurrencyLimit,
+  synthesizeBookletAnnotations,
+  evaluateSubpartAtomically,
+  getOrExtractPageTranscript
 } from './atomicSubpartAgent.ts';
 
 let passed = 0, failed = 0;
@@ -103,6 +106,142 @@ async function main() {
   });
 
   assert(peakActive <= 4, `concurrency stayed <= 4 (peak was ${peakActive})`);
+
+  console.log('\n[4] synthesizeBookletAnnotations deduplication & multi-question preservation:');
+  const dupAndMultiSubparts: any[] = [
+    {
+      question_number: '6',
+      part_label: '6(b)',
+      canonical_label: '6(b)',
+      score: 2,
+      max_score: 6,
+      line_y: 450,
+      page_index: 0,
+      marks_awarded: ['Point 1', 'Point 2'],
+      deductions: [],
+      teacher_correction_note: 'Expand further',
+      constructive_correction: '',
+    },
+    {
+      question_number: '6',
+      part_label: '(b)',
+      canonical_label: '(b)',
+      score: 2,
+      max_score: 6,
+      line_y: 465,
+      page_index: 0,
+      marks_awarded: ['Point 1', 'Point 2'],
+      deductions: [],
+      teacher_correction_note: 'Expand further',
+      constructive_correction: '',
+    },
+    {
+      question_number: '5',
+      part_label: '5(b)',
+      canonical_label: '5(b)',
+      score: 4,
+      max_score: 4,
+      line_y: 180,
+      page_index: 0,
+      marks_awarded: ['P1', 'P2', 'P3', 'P4'],
+      deductions: [],
+      teacher_correction_note: '',
+      constructive_correction: '',
+    },
+    {
+      question_number: '7',
+      part_label: '7(a)',
+      canonical_label: '7(a)',
+      score: 0,
+      max_score: 4,
+      line_y: 700,
+      page_index: 0,
+      unattempted: true,
+      marks_awarded: [],
+      deductions: [],
+      teacher_correction_note: 'Work is absent from page',
+      constructive_correction: '',
+    }
+  ];
+
+  const synthesized = synthesizeBookletAnnotations(dupAndMultiSubparts, ['page0.jpg'], 6, 10);
+  const badges = synthesized.filter(a => a.type === 'mark_badge');
+  assert(badges.length === 2, `Expected 2 badges (Q5(b) + deduplicated Q6(b)), got ${badges.length}`);
+  assert(
+    badges.some(b => String(b.question_number) === '5') && badges.some(b => String(b.question_number) === '6'),
+    'Both distinct questions (Q5 and Q6) keep their separate subpart badges'
+  );
+  const q5Ticks = synthesized.filter(a => a.type === 'inline_tick' && String(a.question_number) === '5');
+  const uniqueTickXs = new Set(q5Ticks.map(t => t.box_2d?.[1]));
+  assert(q5Ticks.length === 4 && uniqueTickXs.size === 4, `Q5(b) 4 inline ticks have distinct x positions (got ${uniqueTickXs.size})`);
+
+  console.log('\n[5] Transcript caching & 2-of-3 consensus verification:');
+  let transcriptCalls = 0;
+  const mockTranscriptChat = async () => {
+    transcriptCalls++;
+    return {
+      ok: true,
+      data: { choices: [{ message: { content: JSON.stringify({ transcript: 'Candidate wrote: The league failed because it lacked an army and could not enforce sanctions.' }) } }] }
+    };
+  };
+  const t1 = await getOrExtractPageTranscript('data:image/jpeg;base64,UNIQUE_TEST_IMAGE_XYZ', mockTranscriptChat);
+  const t2 = await getOrExtractPageTranscript('data:image/jpeg;base64,UNIQUE_TEST_IMAGE_XYZ', mockTranscriptChat);
+  assert(transcriptCalls === 1 && t1 === t2 && t1.includes('lacked an army'), `Same image triggers only 1 transcript extraction call (got ${transcriptCalls})`);
+
+  const ESSAY_SCHEME = `
+(b) [B1] Lack of political will.
+(b) [B1] Economic depression weakened authority.
+(b) [B1] Absent major powers reduced reach.
+(b) [B1] Slow decision making harmed action.
+`;
+  let evalCallCount = 0;
+  const mockConsensusChat = async (_msgs: any[], _temp?: number, seed?: number) => {
+    evalCallCount++;
+    // Pass 1 (seed 42): criteria 0, 1 true (1 is duplicate quote of 0!); criterion 2 true
+    // Pass 2 (seed 101): criteria 0, 1 true; criterion 2 FALSE (disagreement triggers Pass 3)
+    // Pass 3 (seed 202): criterion 2 FALSE (2-of-3 majority => FALSE)
+    const c2 = seed === 42;
+    const verdicts = [
+      { criterion_index: 0, satisfied: true, evidence: 'Governments showed no political will to intervene.' },
+      { criterion_index: 1, satisfied: true, evidence: 'Governments showed no political will to intervene.' },
+      { criterion_index: 2, satisfied: c2, evidence: c2 ? 'Major powers were absent.' : '' },
+      { criterion_index: 3, satisfied: false, evidence: '' }
+    ];
+    return {
+      ok: true,
+      data: {
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              student_answer_detected: 'Lack of political will',
+              transcription_notes: 'Clear essay paragraph',
+              answer_line_y: 420,
+              verdicts,
+              teacher_correction_note: 'Expand with specific economic and structural factors.',
+              constructive_correction: 'Give distinct points.'
+            })
+          }
+        }]
+      }
+    };
+  };
+
+  const evalOut = await evaluateSubpartAtomically(
+    {
+      questionNumber: '6',
+      partLabel: '(b)',
+      canonicalLabel: 'b',
+      marksAvailable: 6,
+      officialMarkScheme: ESSAY_SCHEME,
+      canonicalPageIndex: 0,
+      pageImageUrl: 'data:image/jpeg;base64,TEST_EVAL_IMAGE',
+      pageTranscript: 'Governments showed no political will to intervene in crises because leaders prioritised domestic issues over collective action.'
+    },
+    mockConsensusChat
+  );
+  assert(evalCallCount === 3, `Disagreement between Pass 1 & 2 invoked 3rd tie-breaker (got ${evalCallCount} calls)`);
+  assert(evalOut.score === 1, `2-of-3 rejected borderline c2 AND deduplicated duplicate quote on c1 -> score 1 (got ${evalOut.score})`);
+  assert(evalOut.marking_points.filter(p => p.is_earned).length === 1, `Only 1 marking_point earned matches final score 1`);
 
   console.log(`\n══════════════════════════════════════`);
   console.log(`RESULTS: ${passed} passed, ${failed} failed`);

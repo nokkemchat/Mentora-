@@ -317,6 +317,30 @@ const q3PartialVerdicts = [
 const q3PartialScore = computeSubpartScore(mathQ3Rub, q3PartialVerdicts, 3);
 assert(q3PartialScore.score === 2, `student scores 2/3 with partial M1 + B1 (got ${q3PartialScore.score}/3)`);
 
+console.log('\n[20] DYNAMIC EVIDENCE DEDUPLICATION — one student claim cannot double-count:');
+const GENERIC_ESSAY_SCHEME = `
+(b) [B1] Lack of political will of Presidents/Federal Government.
+(b) [B1] Reconstruction was weakened by Johnson.
+(b) [B1] President Johnson allowed Black Codes to appear.
+`;
+const essayRub = parseRubric('b', GENERIC_ESSAY_SCHEME);
+const sameQuoteVerdicts = [
+  { criterionIndex: 0, satisfied: true, evidence: 'The federal government eventually reduced its involvement in the South, so protection became weaker.' },
+  { criterionIndex: 1, satisfied: true, evidence: 'The federal government eventually reduced its involvement in the South, so protection became weaker.' },
+  { criterionIndex: 2, satisfied: false, evidence: '' }
+];
+const dedupedRes = computeSubpartScore(essayRub, sameQuoteVerdicts, 6);
+assert(dedupedRes.score === 1, `exact same evidence sentence across two B1 points → 1 mark (got ${dedupedRes.score})`);
+assert(dedupedRes.duplicateEvidenceIndices.includes(1), `second duplicate-evidence criterion recorded in duplicateEvidenceIndices`);
+
+const distinctQuotesVerdicts = [
+  { criterionIndex: 0, satisfied: true, evidence: 'The federal government eventually reduced its involvement in the South.' },
+  { criterionIndex: 1, satisfied: true, evidence: 'Johnson vetoed civil rights bills and pardoned former Confederates.' },
+  { criterionIndex: 2, satisfied: false, evidence: '' }
+];
+const distinctRes = computeSubpartScore(essayRub, distinctQuotesVerdicts, 6);
+assert(distinctRes.score === 2, `distinct evidence sentences across two B1 points → 2 marks (got ${distinctRes.score})`);
+
 console.log(`\n══════════════════════════════════════`);
 console.log(`FINAL: ${passed} passed, ${failed} failed`);
 console.log(`══════════════════════════════════════`);

@@ -43,6 +43,8 @@ export interface ParsedRubric {
  *  question number sits inside or directly prefixes the subpart letter. */
 export function canonicalLabel(label: string): string {
   let s = String(label || '').toLowerCase().trim();
+  // Strip leading "Question 6", "Q6", "Part " prefixes before stripping leading question digits
+  s = s.replace(/^(?:question\s*\d*|q\s*(?=\d)|part\s+)\s*/i, '');
   // Strip a LEADING question number: '3(a' → '(a', '1(a)(ii)' → '(a)(ii)', '2a' → 'a'
   s = s.replace(/^\d{1,2}\s*(?=[({.]*[a-z]|[a-z]$)/, '');
   return s
@@ -236,6 +238,34 @@ const SCHEME_BOILERPLATE = new Set([
   'answers', 'allow', 'oe', 'isw', 'ft'
 ]);
 
+/** Lightweight domain-agnostic English stemmer for matching inflected word forms. */
+function stemWord(raw: string): string {
+  let w = String(raw || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (w.length <= 4) return w;
+  const rules: Array<[RegExp, string]> = [
+    [/ations?$/, ''],
+    [/isation$|ization$/, ''],
+    [/ments?$/, ''],
+    [/ness$/, ''],
+    [/ities$|ity$/, ''],
+    [/ings?$/, ''],
+    [/ied$/, 'y'],
+    [/ies$/, 'y'],
+    [/ed$/, ''],
+    [/es$/, ''],
+    [/ly$/, ''],
+    [/ing$/, ''],
+    [/s$/, ''],
+  ];
+  for (const [re, rep] of rules) {
+    if (re.test(w) && w.replace(re, rep).length >= 3) {
+      w = w.replace(re, rep);
+      break;
+    }
+  }
+  return w;
+}
+
 function contentWords(text: string): string[] {
   return String(text || '')
     .toLowerCase()
@@ -244,35 +274,35 @@ function contentWords(text: string): string[] {
     .filter(w => w.length > 3 && !STOPWORDS.has(w) && !SCHEME_BOILERPLATE.has(w));
 }
 
+function stemmedContentWords(text: string): string[] {
+  return contentWords(text).map(stemWord).filter(w => w.length >= 3);
+}
+
 /**
  * Overlap grouping: rows expressing the same idea are linked so one student
- * idea cannot earn from both. Detection layers:
- * 1. LEXICAL: Jaccard >= 0.5 or containment >= 0.75 on content words.
- * 2. KEY-IDEA: synonym idea classes — rows whose key terms fall in the same
- *    idea class overlap semantically (e.g. 'major power' ~ 'dominated';
- *    'annexed states' ~ 'annexing'; 'excluded' ~ 'effectively excluded').
+ * idea cannot earn from both. Completely domain-agnostic detection layers:
+ * 1. LEXICAL (stemmed): stemmed Jaccard >= 0.48 or containment >= 0.72.
+ * 2. PREDICATE EQUIVALENCE: rows that naturally share a subject/entity term
+ *    from their own text AND express the same general English relational concept
+ *    (e.g. dominance, weakness, exclusion, expansion, reorganization, growth).
  * Grouping is transitive via union-find; rows in the same group award a
  * SINGLE mark (the highest).
  */
 
-/** Idea classes: term-sets that represent the same underlying concept. */
-const IDEA_CLASSES: string[][] = [
-  ['dominated', 'dominating', 'dominate', 'major power', 'most powerful', 'only possible leader', 'led', 'leading', 'leader'],
-  ['annexed', 'annexing', 'annexation', 'absorbed', 'took over'],
-  ['excluded', 'excluding', 'effectively excluded', 'no longer part', 'removed from'],
-  ['president', 'headed', 'led the confederation'],
-  ['confederation', 'confederacy', 'north german'],
-  ['unification', 'united', 'unify', 'unity', 'step towards'],
-  ['remodeled', 'reorganised', 'reorganized', 'restructured', 'changed'],
-  ['more powerful', 'grew', 'strengthened', 'increased power'],
-  ['war', 'battle', 'fought', 'defeated', 'defeat'],
-  ['revolution', 'revolt', 'uprising'],
+/** General English predicate/action synsets (strictly domain- and topic-agnostic). */
+const GENERIC_PREDICATE_GROUPS: string[][] = [
+  ['dominated', 'dominating', 'dominate', 'major power', 'most powerful', 'main power', 'sole leader', 'only possible leader', 'led', 'leading'],
+  ['weak', 'weaker', 'weakened', 'weakness', 'powerless', 'helpless', 'ineffective', 'unable', 'incapable', 'could not stand'],
+  ['annexed', 'annexing', 'annexation', 'absorbed', 'took over', 'incorporated'],
+  ['excluded', 'excluding', 'effectively excluded', 'no longer part', 'removed from', 'kept out', 'shut out', 'expelled'],
+  ['more powerful', 'grew', 'strengthened', 'increased power', 'expanded', 'stronger'],
+  ['opposition', 'opposed', 'resistance', 'resisted', 'protested', 'protests'],
 ];
 
-function ideaClassHits(text: string): Set<number> {
+function predicateGroupHits(text: string): Set<number> {
   const t = ' ' + String(text || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ') + ' ';
   const hits = new Set<number>();
-  IDEA_CLASSES.forEach((cls, ci) => {
+  GENERIC_PREDICATE_GROUPS.forEach((cls, ci) => {
     for (const term of cls) {
       if (t.includes(' ' + term + ' ') || t.includes(term + ' ')) { hits.add(ci); break; }
     }
@@ -281,8 +311,8 @@ function ideaClassHits(text: string): Set<number> {
 }
 
 function assignOverlapGroups(rows: RubricCriterion[]): void {
-  const words = rows.map(r => new Set(contentWords(r.text)));
-  const ideaHits = rows.map(r => ideaClassHits(r.text));
+  const words = rows.map(r => new Set(stemmedContentWords(r.text)));
+  const predHits = rows.map(r => predicateGroupHits(r.text));
 
   // Union-find
   const parent = rows.map((_, i) => i);
@@ -302,8 +332,7 @@ function assignOverlapGroups(rows: RubricCriterion[]): void {
       // BUT DO MERGE:
       // 1. Explicit alternatives ('or', 'instead', 'alternative')
       // 2. Descending partial tiers for the same calculation step (e.g. M2 with M1 partial factorisation,
-      //    or B2 with B1 for one correct value, or SC1 fallback). These represent mutually exclusive tiers
-      //    of the same mark and MUST share an overlap group so the engine awards Math.max(valA, valB).
+      //    or B2 with B1 for one correct value, or SC1 fallback).
       const isCalculationStep = (c: string, t: string) =>
         /^(?:M\d|A\d|SC\d?)(?:DEP)?$/i.test(c) || (/^B\d(?:DEP)?$/i.test(c) && /[\d=+\-*/<>]/.test(t));
       const isExplicitAlt = (t: string) => /^(?:or\s+|instead\s+|alternative\b)/i.test(t);
@@ -318,25 +347,20 @@ function assignOverlapGroups(rows: RubricCriterion[]): void {
         const letterA = cA.replace(/\d+.*$/, '');
         const letterB = cB.replace(/\d+.*$/, '');
 
-        // 1. Same mark family (e.g. M2 & M1, or B2 & B1) where row B is a lower partial value
         if (letterA && letterA === letterB && vA > vB) {
-          // If immediately adjacent, row B is the partial fallback tier of row A's step
           if (idxB === idxA + 1) return true;
-          // Or if text explicitly signals partial credit / alternative condition
           if (/partial|instead|\bor\b|where|or\s+better|or\s+equivalent|for\s+one|for\s+either/i.test(tB)) {
             const wi = words[idxA], wj = words[idxB];
             if ([...wi].some(w => wj.has(w))) return true;
           }
         }
 
-        // 2. Special Case (SC): only link to the immediately preceding criterion it serves as fallback for
         if (cB.startsWith('SC')) {
           if (idxB === idxA + 1 && (tB.toLowerCase().includes(letterA.toLowerCase() + '0') || /instead|alternative|if\s+0/i.test(tB))) {
             return true;
           }
         }
 
-        // 3. Cross-type partial tier: e.g. B2 with M1 partial (e.g. B2 for 65/80, M1 for 9/80 + 56/80)
         if (idxB === idxA + 1 && vA > vB && /partial|\bor\b|for/i.test(tB)) {
           const wi = words[idxA], wj = words[idxB];
           if ([...wi].some(w => wj.has(w))) return true;
@@ -352,48 +376,39 @@ function assignOverlapGroups(rows: RubricCriterion[]): void {
         continue;
       }
 
-      // Layer 1: lexical similarity
+      // Layer 1: stemmed lexical similarity (avoid letting a tiny 3-word row absorb an unrelated compound sentence)
       const wi = words[i], wj = words[j];
       let linked = false;
       if (wi.size > 0 && wj.size > 0) {
         const inter = [...wi].filter(w => wj.has(w)).length;
         const union_ = new Set([...wi, ...wj]).size;
+        const minSize = Math.min(wi.size, wj.size);
+        const maxSize = Math.max(wi.size, wj.size);
         const jaccard = inter / union_;
-        const containment = inter / Math.min(wi.size, wj.size);
-        if (jaccard >= 0.5 || containment >= 0.75) linked = true;
+        const containment = inter / minSize;
+        if (jaccard >= 0.50 || (containment >= 0.75 && minSize / maxSize >= 0.35)) linked = true;
       }
-      // Layer 2: KEY-IDEA overlap — both rows make the SAME core claim.
-      // A merge requires ALL of:
-      // (a) both rows hit the same idea class,
-      // (b) the class is the row's CLAIM (salient: class terms form a substantial
-      //     share of the row's content),
-      // (c) subject-only classes never merge — 'confederation', 'unification',
-      //     'war' etc. describe WHAT is discussed, not the claim. A class whose
-      //     head term is a shared TOPIC rather than an asserted relation is
-      //     excluded as a merge key.
-      // (d) the two rows share at least one subject word (prussia/germany/...).
+
+      // Layer 2: shared dynamically-derived subject/entity stem + same general predicate group
       if (!linked) {
-        // Classes that are too topical to signal same-idea by themselves
-        const TOPIC_CLASSES = new Set<number>();
-        IDEA_CLASSES.forEach((cls, ci) => {
-          const head = cls[0];
-          if (['confederation', 'unification', 'war', 'revolution', 'remodeled', 'president'].includes(head)) {
-            TOPIC_CLASSES.add(ci);
+        const sharedPreds = [...predHits[i]].filter(c => predHits[j].has(c));
+        if (sharedPreds.length > 0) {
+          // Collect predicate stems to ensure the shared stem is a distinct entity/subject word, not the predicate itself
+          const predTermsSet = new Set<string>();
+          for (const gIdx of sharedPreds) {
+            for (const term of GENERIC_PREDICATE_GROUPS[gIdx]) {
+              stemmedContentWords(term).forEach(s => predTermsSet.add(s));
+            }
           }
-        });
-        const sharedClasses = [...ideaHits[i]].filter(c => ideaHits[j].has(c) && !TOPIC_CLASSES.has(c));
-        if (sharedClasses.length > 0) {
-          const sharedWords = [...words[i]].filter(w => words[j].has(w));
-          const SUBJECT_TERMS = new Set(['prussia', 'prussian', 'germany', 'german', 'austria', 'austrian', 'france', 'french', 'states', 'germany']);
-          const sharesSubject = sharedWords.some(w => SUBJECT_TERMS.has(w));
-          if (sharesSubject) {
+          const sharedEntities = [...wi].filter(w => wj.has(w) && !predTermsSet.has(w));
+          if (sharedEntities.length >= 1) {
             const classSalientIn = (rowIdx: number): boolean => {
               const txt = ' ' + rows[rowIdx].text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ') + ' ';
               const rowWords = contentWords(rows[rowIdx].text);
               if (rowWords.length === 0) return false;
               let classTermChars = 0;
-              for (const cls of sharedClasses) {
-                for (const term of IDEA_CLASSES[cls]) {
+              for (const gIdx of sharedPreds) {
+                for (const term of GENERIC_PREDICATE_GROUPS[gIdx]) {
                   if (txt.includes(' ' + term + ' ')) classTermChars += term.length;
                 }
               }
@@ -418,6 +433,29 @@ function assignOverlapGroups(rows: RubricCriterion[]): void {
 }
 
 /**
+ * Checks whether two cited student evidence snippets represent the same single
+ * sentence/claim, preventing double-counting when one quote is cited for two B1 criteria.
+ */
+function areEvidenceSnippetsSameClaim(evA: string, evB: string): boolean {
+  const aClean = String(evA || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  const bClean = String(evB || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!aClean || !bClean) return false;
+  if (aClean === bClean) return true;
+
+  const toksA = new Set(aClean.split(' ').filter(w => w.length > 2 && !STOPWORDS.has(w)).map(stemWord));
+  const toksB = new Set(bClean.split(' ').filter(w => w.length > 2 && !STOPWORDS.has(w)).map(stemWord));
+  if (toksA.size === 0 || toksB.size === 0) return false;
+
+  const inter = [...toksA].filter(t => toksB.has(t)).length;
+  const minLen = Math.min(toksA.size, toksB.size);
+  const unionLen = new Set([...toksA, ...toksB]).size;
+  const containment = inter / minLen;
+  const jaccard = inter / unionLen;
+
+  return (minLen >= 3 && containment >= 0.78) || jaccard >= 0.70;
+}
+
+/**
  * DETERMINISTIC SCORE COMPUTATION from validated marking decisions.
  * Takes the LLM's per-criterion "satisfied" verdicts and computes the final
  * subpart score in code — the model NEVER computes the total.
@@ -433,9 +471,20 @@ export function computeSubpartScore(
   rubric: ParsedRubric,
   satisfied: { criterionIndex: number; satisfied: boolean; evidence?: string }[],
   marksAvailable: number
-): { score: number; awardedGroups: number[]; cappedByOverlap: number; cappedAtMax: boolean; waivedFallbacks: number[] } {
+): {
+  score: number;
+  awardedGroups: number[];
+  cappedByOverlap: number;
+  cappedAtMax: boolean;
+  waivedFallbacks: number[];
+  duplicateEvidenceIndices: number[];
+} {
   const verdictByIndex = new Map<number, boolean>();
-  for (const v of satisfied || []) verdictByIndex.set(v.criterionIndex, !!v.satisfied);
+  const evidenceByIndex = new Map<number, string>();
+  for (const v of satisfied || []) {
+    verdictByIndex.set(v.criterionIndex, !!v.satisfied);
+    if (v.evidence) evidenceByIndex.set(v.criterionIndex, String(v.evidence).trim());
+  }
 
   // 1. Level-based: award the highest satisfied level value directly
   const levelRows = rubric.criteria.filter(r => r.isLevel);
@@ -452,24 +501,70 @@ export function computeSubpartScore(
       awardedGroups: [],
       cappedByOverlap: 0,
       cappedAtMax: best > marksAvailable,
-      waivedFallbacks: []
+      waivedFallbacks: [],
+      duplicateEvidenceIndices: []
     };
   }
 
   // 2. Point/menu-based: one award per overlap group (highest value satisfied row)
   const groupBest = new Map<number, number>();
-  let awarded = 0;
+  const groupWinnerRow = new Map<number, RubricCriterion>();
+  const groupEvidence = new Map<number, string>();
   for (const r of rubric.criteria) {
     if (r.isLevel) continue;
     if (!verdictByIndex.get(r.index)) continue;
     const g = r.overlapGroup ?? r.index;
     const cur = groupBest.get(g) ?? 0;
-    if (r.value > cur) groupBest.set(g, r.value);
+    const ev = evidenceByIndex.get(r.index) || '';
+    if (r.value > cur || (!groupWinnerRow.has(g) && ev)) {
+      if (r.value >= cur) {
+        groupBest.set(g, r.value);
+        groupWinnerRow.set(g, r);
+        if (ev) groupEvidence.set(g, ev);
+      }
+    }
   }
-  awarded = [...groupBest.values()].reduce((s, v) => s + v, 0);
 
-  const cappedByOverlap = rubric.criteria.filter(r => !r.isLevel && verdictByIndex.get(r.index))
-    .length - groupBest.size;
+  // 2b. Dynamic Evidence Deduplication:
+  // If two distinct qualitative 1-mark criteria (not calculation formulas) cite the
+  // exact same student sentence/phrase as evidence, collapse the duplicate claim so
+  // one sentence cannot earn two separate marks on subjective checklists.
+  const isQualitativeSingleMark = (r?: RubricCriterion): boolean => {
+    if (!r || r.value !== 1) return false;
+    const isCalc =
+      /^(?:M\d|A\d|SC\d?)(?:DEP)?$/i.test(r.code) ||
+      (/^B\d(?:DEP)?$/i.test(r.code) &&
+        (/[=<>±√π×÷^]/.test(r.text) ||
+          /(?:\d|\))\s*[+\-*/]\s*(?:\d|\(|[a-z]\b)/i.test(r.text) ||
+          /\b\d+(?:\.\d+)?\s*(?:cm|mm|km|mg|kg|mol|dm|ml|°)\b/i.test(r.text) ||
+          /^\s*(?:allow|accept|cao|oe|ft|isw)?\s*-?\d+(?:\.\d+)?(?:\s*(?:,|or)\s*-?\d+(?:\.\d+)?)*\s*$/i.test(r.text)));
+    return !isCalc;
+  };
+
+  const acceptedEntries: Array<{ group: number; value: number; row: RubricCriterion; evidence: string }> = [];
+  const duplicateEvidenceIndices: number[] = [];
+  let duplicateClaimCollapses = 0;
+
+  for (const [g, val] of groupBest.entries()) {
+    const row = groupWinnerRow.get(g)!;
+    const ev = groupEvidence.get(g) || '';
+    if (ev && isQualitativeSingleMark(row)) {
+      const dupMatch = acceptedEntries.find(
+        (prev) => isQualitativeSingleMark(prev.row) && areEvidenceSnippetsSameClaim(prev.evidence, ev)
+      );
+      if (dupMatch) {
+        duplicateClaimCollapses++;
+        duplicateEvidenceIndices.push(row.index);
+        continue;
+      }
+    }
+    acceptedEntries.push({ group: g, value: val, row, evidence: ev });
+  }
+
+  const awarded = acceptedEntries.reduce((s, e) => s + e.value, 0);
+
+  const satisfiedCount = rubric.criteria.filter(r => !r.isLevel && verdictByIndex.get(r.index)).length;
+  const cappedByOverlap = satisfiedCount - acceptedEntries.length;
 
   const finalScore = Math.min(awarded, marksAvailable);
 
@@ -486,10 +581,11 @@ export function computeSubpartScore(
 
   return {
     score: Math.max(0, finalScore),
-    awardedGroups: [...groupBest.keys()],
+    awardedGroups: acceptedEntries.map(e => e.group),
     cappedByOverlap: Math.max(0, cappedByOverlap),
     cappedAtMax: awarded > marksAvailable,
-    waivedFallbacks
+    waivedFallbacks,
+    duplicateEvidenceIndices
   };
 }
 

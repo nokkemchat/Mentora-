@@ -4,7 +4,7 @@ import { parseRubric, computeSubpartScore, isAlgebraicMatch } from "./rubricEngi
 import { buildCriterionEvaluationPrompt, SubpartPerceptionDetails } from "./criterionEvaluation.ts";
 import { buildPerceptionPrompt, QuestionPerceptionResult, ObservedSubpartWork } from "./perceptionAgent.ts";
 import { fingerprintAndSortBooklet, BookletLayout, getSubpartKey, canonicalSubpartLabel } from "./pageFingerprinter.ts";
-import { evaluateBookletAtomically, synthesizeBookletAnnotations, extractQuestionSubparts } from "./atomicSubpartAgent.ts";
+import { evaluateBookletAtomically, synthesizeBookletAnnotations, extractQuestionSubparts, isMissingOrForeignSubpartNote } from "./atomicSubpartAgent.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -526,7 +526,7 @@ async function getQuestionMarkScheme(
           return {
             found: true,
             question_number: cleanQNum,
-            topic: qData.topic || context?.topic || "Science Examination",
+            topic: qData.topic || context?.topic || "Examination Question",
             marks: qData.marks || 9,
             content_text: qData.content_text || "",
             official_mark_scheme: officialScheme,
@@ -540,7 +540,7 @@ async function getQuestionMarkScheme(
         return {
           found: true,
           question_number: cleanQNum,
-          topic: qData.topic || context?.topic || "Science Examination",
+          topic: qData.topic || context?.topic || "Examination Question",
           marks: qData.marks || 9,
           content_text: qData.content_text || context?.questionText || "",
           official_mark_scheme: null,
@@ -1051,6 +1051,23 @@ function applyVisualGroundingToAssessment(
 
   if (subparts.length === 0) return;
 
+  // Deduplicate subparts by normalized subpart key so single-page evaluation never double-stamps a subpart
+  const seenSpMap = new Map<string, any>();
+  subparts.forEach((sp: any) => {
+    const cleanKey = String(sp.part_label || '')
+      .toLowerCase()
+      .replace(/^(?:question\s*\d*|q\s*(?=\d)|part\s+)\s*/i, '')
+      .replace(/^\d{1,2}\s*(?=[({.]*[a-z]|[a-z]$)/, '')
+      .replace(/[^a-z0-9]/g, '');
+    const key = cleanKey || `idx_${seenSpMap.size}`;
+    const existing = seenSpMap.get(key);
+    if (!existing || (Number(sp.score) || 0) > (Number(existing.score) || 0)) {
+      seenSpMap.set(key, sp);
+    }
+  });
+  subparts = Array.from(seenSpMap.values());
+  assessment.subparts = subparts;
+
   subparts.sort((a: any, b: any) => {
     const wA = getSubpartSortWeight(a.part_label || '');
     const wB = getSubpartSortWeight(b.part_label || '');
@@ -1143,6 +1160,7 @@ function applyVisualGroundingToAssessment(
       text: badgeText,
       comment: sp.score > 0 ? (sp.marks_awarded?.[0] || `Part ${sp.part_label}: ${sp.score}/${sp.max_score} marks`) : (sp.deductions?.[0] || `Part ${sp.part_label}: 0/${sp.max_score} marks`),
       box_2d: [Math.max(yMid - 14, 25), 865, Math.min(yMid + 14, 975), 975],
+      question_number: qNum,
       subpart_label: sp.part_label,
       page_index: pIdx
     });
@@ -1762,7 +1780,7 @@ serve(async (req) => {
       }
 
       const assessmentData = reqAssessment || {};
-      const topic = assessmentData.identified_topic || "Chemistry / Science";
+      const topic = assessmentData.identified_topic || "Examination Question";
       const totalScore = assessmentData.total_score !== undefined ? assessmentData.total_score : (assessmentData.score || 0);
       const totalMax = assessmentData.total_max_score !== undefined ? assessmentData.total_max_score : (assessmentData.max_score || 10);
       
@@ -1877,7 +1895,7 @@ serve(async (req) => {
 
               const { data: partsData } = await supabaseClient
                 .from("question_parts")
-                .select("question_id, part_label, marks")
+                .select("id, question_id, parent_part_id, part_label, marks")
                 .in("question_id", qIds);
               if (partsData && partsData.length > 0) {
                 partsData.forEach((p: any) => {
@@ -2049,7 +2067,12 @@ ${ms}
           const pages: any[] = canonicalImages.map((imgUrl, pIdx) => {
             const rawIdx = layout.canonical_order?.[pIdx] ?? pIdx;
             const remoteUrl = originalRemoteUrls[rawIdx] || imgUrl;
-            const pageSubparts = evalResult.allSubparts.filter((sp: any) => sp.page_index === pIdx);
+            const pageSubparts = evalResult.allSubparts.filter(
+              (sp: any) =>
+                sp.page_index === pIdx &&
+                !sp.unattempted &&
+                !isMissingOrForeignSubpartNote(sp)
+            );
             const pageScore = pageSubparts.reduce((sum: number, sp: any) => sum + (Number(sp.score) || 0), 0);
             const pageMax = pageSubparts.reduce((sum: number, sp: any) => sum + (Number(sp.max_score) || 0), 0) || 5;
             const pageAnnotations = allAnnotations.filter((ann: any) => ann.page_index === pIdx);
@@ -2093,7 +2116,7 @@ ${ms}
           // No paper is EVER left unmarked or missed!
           if (generate_marked_image !== false) {
             try {
-              const topic = multiPageAssessment.identified_topic || "Science";
+              const topic = multiPageAssessment.identified_topic || "Examination Script";
               console.log(`Starting concurrent marked image generation for all ${canonicalImages.length} booklet pages...`);
               await Promise.all(
                 canonicalImages.map(async (imgUrl, pIdx) => {
@@ -2156,8 +2179,8 @@ ${ms}
       // =========================================================================
       const singleImageUrl = rawImages[0] || image_url;
 
-      // PASS 1: Pedagogical Examiner Agent (focused marking with gpt-6-luna)
-      console.log(`Single-page: Running Pass 1 (Pedagogical Examiner Agent with gpt-6-luna)...`);
+      // PASS 1: Pedagogical Examiner Agent
+      console.log(`Single-page: Running Pass 1 (Pedagogical Examiner Agent)...`);
       const singleTargetedPrompt = `You are the Ziviso Senior Chief Examiner and Master Pedagogical Teacher.
 You evaluate student exam answers under the guiding philosophy:
 "MARK LIKE AN EXAMINER, EXPLAIN LIKE A TEACHER, AND ANNOTATE LIKE A PROFESSIONAL TEACHER."
@@ -2359,10 +2382,10 @@ Return only JSON.`;
             }
           }
 
-          // PASS 2: Visual Grounding & Positioning Agent (spatial localization with gpt-6-luna)
+          // PASS 2: Visual Grounding & Positioning Agent (spatial localization)
           let singlePageGrounding: VisualGroundingResult | null = null;
           if (singleImageUrl && Array.isArray(assessment.subparts) && assessment.subparts.length > 0) {
-            console.log(`Single-page: Running Pass 2 (Visual Grounding Agent with gpt-6-luna)...`);
+            console.log(`Single-page: Running Pass 2 (Visual Grounding Agent)...`);
             singlePageGrounding = await groundEvaluatedMarks(
               openaiApiKey,
               pass1Candidates,
@@ -2381,7 +2404,7 @@ Return only JSON.`;
           // 2. Image Annotation Agent (GPT-Image-2.5-Sunburst)
           if (openaiApiKey && singleImageUrl && generate_marked_image !== false) {
             try {
-              const topic = assessment.identified_topic || "Chemistry / Science";
+              const topic = assessment.identified_topic || "Examination Question";
               const totalScore = assessment.total_score !== undefined ? assessment.total_score : (assessment.score || 0);
               const totalMax = assessment.total_max_score !== undefined ? assessment.total_max_score : (assessment.max_score || 10);
               const editPrompt = buildSunburstEditPrompt(assessment, topic, totalScore, totalMax);
@@ -2472,7 +2495,7 @@ Return only JSON.`;
     }
 
     const paperTitle = context?.paperTitle || context?.title || "Past Exam Paper";
-    const subject = context?.subject || "Science / Mathematics";
+    const subject = context?.subject || "General Studies";
     const curriculum = context?.curriculum || "Cambridge / ZIMSEC / IB";
     const activeQNum = context?.questionNumber || "1";
     const activeQText = context?.questionText || "";

@@ -151,10 +151,8 @@ serve(async (req) => {
     // 4. Per-question rubric extraction: one dedicated call per question so the official
     // mark scheme table is preserved ROW-BY-ROW instead of being compressed into a flat,
     // lossy one-liner like "B1 for X; C1 for Y". Deterministic: temperature 0.
-    const EXTRACT_MODEL = "gpt-4o";
-
     const extractRubricForQuestion = async (q: any): Promise<ExtractedSolution | null> => {
-      const systemPrompt = `You are an expert Cambridge and ZIMSEC examination marking scheme specialist.
+      const systemPrompt = `You are an expert international examination marking scheme specialist.
 Extract the COMPLETE official rubric for ONE question from the marking scheme text provided.
 
 Paper details:
@@ -166,33 +164,28 @@ Paper details:
 TARGET QUESTION: Question ${q.question_number} — official total: ${q.marks || 'unknown'} marks.
 Question content snippet (for matching): ${(q.content_text || "").substring(0, 300)}
 
-THE OFFICIAL MARK SCHEME IS A TABLE with columns: Question | Answer | Marks. EACH ROW of the table is ONE marking point.
-
-"official_mark_scheme" FORMAT (CRITICAL — one line per marking-point row, in this exact structure):
-(subpart) [MARKCODE] exact criteria / allowed answer
-
-REAL EXAMPLE (a Cambridge electricity question):
-(a) [B1] sum of current(s) into junction = sum of current(s) out junction; or (algebraic) sum of current(s) at a junction is zero
-(b)(i) [C1] line with negative gradient
-(b)(i) [A1] line from 0 °C to 100 °C, starting at (0, R0) with negative gradient throughout and never reaching R = 0
-(b)(ii) [B1] (resistance of T decreases so) total resistance (of circuit) decreases
-(b)(ii) [B1] current in cell increases (so p.d. across internal resistance increases)
-(c)(i) [C1] p.d. across r = 1.50 – (6.00 × 0.200) (= 0.30 V)
-(c)(i) [A1] current in cell = 0.30 / 0.12 (= 2.5 A)
+"official_mark_scheme" FORMAT (CRITICAL — one line per row, in this exact structure):
+- For point-marked items: (subpart) [MARKCODE] exact criteria / allowed answer
+  Example: (b)(i) [M1] sets derivative equal to zero
+- For level-of-response essays (common in History, Geography, Economics, Literature, Business):
+  Output EVERY level band first as:
+  (subpart) [LEVEL] Level X: <exact level descriptor> — <mark range>
+  Followed by any indicative content bullets as:
+  (subpart) [B1] <exact indicative content point>
 
 STRICT RULES:
-1. ONE LINE PER MARKING-POINT ROW of the official table. Include EVERY row for this question — never merge or skip rows.
-2. Preserve the EXACT criteria text, allowed answers, "or" alternatives, bracketed guidance, and figures from the table. Do NOT summarise, compress, or rephrase. Prose like "B1 for statement of conservation of charge; C1 for correct graph shape" is FORBIDDEN.
-3. EXACT NUMBERS (CRITICAL): copy every number, unit, angle, and value EXACTLY as printed in the mark scheme. NEVER round, approximate, or reformat values — "12.5°" must stay "12.5°" (never "12°"), "6.2°" must stay "6.2°", "0.52 Ω" must stay "0.52 Ω". If a value is unclear in the extracted text, keep the closest literal form and do not invent a rounded version.
-4. Keep each subpart label exactly as printed (e.g. "(a)", "(b)(i)", "(c)(ii)") followed by the mark code in square brackets, e.g. [B1], [C1], [A1], [M1].
-5. The sum of the mark codes MUST equal the question's official total (${q.marks || 'see table'} marks). If a row's mark code appears multiple times, output it once per occurrence.
+1. ONE LINE PER ROW / BULLET / LEVEL BAND of the official table. Include EVERY row for this question — never merge or skip rows.
+2. Preserve the EXACT criteria text, allowed answers, "or" alternatives, level descriptors, bracketed guidance, and figures from the scheme. Do NOT summarise, compress, or rephrase.
+3. EXACT NUMBERS (CRITICAL): copy every number, date, unit, angle, and value EXACTLY as printed in the mark scheme. NEVER round, approximate, or reformat values.
+4. Keep each subpart label exactly as printed (e.g. "(a)", "(b)(i)", "(c)") followed by the mark code in square brackets, e.g. [B1], [C1], [A1], [M1], [1], or [LEVEL].
+5. If a subpart is point-marked, ensure mark code values match the subpart marks; if it uses Level-of-Response bands, output ALL level bands with their mark ranges (e.g. "— 7–9", "— 10") plus all indicative content points.
 6. If the mark scheme also has a "Notes" or guidance column for a row, append it to that row's line after " — Guidance: ...".
 7. "ai_worked_solution": a clear step-by-step full solution. "common_mistakes": pitfalls/misconceptions. "examiner_tips": key guidance.
 
 Return ONLY raw JSON:
 { "question_number": "${q.question_number}", "official_mark_scheme": "...", "ai_worked_solution": "...", "common_mistakes": "...", "examiner_tips": "..." }`;
 
-      console.log(`Extracting rubric for Question ${q.question_number} (${EXTRACT_MODEL})...`);
+      console.log(`Extracting rubric for Question ${q.question_number} (${providerModel})...`);
       try {
         const aiResponse = await fetch(`${providerBaseUrl}/chat/completions`, {
           method: "POST",

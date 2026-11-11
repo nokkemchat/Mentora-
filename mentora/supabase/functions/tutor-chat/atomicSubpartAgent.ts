@@ -39,9 +39,82 @@ export interface AtomicSubpartInput {
   officialMarkScheme: string | null;
   canonicalPageIndex: number;
   pageImageUrl: string;
+  pageTranscript?: string;
   defaultAnswerLineY?: number;
   previousAnswerSnippet?: string;
   topic?: string;
+}
+
+const pageTranscriptCache = new Map<string, string>();
+const MAX_TRANSCRIPT_CACHE = 64;
+
+async function sha256Hex(input: string): Promise<string> {
+  try {
+    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
+    return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+  } catch {
+    return input.slice(0, 128);
+  }
+}
+
+/**
+ * Extracts ONE canonical verbatim transcript for a page image (cached by image SHA-256)
+ * so every subpart on that page—and identical scans across a batch—sees the exact same text.
+ */
+export async function getOrExtractPageTranscript(
+  pageImageUrl: string,
+  callChatCompletion: (messages: any[], temperature?: number, seed?: number) => Promise<any>
+): Promise<string> {
+  if (!pageImageUrl) return "";
+  const cacheKey = await sha256Hex(pageImageUrl);
+  const cached = pageTranscriptCache.get(cacheKey);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  try {
+    const prompt = `Transcribe ALL candidate handwritten or typed work visible on this answer sheet VERBATIM.
+STRICT RULES:
+1. Reproduce the candidate's exact sentences, numbers, formulas, and question/subpart labels (e.g. "3(a)", "(b)", "(c)") in top-to-bottom reading order.
+2. Do NOT fix grammar, paraphrase, summarize, or invent text. Include margin scratch work labeled [Margin].
+3. Ignore pre-printed exam instructions/headers unless needed to show which question/subpart is being answered.
+4. Output strictly valid JSON: { "transcript": "string" }`;
+
+    const res = await callChatCompletion(
+      [
+        { role: "system", content: "You are a precise exam script transcriber. Output strictly valid JSON." },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: prompt },
+            { type: "image_url", image_url: { url: pageImageUrl, detail: "high" } }
+          ]
+        }
+      ],
+      0.0,
+      42
+    );
+
+    if (res?.ok && res?.data?.choices?.[0]?.message?.content) {
+      const clean = res.data.choices[0].message.content
+        .replace(/^```(?:json)?\s*/i, "")
+        .replace(/\s*```$/i, "")
+        .trim();
+      const parsed = JSON.parse(clean);
+      const transcript = String(parsed?.transcript || "").trim();
+      if (transcript) {
+        if (pageTranscriptCache.size >= MAX_TRANSCRIPT_CACHE) {
+          const oldestKey = pageTranscriptCache.keys().next().value;
+          if (oldestKey) pageTranscriptCache.delete(oldestKey);
+        }
+        pageTranscriptCache.set(cacheKey, transcript);
+        return transcript;
+      }
+    }
+  } catch (err) {
+    console.warn("[CanonicalTranscription] Failed to extract page transcript, falling back to direct image:", err);
+  }
+  return "";
 }
 
 export interface AtomicSubpartOutput {
@@ -254,7 +327,8 @@ export function buildAtomicSubpartPrompt(
   marksAvailable: number,
   rubricCriteria: RubricCriterion[],
   overlapGroups: Array<{ group: number; memberIndices: number[] }>,
-  previousAnswerSnippet?: string
+  previousAnswerSnippet?: string,
+  pageTranscript?: string
 ): string {
   const criteriaText = rubricCriteria.map(c =>
     `${c.index}. [${c.code}] ${c.text}${c.guidance ? `\n   GUIDANCE: ${c.guidance}` : ''}`
@@ -264,31 +338,35 @@ export function buildAtomicSubpartPrompt(
     ? `\nNOTE — The following criteria express THE SAME UNDERLYING IDEA (award evidence separately for each, but the scoring engine will count the group once):\n${overlapGroups.map(g => `  Group ${g.group}: criteria ${g.memberIndices.join(', ')}`).join('\n')}\n`
     : '';
 
+  const transcriptBlock = pageTranscript
+    ? `\nCANONICAL PAGE TRANSCRIPT (verbatim candidate text — quote exact phrases from this transcript in "evidence" while using the image for layout, diagrams, graphs, symbols, and y-coordinates):\n"""\n${pageTranscript}\n"""\n`
+    : '';
+
   return `You are the Senior Chief Examiner evaluating ONE SPECIFIC SUBPART of Question ${qNum}.
 SUBPART TO EVALUATE: Question ${qNum} Part (${subpartLabel})
 TOTAL MARKS AVAILABLE FOR THIS SUBPART: ${marksAvailable}
 
 OFFICIAL MARK SCHEME CRITERIA FOR THIS SUBPART:
 ${criteriaText}
-${overlapNote}
+${overlapNote}${transcriptBlock}
 ${previousAnswerSnippet ? `\nCANDIDATE'S PREVIOUS SUBPART ANSWER (for Follow-Through / FT credit if applicable):\n"${previousAnswerSnippet}"\n` : ''}
 
 CRITICAL RULES FOR ATOMIC SUBPART MARKING:
 1. MANDATORY 3-ZONE SYSTEMATIC INSPECTION:
-   - Zone 1 (Answer Line): Check the printed dotted answer line "......................" or answer bracket at the bottom of the question. Transcribe the exact value written there (e.g., "95.1°", "5", "65/80"). NEVER miss or overlook the final answer line!
+   - Zone 1 (Answer Line): Check the printed dotted answer line "......................" or answer bracket at the bottom of the question. Transcribe the exact value written there. NEVER miss or overlook the final answer line!
    - Zone 2 (Main Working): Inspect every handwritten line top-to-bottom in the dedicated working space between the question prompt and the answer line.
-   - Zone 3 (Margins & Scratch Work): Inspect the left, right, and lower margins directly adjacent to this subpart. Candidates frequently write intermediate fractions (e.g. "9/80", "56/80"), second-difference sequences (e.g. "12, 18, 24..."), or factorisation attempts in margins. If candidate ink is visible in the margin for this subpart, transcribe it into "transcription_notes" and credit valid method/accuracy criteria!
+   - Zone 3 (Margins & Scratch Work): Inspect the left, right, and lower margins directly adjacent to this subpart. If candidate ink is visible in the margin for this subpart, transcribe it into "transcription_notes" and credit valid method/accuracy criteria!
 2. CANDIDATE INK ONLY:
    - Evidence MUST come exclusively from what the candidate wrote, calculated, or drew with pen or pencil.
    - Pre-printed exam paper text, diagrams, and figures belong to the exam board. NEVER credit pre-printed elements as candidate work!
 3. STRICT MATHEMATICAL & ALGEBRAIC EQUIVALENCE:
-   - For algebraic expressions: check variables and signs strictly! Do NOT credit mismatched expressions (e.g., "(x - 3)(x + 3)" or "(x - 3)(2x + 5)" does NOT satisfy "(x - 3)(2y + 5)").
+   - For algebraic expressions: check variables and signs strictly! Do NOT credit mismatched expressions (e.g., "(x - 3)(x + 3)" does NOT satisfy "(x - 3)(2y + 5)").
    - For calculus: setting "dy/dx = 0" does NOT satisfy "set dy/dx = 10" or "their dy/dx = 10" unless explicitly permitted by the mark scheme.
    - For numerical accuracy (A) and independent (B) marks: verify numbers against the scheme or acceptable range. Accept standard rounding or equivalent fractions.
-4. CRITERION VERDICTS & EVIDENCE:
-   - For EACH criterion listed above (by index 0..N-1), judge whether it is satisfied (true or false).
-   - If satisfied, quote the candidate's exact handwritten expression, number, or words from the image in "evidence".
-   - If not satisfied, "evidence" must be empty "".
+4. DISTINCT EVIDENCE PER CRITERION & NO INFERENTIAL STRETCHING:
+   - Mark a criterion "satisfied": true ONLY if the candidate's response EXPLICITLY states or directly demonstrates that specific criterion. Never infer an unstated motive, conclusion, or institution from a tangential or generic sentence.
+   - Do NOT reuse the exact same student sentence or phrase to satisfy multiple separate single-mark criteria unless they explicitly ask for different aspects clearly stated in separate clauses or distinct calculation steps on one line.
+   - For each criterion (by index 0..N-1): if satisfied, quote the candidate's exact words/expression in "evidence"; if not satisfied, "evidence" MUST be "".
 5. ANSWER LINE COORDINATE & STUDENT DETECTED ANSWER:
    - "answer_line_y": estimate the 0-1000 vertical coordinate where the printed answer line or student's final answer sits on the page.
    - "student_answer_detected": transcribe the student's final answer or conclusion.
@@ -327,6 +405,7 @@ export async function evaluateSubpartAtomically(
     officialMarkScheme,
     canonicalPageIndex,
     pageImageUrl,
+    pageTranscript,
     defaultAnswerLineY,
     previousAnswerSnippet
   } = input;
@@ -347,6 +426,11 @@ export async function evaluateSubpartAtomically(
     .map(([group, memberIndices]) => ({ group, memberIndices }));
 
   const hasStructuredCriteria = rubric.criteria.length > 0;
+  const hasCalcCriteria = rubric.criteria.some(
+    (c: RubricCriterion) =>
+      /^(?:M\d|A\d|SC\d?)(?:DEP)?$/i.test(c.code) ||
+      (/^B\d(?:DEP)?$/i.test(c.code) && /[\d=+\-*/<>]/.test(c.text))
+  );
 
   let prompt = "";
   if (hasStructuredCriteria) {
@@ -356,16 +440,20 @@ export async function evaluateSubpartAtomically(
       marksAvailable,
       rubric.criteria,
       overlapPromptList,
-      previousAnswerSnippet
+      previousAnswerSnippet,
+      pageTranscript
     );
   } else {
     // Fallback prompt for questions without structured rubric rows
+    const transcriptSnippet = pageTranscript
+      ? `\nCANONICAL PAGE TRANSCRIPT (verbatim candidate text):\n"""\n${pageTranscript}\n"""\n`
+      : '';
     prompt = `You are the Senior Chief Examiner evaluating Question ${questionNumber} Part (${partLabel}).
 MARKS AVAILABLE: ${marksAvailable}
-
+${transcriptSnippet}
 INSTRUCTIONS:
-1. Examine the candidate's handwritten response in the answer space AND in the margins/scratch workspace for this part on the attached page image.
-2. Grade under standard Cambridge / ZIMSEC / IB syllabus principles for ${marksAvailable} marks.
+1. Examine the candidate's response in the answer space AND in the margins/scratch workspace for this part on the attached page image.
+2. Grade under standard examination marking principles for ${marksAvailable} marks.
 3. Identify candidate ink only (ignore pre-printed text/diagrams).
 4. Provide score (0 to ${marksAvailable}), list marks awarded and deductions, and locate the vertical answer_line_y (0-1000).
 
@@ -386,6 +474,17 @@ OUTPUT STRICTLY VALID JSON:
     { type: "image_url", image_url: { url: pageImageUrl, detail: "high" } }
   ];
 
+  const parseJsonContent = (res: any): any | null => {
+    const raw = res?.data?.choices?.[0]?.message?.content;
+    if (!res?.ok || !raw) return null;
+    try {
+      const clean = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+      return JSON.parse(clean);
+    } catch {
+      return null;
+    }
+  };
+
   let evalError = "";
   try {
     const res = await callChatCompletion(
@@ -397,12 +496,89 @@ OUTPUT STRICTLY VALID JSON:
       42
     );
 
-    if (res?.ok && res?.data?.choices?.[0]?.message?.content) {
-      const cleanJson = res.data.choices[0].message.content
-        .replace(/^```(?:json)?\s*/i, '')
-        .replace(/\s*```$/i, '')
-        .trim();
-      const parsed = JSON.parse(cleanJson);
+    const parsed = parseJsonContent(res);
+    if (parsed) {
+      // Consensus stabilization for qualitative / multi-criterion / level-based subparts:
+      // Run a fast verification pass (text-only when canonical transcript is available) and break ties
+      // by majority vote (2 of 3) only if Pass 1 and Pass 2 disagree on any criterion verdict.
+      const needsConsensus =
+        hasStructuredCriteria &&
+        Array.isArray(parsed.verdicts) &&
+        (rubric.schemeType === 'menu' ||
+          rubric.schemeType === 'levels' ||
+          (!hasCalcCriteria && rubric.criteria.length >= 4));
+
+      if (needsConsensus) {
+        const useTextVerifier = Boolean(pageTranscript && pageTranscript.trim().length >= 80);
+        const verifierContent: any[] = useTextVerifier
+          ? [{
+              type: "text",
+              text: prompt + `\nNOTE: Evaluate strictly from the CANONICAL PAGE TRANSCRIPT above; set answer_line_y to ${Number(parsed.answer_line_y) || defaultAnswerLineY || 500}.`
+            }]
+          : userContent;
+
+        const res2 = await callChatCompletion(
+          [
+            { role: "system", content: "You are an independent Senior Moderator verifying criterion verdicts for ONE subquestion. Output strictly valid JSON." },
+            { role: "user", content: verifierContent }
+          ],
+          0.0,
+          101
+        );
+        const parsed2 = parseJsonContent(res2);
+
+        if (parsed2 && Array.isArray(parsed2.verdicts)) {
+          const map1 = new Map<number, { satisfied: boolean; evidence: string }>();
+          const map2 = new Map<number, { satisfied: boolean; evidence: string }>();
+          parsed.verdicts.forEach((v: any) =>
+            map1.set(Number(v.criterion_index), { satisfied: v.satisfied === true && Boolean(String(v.evidence || '').trim()), evidence: String(v.evidence || '').trim() })
+          );
+          parsed2.verdicts.forEach((v: any) =>
+            map2.set(Number(v.criterion_index), { satisfied: v.satisfied === true && Boolean(String(v.evidence || '').trim()), evidence: String(v.evidence || '').trim() })
+          );
+
+          const hasDisagreement = rubric.criteria.some((c: RubricCriterion) => {
+            const v1 = map1.get(c.index)?.satisfied ?? false;
+            const v2 = map2.get(c.index)?.satisfied ?? false;
+            return v1 !== v2;
+          });
+
+          if (hasDisagreement) {
+            console.log(`[Consensus] Disagreement detected on Q${questionNumber}${partLabel} — invoking 3rd tie-breaker pass.`);
+            const res3 = await callChatCompletion(
+              [
+                { role: "system", content: "You are the Chief Moderator breaking a marking tie on ONE subquestion. Enforce strict direct-evidence rules. Output strictly valid JSON." },
+                { role: "user", content: verifierContent }
+              ],
+              0.0,
+              202
+            );
+            const parsed3 = parseJsonContent(res3);
+            const map3 = new Map<number, { satisfied: boolean; evidence: string }>();
+            if (parsed3 && Array.isArray(parsed3.verdicts)) {
+              parsed3.verdicts.forEach((v: any) =>
+                map3.set(Number(v.criterion_index), { satisfied: v.satisfied === true && Boolean(String(v.evidence || '').trim()), evidence: String(v.evidence || '').trim() })
+              );
+
+              parsed.verdicts = rubric.criteria.map((c: RubricCriterion) => {
+                const a = map1.get(c.index);
+                const b = map2.get(c.index);
+                const d = map3.get(c.index);
+                const votesTrue = (a?.satisfied ? 1 : 0) + (b?.satisfied ? 1 : 0) + (d?.satisfied ? 1 : 0);
+                const majority = votesTrue >= 2;
+                const winningEvidence = majority
+                  ? ([a, b, d].find(x => x?.satisfied && x.evidence)?.evidence || '')
+                  : '';
+                return {
+                  criterion_index: c.index,
+                  satisfied: majority,
+                  evidence: winningEvidence
+                };
+              });
+            }
+          }
+        }
+      }
 
       let finalScore = 0;
       let marksAwarded: string[] = [];
@@ -428,12 +604,13 @@ OUTPUT STRICTLY VALID JSON:
 
         finalScore = scoring.score;
         overlapCapped = scoring.cappedByOverlap;
+        const dupCollapsedSet = new Set(scoring.duplicateEvidenceIndices || []);
 
         // Build point-by-point marking records
         rubric.criteria.forEach((crit: RubricCriterion) => {
           const v = parsed.verdicts.find((x: any) => Number(x.criterion_index) === crit.index);
-          const isSatisfied = v?.satisfied === true && Boolean(v?.evidence?.trim());
-          const isWaived = scoring.waivedFallbacks.includes(crit.index);
+          const isSatisfied = v?.satisfied === true && Boolean(v?.evidence?.trim()) && !dupCollapsedSet.has(crit.index);
+          const isWaived = scoring.waivedFallbacks.includes(crit.index) || dupCollapsedSet.has(crit.index);
 
           markingPoints.push({
             point_number: crit.index + 1,
@@ -607,7 +784,7 @@ const MISSING_OR_FOREIGN_NOTE_PATTERNS = [
  * Returns true when a 0-mark subpart note indicates the subpart's work is absent from
  * the page or belongs to another question, so we never stamp stray crosses onto another page.
  */
-function isMissingOrForeignSubpartNote(sp: {
+export function isMissingOrForeignSubpartNote(sp: {
   score?: number;
   teacher_correction_note?: string;
   constructive_correction?: string;
@@ -794,6 +971,22 @@ export async function evaluateBookletAtomically(
     });
   });
 
+  // Extract one canonical verbatim transcript per active page before dispatching subparts,
+  // so every subpart on the same sheet—and repeated scans of the same image—sees identical text.
+  const uniquePageIndices = Array.from(new Set(tasks.map(t => t.input.canonicalPageIndex)));
+  const transcriptsByPage = new Map<number, string>();
+  if (uniquePageIndices.length > 0) {
+    console.log(`[AtomicBookletEvaluator] Extracting canonical transcript for ${uniquePageIndices.length} page(s)...`);
+    await runWithConcurrencyLimit(uniquePageIndices, 4, async (pIdx) => {
+      const tr = await getOrExtractPageTranscript(canonicalImages[pIdx], callChatCompletion);
+      if (tr) transcriptsByPage.set(pIdx, tr);
+    });
+    tasks.forEach((t) => {
+      const tr = transcriptsByPage.get(t.input.canonicalPageIndex);
+      if (tr) t.input.pageTranscript = tr;
+    });
+  }
+
   console.log(`[AtomicBookletEvaluator] Dispatched ${tasks.length} atomic subquestions across ${canonicalImages.length} canonical pages (concurrency 10)...`);
   const t0 = Date.now();
 
@@ -885,9 +1078,15 @@ export async function evaluateBookletAtomically(
     ? Math.round((grandTotalScore / grandTotalMax) * 100)
     : 0;
 
+  // Use the deduplicated subparts across attempted questions so duplicate subparts
+  // can never leak into synthesized annotations or page subparts.
+  const deduplicatedAllSubparts: AtomicSubpartOutput[] = questionEvaluations.flatMap(
+    (qe: any) => (Array.isArray(qe.subparts) ? qe.subparts : [])
+  );
+
   return {
     questionEvaluations: combinedEvaluations,
-    allSubparts: evaluatedSubparts,
+    allSubparts: deduplicatedAllSubparts,
     grandTotalScore,
     grandTotalMax,
     percentage: finalPercentage
@@ -920,8 +1119,8 @@ export function synthesizeBookletAnnotations(
     });
   }
 
-  // Group subparts by page index (only including valid, attempted subparts)
-  const subpartsByPage = new Map<number, AtomicSubpartOutput[]>();
+  // Deduplicate subparts by (question_number, canonical_label) before grouping by page
+  const uniqueSubpartsMap = new Map<string, AtomicSubpartOutput>();
   subparts.forEach((sp) => {
     const p = sp.page_index;
     if (typeof p !== 'number' || p < 0 || p >= canonicalImages.length) return;
@@ -930,6 +1129,19 @@ export function synthesizeBookletAnnotations(
     // Filter out annotations that are explicit mismatch or missing-work notices
     if (isMissingOrForeignSubpartNote(sp)) return; // Do not stamp annotations on the wrong question's page!
 
+    const qKey = String(sp.question_number || '').trim();
+    const partKey = canonicalLabel(sp.canonical_label || sp.part_label || '');
+    const uniqueKey = `${qKey}::${partKey}`;
+    const existing = uniqueSubpartsMap.get(uniqueKey);
+    if (!existing || (Number(sp.score) || 0) > (Number(existing.score) || 0)) {
+      uniqueSubpartsMap.set(uniqueKey, sp);
+    }
+  });
+
+  // Group deduplicated subparts by page index
+  const subpartsByPage = new Map<number, AtomicSubpartOutput[]>();
+  uniqueSubpartsMap.forEach((sp) => {
+    const p = sp.page_index;
     if (!subpartsByPage.has(p)) subpartsByPage.set(p, []);
     subpartsByPage.get(p)!.push(sp);
   });
@@ -958,21 +1170,25 @@ export function synthesizeBookletAnnotations(
           ? (sp.marks_awarded?.[0] || `Part ${sp.part_label}: ${sp.score}/${sp.max_score} marks`)
           : (sp.deductions?.[0] || `Part ${sp.part_label}: 0/${sp.max_score} marks`),
         box_2d: [Math.max(yMid - 14, 25), 865, Math.min(yMid + 14, 875), 975],
+        question_number: sp.question_number,
         subpart_label: sp.part_label,
         page_index: pIdx
       });
 
       // 2. Inline ticks for earned marking points
-      // Exactly sp.score neat ticks placed neatly to the right, well clear of the margin badge (x >= 865)
+      // Spread ticks neatly to the left of the margin badge (x <= 785) so multi-mark ticks never pile on top of each other
       const earnedCount = Math.min(Math.max(0, sp.score), sp.max_score);
+      const tickStep = earnedCount > 6 ? 24 : 28;
+      const tickStartX = Math.max(460, 785 - Math.max(0, earnedCount - 1) * tickStep);
       for (let k = 0; k < earnedCount; k++) {
         const tickY = Math.max(yMid - 10, 25);
-        const tickX = Math.min(700 + k * 28, 785);
+        const tickX = Math.min(tickStartX + k * tickStep, 785);
         annotations.push({
           type: 'inline_tick',
           text: '✓',
           comment: sp.marks_awarded?.[k] || `Part ${sp.part_label} mark ${k + 1} earned`,
-          box_2d: [Math.max(tickY - 14, 25), tickX, Math.min(tickY + 14, 875), Math.min(tickX + 26, 815)],
+          box_2d: [Math.max(tickY - 14, 25), tickX, Math.min(tickY + 14, 875), Math.min(tickX + 22, 810)],
+          question_number: sp.question_number,
           subpart_label: sp.part_label,
           page_index: pIdx
         });
@@ -985,6 +1201,7 @@ export function synthesizeBookletAnnotations(
           text: sp.teacher_correction_note,
           comment: sp.constructive_correction || sp.teacher_correction_note,
           box_2d: [Math.min(yMid + 16, 845), 160, Math.min(yMid + 50, 880), 820],
+          question_number: sp.question_number,
           subpart_label: sp.part_label,
           page_index: pIdx
         });
