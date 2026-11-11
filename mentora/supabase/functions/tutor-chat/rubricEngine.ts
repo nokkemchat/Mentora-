@@ -105,7 +105,7 @@ export function parseRubric(
     const baseCode = aoCapMatch ? aoCapMatch[1].toUpperCase() : code;
     const isGuidance = /^(GUIDANCE|MARKING GUIDANCE|NOTE)$/i.test(baseCode) || /—\s*note$/i.test(code);
     const isAllocation = /^(MARK ALLOCATION)$/i.test(baseCode);
-    const isLevel = /^LEVEL/.test(baseCode) || /level\s+\d/i.test(rr.text);
+    const isLevel = /^LEVEL/.test(baseCode) || /^level\s+\d\b/i.test(rr.text);
 
     if (isGuidance || isAllocation) {
       const guidanceEntry = `${isAllocation ? 'MARK ALLOCATION' : 'GUIDANCE'}: ${rr.text}`;
@@ -173,6 +173,31 @@ export function parseRubric(
     const aoCapGuidance = aoCapMatch
       ? `Per-AO budget: ${aoCapMatch[1].toUpperCase()} up to ${aoCapMatch[2]} marks`
       : '';
+
+    // Expand combined multi-mark "or"-lists (e.g. "(a) [4] Fact 1. or Fact 2. or ...")
+    // into individual 1-mark items so 1 recalled fact cannot earn all 4 marks.
+    if (!isLevel && value >= 2 && !isCalculationCriterion(baseCode, rr.text)) {
+      const orClauses = rr.text.split(/(?<=[.?!])\s+or\s+/i).map(s => s.trim()).filter(Boolean);
+      if (orClauses.length >= value) {
+        for (const clause of orClauses) {
+          rows.push({
+            index: idx++,
+            label,
+            code: baseCode,
+            value: 1,
+            text: clause,
+            isLevel: false,
+            isFallback: false,
+            guidance: [
+              ...(subpartWideGuidance.length > 0 ? [subpartWideGuidance.join(' | ')] : []),
+              ...(aoCapGuidance ? [aoCapGuidance] : [])
+            ].join(' | ') || undefined,
+            overlapGroup: null
+          } as RubricCriterion);
+        }
+        continue;
+      }
+    }
 
     rows.push({
       index: idx++,
@@ -310,6 +335,23 @@ function predicateGroupHits(text: string): Set<number> {
   return hits;
 }
 
+/**
+ * Returns true if a rubric criterion represents a mathematical/numeric calculation
+ * step (M/A/SC method/accuracy codes or numeric/formula B-codes), rather than a
+ * qualitative prose point. Used consistently across overlap grouping, consensus gating,
+ * and evidence deduplication.
+ */
+export function isCalculationCriterion(code: string, text: string): boolean {
+  if (/^(?:M\d|A\d|SC\d?)(?:DEP)?$/i.test(code)) return true;
+  if (!/^B\d(?:DEP)?$/i.test(code)) return false;
+  return (
+    /[=<>±√π×÷^]/.test(text) ||
+    /(?:\d|\))\s*[+\-*/]\s*(?:\d|\(|[a-z]\b)/i.test(text) ||
+    /\b\d+(?:\.\d+)?\s*(?:cm|mm|km|mg|kg|mol|dm|ml|°)\b/i.test(text) ||
+    /^\s*(?:allow|accept|cao|oe|ft|isw)?\s*-?\d+(?:\.\d+)?(?:\s*(?:,|or)\s*-?\d+(?:\.\d+)?)*\s*$/i.test(text)
+  );
+}
+
 function assignOverlapGroups(rows: RubricCriterion[]): void {
   const words = rows.map(r => new Set(stemmedContentWords(r.text)));
   const predHits = rows.map(r => predicateGroupHits(r.text));
@@ -333,8 +375,6 @@ function assignOverlapGroups(rows: RubricCriterion[]): void {
       // 1. Explicit alternatives ('or', 'instead', 'alternative')
       // 2. Descending partial tiers for the same calculation step (e.g. M2 with M1 partial factorisation,
       //    or B2 with B1 for one correct value, or SC1 fallback).
-      const isCalculationStep = (c: string, t: string) =>
-        /^(?:M\d|A\d|SC\d?)(?:DEP)?$/i.test(c) || (/^B\d(?:DEP)?$/i.test(c) && /[\d=+\-*/<>]/.test(t));
       const isExplicitAlt = (t: string) => /^(?:or\s+|instead\s+|alternative\b)/i.test(t);
 
       const isSameFamilyPartial = (idxA: number, idxB: number): boolean => {
@@ -369,7 +409,7 @@ function assignOverlapGroups(rows: RubricCriterion[]): void {
         return false;
       };
 
-      if (isCalculationStep(rows[i].code, rows[i].text) && isCalculationStep(rows[j].code, rows[j].text)) {
+      if (isCalculationCriterion(rows[i].code, rows[i].text) && isCalculationCriterion(rows[j].code, rows[j].text)) {
         if (isSameFamilyPartial(i, j) || isExplicitAlt(rows[j].text)) {
           union(i, j);
         }
@@ -433,8 +473,44 @@ function assignOverlapGroups(rows: RubricCriterion[]): void {
 }
 
 /**
+ * Checks whether two qualitative rubric criteria share substantive concept overlap
+ * (so citing identical student text for both is double-counting), while keeping
+ * genuinely distinct rubric facts separate (even when packed into one compound sentence).
+ */
+function criteriaShareConceptOverlap(rowA: RubricCriterion, rowB: RubricCriterion): boolean {
+  if (rowA.overlapGroup !== null && rowA.overlapGroup === rowB.overlapGroup) return true;
+
+  const tokA = new Set(stemmedContentWords(rowA.text));
+  const tokB = new Set(stemmedContentWords(rowB.text));
+  if (tokA.size > 0 && tokB.size > 0) {
+    const inter = [...tokA].filter(w => tokB.has(w)).length;
+    const minSize = Math.min(tokA.size, tokB.size);
+    const unionSize = new Set([...tokA, ...tokB]).size;
+    if ((inter >= 2 && inter / unionSize >= 0.25) || (inter >= 2 && inter / minSize >= 0.40)) {
+      return true;
+    }
+  }
+
+  const predA = predicateGroupHits(rowA.text);
+  const predB = predicateGroupHits(rowB.text);
+  const sharedPreds = [...predA].filter(p => predB.has(p));
+  if (sharedPreds.length > 0 && tokA.size > 0 && tokB.size > 0) {
+    const predTerms = new Set<string>();
+    for (const gIdx of sharedPreds) {
+      for (const term of GENERIC_PREDICATE_GROUPS[gIdx]) {
+        stemmedContentWords(term).forEach(s => predTerms.add(s));
+      }
+    }
+    const sharedEntities = [...tokA].filter(w => tokB.has(w) && !predTerms.has(w));
+    if (sharedEntities.length >= 1) return true;
+  }
+
+  return false;
+}
+
+/**
  * Checks whether two cited student evidence snippets represent the same single
- * sentence/claim, preventing double-counting when one quote is cited for two B1 criteria.
+ * claim/phrase, preventing double-counting when one quote is cited for two overlapping B1 criteria.
  */
 function areEvidenceSnippetsSameClaim(evA: string, evB: string): boolean {
   const aClean = String(evA || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -525,21 +601,12 @@ export function computeSubpartScore(
     }
   }
 
-  // 2b. Dynamic Evidence Deduplication:
-  // If two distinct qualitative 1-mark criteria (not calculation formulas) cite the
-  // exact same student sentence/phrase as evidence, collapse the duplicate claim so
-  // one sentence cannot earn two separate marks on subjective checklists.
-  const isQualitativeSingleMark = (r?: RubricCriterion): boolean => {
-    if (!r || r.value !== 1) return false;
-    const isCalc =
-      /^(?:M\d|A\d|SC\d?)(?:DEP)?$/i.test(r.code) ||
-      (/^B\d(?:DEP)?$/i.test(r.code) &&
-        (/[=<>±√π×÷^]/.test(r.text) ||
-          /(?:\d|\))\s*[+\-*/]\s*(?:\d|\(|[a-z]\b)/i.test(r.text) ||
-          /\b\d+(?:\.\d+)?\s*(?:cm|mm|km|mg|kg|mol|dm|ml|°)\b/i.test(r.text) ||
-          /^\s*(?:allow|accept|cao|oe|ft|isw)?\s*-?\d+(?:\.\d+)?(?:\s*(?:,|or)\s*-?\d+(?:\.\d+)?)*\s*$/i.test(r.text)));
-    return !isCalc;
-  };
+  // 2b. Concept-Gated Dynamic Evidence Deduplication:
+  // Only collapse duplicate/overlapping evidence between two qualitative 1-mark
+  // criteria when the rubric criteria themselves share concept overlap. Distinct facts
+  // packed into one compound sentence (Biology/Chemistry/History) are never collapsed.
+  const isQualitativeSingleMark = (r?: RubricCriterion): boolean =>
+    Boolean(r && r.value === 1 && !isCalculationCriterion(r.code, r.text));
 
   const acceptedEntries: Array<{ group: number; value: number; row: RubricCriterion; evidence: string }> = [];
   const duplicateEvidenceIndices: number[] = [];
@@ -550,7 +617,10 @@ export function computeSubpartScore(
     const ev = groupEvidence.get(g) || '';
     if (ev && isQualitativeSingleMark(row)) {
       const dupMatch = acceptedEntries.find(
-        (prev) => isQualitativeSingleMark(prev.row) && areEvidenceSnippetsSameClaim(prev.evidence, ev)
+        (prev) =>
+          isQualitativeSingleMark(prev.row) &&
+          criteriaShareConceptOverlap(prev.row, row) &&
+          areEvidenceSnippetsSameClaim(prev.evidence, ev)
       );
       if (dupMatch) {
         duplicateClaimCollapses++;

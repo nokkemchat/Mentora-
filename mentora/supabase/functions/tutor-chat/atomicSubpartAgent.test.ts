@@ -189,8 +189,8 @@ async function main() {
   assert(transcriptCalls === 1 && t1 === t2 && t1.includes('lacked an army'), `Same image triggers only 1 transcript extraction call (got ${transcriptCalls})`);
 
   const ESSAY_SCHEME = `
-(b) [B1] Lack of political will.
-(b) [B1] Economic depression weakened authority.
+(b) [B1] Lack of political will to act.
+(b) [B1] Leaders showed weak political will to act.
 (b) [B1] Absent major powers reduced reach.
 (b) [B1] Slow decision making harmed action.
 `;

@@ -317,29 +317,46 @@ const q3PartialVerdicts = [
 const q3PartialScore = computeSubpartScore(mathQ3Rub, q3PartialVerdicts, 3);
 assert(q3PartialScore.score === 2, `student scores 2/3 with partial M1 + B1 (got ${q3PartialScore.score}/3)`);
 
-console.log('\n[20] DYNAMIC EVIDENCE DEDUPLICATION — one student claim cannot double-count:');
-const GENERIC_ESSAY_SCHEME = `
-(b) [B1] Lack of political will of Presidents/Federal Government.
-(b) [B1] Reconstruction was weakened by Johnson.
-(b) [B1] President Johnson allowed Black Codes to appear.
+console.log('\n[20] CONCEPT-GATED EVIDENCE DEDUPLICATION — overlapping claims collapse; distinct compound facts do not:');
+const OVERLAPPING_ESSAY_SCHEME = `
+(b) [B1] Lack of political will of the Federal Government.
+(b) [B1] Federal Government reduced involvement and enforcement.
+(b) [B1] President allowed state restrictions to appear.
 `;
-const essayRub = parseRubric('b', GENERIC_ESSAY_SCHEME);
+const essayRub = parseRubric('b', OVERLAPPING_ESSAY_SCHEME);
 const sameQuoteVerdicts = [
   { criterionIndex: 0, satisfied: true, evidence: 'The federal government eventually reduced its involvement in the South, so protection became weaker.' },
   { criterionIndex: 1, satisfied: true, evidence: 'The federal government eventually reduced its involvement in the South, so protection became weaker.' },
   { criterionIndex: 2, satisfied: false, evidence: '' }
 ];
 const dedupedRes = computeSubpartScore(essayRub, sameQuoteVerdicts, 6);
-assert(dedupedRes.score === 1, `exact same evidence sentence across two B1 points → 1 mark (got ${dedupedRes.score})`);
+assert(dedupedRes.score === 1, `exact same evidence sentence across overlapping B1 points → 1 mark (got ${dedupedRes.score})`);
 assert(dedupedRes.duplicateEvidenceIndices.includes(1), `second duplicate-evidence criterion recorded in duplicateEvidenceIndices`);
 
 const distinctQuotesVerdicts = [
   { criterionIndex: 0, satisfied: true, evidence: 'The federal government eventually reduced its involvement in the South.' },
-  { criterionIndex: 1, satisfied: true, evidence: 'Johnson vetoed civil rights bills and pardoned former Confederates.' },
+  { criterionIndex: 1, satisfied: true, evidence: 'New federal officers withdrew before enforcing civil rights.' },
   { criterionIndex: 2, satisfied: false, evidence: '' }
 ];
 const distinctRes = computeSubpartScore(essayRub, distinctQuotesVerdicts, 6);
-assert(distinctRes.score === 2, `distinct evidence sentences across two B1 points → 2 marks (got ${distinctRes.score})`);
+assert(distinctRes.score === 2, `distinct evidence claims across overlapping B1 points → 2 marks (got ${distinctRes.score})`);
+
+console.log('\n[21] COMPOUND SENTENCE SAFETY (Biology / Chemistry / History distinct facts packed in 1 sentence):');
+const BIO_SCHEME = `
+(a) [B1] substrate binds to complementary active site
+(a) [B1] enzyme-substrate complex is formed
+(a) [B1] lowers activation energy of reaction
+`;
+const bioRub = parseRubric('a', BIO_SCHEME);
+const compoundSentence = 'The substrate binds to the complementary active site forming an enzyme-substrate complex.';
+const bioSameSentenceVerdicts = [
+  { criterionIndex: 0, satisfied: true, evidence: compoundSentence },
+  { criterionIndex: 1, satisfied: true, evidence: compoundSentence },
+  { criterionIndex: 2, satisfied: false, evidence: '' }
+];
+const bioRes = computeSubpartScore(bioRub, bioSameSentenceVerdicts, 3);
+assert(bioRes.score === 2, `two distinct Biology facts in 1 compound sentence → 2 marks, NOT collapsed (got ${bioRes.score})`);
+assert(bioRes.duplicateEvidenceIndices.length === 0, `no false duplicate flagged when rubric criteria are distinct facts`);
 
 console.log(`\n══════════════════════════════════════`);
 console.log(`FINAL: ${passed} passed, ${failed} failed`);

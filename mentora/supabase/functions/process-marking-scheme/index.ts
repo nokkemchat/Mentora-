@@ -178,9 +178,10 @@ STRICT RULES:
 2. Preserve the EXACT criteria text, allowed answers, "or" alternatives, level descriptors, bracketed guidance, and figures from the scheme. Do NOT summarise, compress, or rephrase.
 3. EXACT NUMBERS (CRITICAL): copy every number, date, unit, angle, and value EXACTLY as printed in the mark scheme. NEVER round, approximate, or reformat values.
 4. Keep each subpart label exactly as printed (e.g. "(a)", "(b)(i)", "(c)") followed by the mark code in square brackets, e.g. [B1], [C1], [A1], [M1], [1], or [LEVEL].
-5. If a subpart is point-marked, ensure mark code values match the subpart marks; if it uses Level-of-Response bands, output ALL level bands with their mark ranges (e.g. "— 7–9", "— 10") plus all indicative content points.
-6. If the mark scheme also has a "Notes" or guidance column for a row, append it to that row's line after " — Guidance: ...".
-7. "ai_worked_solution": a clear step-by-step full solution. "common_mistakes": pitfalls/misconceptions. "examiner_tips": key guidance.
+5. For point-marked subparts with multiple "1 mark for each point / or" alternatives (e.g. a 4-mark list of facts), split EACH alternative onto its own separate [1] line — NEVER merge multiple points into one combined [4] line joined by "or".
+6. If a subpart uses Level-of-Response bands, output ALL level bands with their mark ranges (e.g. "— 7–9", "— 10") plus all indicative content bullets (as [B1], NOT numbered [B1], [B2], [B3]), and do NOT output meta-rubric rules like "One Level 2 mark for each..." as a [B1] criterion.
+7. If the mark scheme also has a "Notes" or guidance column for a row, append it to that row's line after " — Guidance: ...".
+8. "ai_worked_solution": a clear step-by-step full solution. "common_mistakes": pitfalls/misconceptions. "examiner_tips": key guidance.
 
 Return ONLY raw JSON:
 { "question_number": "${q.question_number}", "official_mark_scheme": "...", "ai_worked_solution": "...", "common_mistakes": "...", "examiner_tips": "..." }`;

@@ -20,6 +20,7 @@ import {
   parseRubric,
   computeSubpartScore,
   canonicalLabel,
+  isCalculationCriterion,
   ParsedRubric,
   RubricCriterion
 } from "./rubricEngine.ts";
@@ -365,8 +366,8 @@ CRITICAL RULES FOR ATOMIC SUBPART MARKING:
    - For numerical accuracy (A) and independent (B) marks: verify numbers against the scheme or acceptable range. Accept standard rounding or equivalent fractions.
 4. DISTINCT EVIDENCE PER CRITERION & NO INFERENTIAL STRETCHING:
    - Mark a criterion "satisfied": true ONLY if the candidate's response EXPLICITLY states or directly demonstrates that specific criterion. Never infer an unstated motive, conclusion, or institution from a tangential or generic sentence.
-   - Do NOT reuse the exact same student sentence or phrase to satisfy multiple separate single-mark criteria unless they explicitly ask for different aspects clearly stated in separate clauses or distinct calculation steps on one line.
-   - For each criterion (by index 0..N-1): if satisfied, quote the candidate's exact words/expression in "evidence"; if not satisfied, "evidence" MUST be "".
+   - Do NOT reuse the exact same claim or phrase across multiple overlapping criteria. However, if a compound sentence genuinely packs two distinct facts/points (e.g. two Biology steps or two History events in one sentence), BOTH may be credited provided you quote ONLY the specific minimal clause or phrase matching each criterion.
+   - For each criterion (by index 0..N-1): if satisfied, quote ONLY the exact minimal clause, phrase, or expression proving that specific criterion (NOT the entire surrounding sentence); if not satisfied, "evidence" MUST be "".
 5. ANSWER LINE COORDINATE & STUDENT DETECTED ANSWER:
    - "answer_line_y": estimate the 0-1000 vertical coordinate where the printed answer line or student's final answer sits on the page.
    - "student_answer_detected": transcribe the student's final answer or conclusion.
@@ -427,9 +428,7 @@ export async function evaluateSubpartAtomically(
 
   const hasStructuredCriteria = rubric.criteria.length > 0;
   const hasCalcCriteria = rubric.criteria.some(
-    (c: RubricCriterion) =>
-      /^(?:M\d|A\d|SC\d?)(?:DEP)?$/i.test(c.code) ||
-      (/^B\d(?:DEP)?$/i.test(c.code) && /[\d=+\-*/<>]/.test(c.text))
+    (c: RubricCriterion) => isCalculationCriterion(c.code, c.text)
   );
 
   let prompt = "";

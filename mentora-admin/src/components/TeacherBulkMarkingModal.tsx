@@ -172,6 +172,14 @@ async function uploadBase64ToStorage(
   }
 }
 
+const CONCURRENCY_PRESETS = [1, 2, 4, 6, 8, 10] as const;
+const MAX_CONCURRENCY = 10;
+
+function clampConcurrency(value: number): number {
+  if (!Number.isFinite(value)) return 1;
+  return Math.min(MAX_CONCURRENCY, Math.max(1, Math.round(value)));
+}
+
 export default function TeacherBulkMarkingModal({ paper, onClose, onPaperUpdated }: TeacherBulkMarkingModalProps) {
   const { user, isStudent, isTeacher, isAdmin } = useAuth();
   const defaultStudentName = user?.user_metadata?.first_name 
@@ -1667,7 +1675,7 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                             <SlidersHorizontal className="w-3 h-3" />
                             Workers:
                           </span>
-                          {[1, 2, 4, 6, 8, 10].map((num) => (
+                          {CONCURRENCY_PRESETS.map((num) => (
                             <button
                               key={num}
                               onClick={() => setConcurrency(num)}
@@ -1676,9 +1684,9 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                                   ? 'bg-primary text-white shadow-sm'
                                   : 'text-textMuted hover:text-text hover:bg-border/40'
                               }`}
-                              title={`Run ${num} student papers concurrently (Maximum 10x)`}
+                              title={`Run ${num} student papers concurrently (Maximum ${MAX_CONCURRENCY}x)`}
                             >
-                              {num}x{num === 10 ? ' Max' : num === 4 ? ' ★' : ''}
+                              {num}x{num === MAX_CONCURRENCY ? ' Max' : num === 4 ? ' ★' : ''}
                             </button>
                           ))}
                         </div>
@@ -2225,6 +2233,57 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                 </div>
               </div>
 
+              {/* Pre-Submission Parallel Batch Count Selector (Teachers only) */}
+              {!isStudent && (
+                <div className="p-3.5 rounded-2xl border border-border bg-background/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-text uppercase tracking-wider flex items-center gap-1.5">
+                      <Layers className="w-3.5 h-3.5 text-primary" />
+                      <span>Parallel Batches (Before Submitting)</span>
+                    </label>
+                    <p className="text-[11px] text-textMuted mt-0.5">
+                      Choose how many student papers to mark at the same time (1–{MAX_CONCURRENCY}).
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <div className="flex items-center bg-surface border border-border rounded-xl p-0.5">
+                      {CONCURRENCY_PRESETS.map((num) => (
+                        <button
+                          key={num}
+                          type="button"
+                          onClick={() => setConcurrency(num)}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                            concurrency === num
+                              ? 'bg-primary text-white shadow-sm'
+                              : 'text-textMuted hover:text-text hover:bg-border/40'
+                          }`}
+                          title={`Run ${num} papers concurrently`}
+                        >
+                          {num}x{num === MAX_CONCURRENCY ? ' Max' : num === 4 ? ' ★' : ''}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="flex items-center gap-1.5 bg-surface border border-border rounded-xl px-2.5 py-1">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-textMuted">Custom:</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={MAX_CONCURRENCY}
+                        value={concurrency}
+                        onChange={(e) => {
+                          const parsed = parseInt(e.target.value, 10);
+                          if (!Number.isNaN(parsed)) setConcurrency(clampConcurrency(parsed));
+                        }}
+                        aria-label="Number of parallel batches before submitting"
+                        className="w-11 bg-transparent text-xs font-bold text-text text-center focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* TAB 1: BATCH CLASS UPLOAD (Teachers only) */}
               {!isStudent && uploadTab === 'batch' && (
                 <div className="space-y-4">
@@ -2366,7 +2425,19 @@ EXAMINER ASSESSMENT & MARKING INSTRUCTIONS:
                       {/* Batch Action Bar */}
                       <div className="pt-3 border-t border-border flex items-center justify-between gap-3">
                         <div className="text-[11px] text-textMuted">
-                          Estimated marking duration: <span className="text-text font-semibold">~1-2 minutes</span> with {concurrency}x parallel workers.
+                          {(() => {
+                            const selectedCount = batchEntries.filter(b => b.selected).length;
+                            const rounds = selectedCount > 0 ? Math.ceil(selectedCount / concurrency) : 0;
+                            return (
+                              <>
+                                Running <span className="text-text font-semibold">{concurrency}x parallel batches</span>
+                                {selectedCount > 0 && (
+                                  <> ({rounds} {rounds === 1 ? 'batch round' : 'batch rounds'} for {selectedCount} {selectedCount === 1 ? 'student' : 'students'})</>
+                                )}
+                                .
+                              </>
+                            );
+                          })()}
                         </div>
 
                         <div className="flex items-center gap-2">
