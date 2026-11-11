@@ -418,6 +418,47 @@ assert(
   'rejects sign-flipped -3.7 copied from scheme when transcript has +3.7 and -2.7'
 );
 
+console.log('\n[25] INLINE GUIDANCE SPLIT, TIERED FALLBACKS & ORDERED SEQUENCE GUARD:');
+const EACH_SCHEME = `(d) [B2] -3.7 -2.7 — Guidance: B1FT for each`;
+const eachRub = parseRubric('d', EACH_SCHEME);
+assert(eachRub.criteria.length === 2, `B1FT for each splits -3.7 -2.7 into 2 criteria (got ${eachRub.criteria.length})`);
+assert(eachRub.criteria.every(c => c.code === 'B1FT' && c.value === 1), 'split criteria carry B1FT code with value 1 each');
+const partialRootScore = computeSubpartScore(eachRub, [{ criterionIndex: 1, satisfied: true, evidence: 'x ≈ -2.7' }], 2);
+assert(partialRootScore.score === 1, `quoting single root awards 1/2 instead of inflating to 2/2 (got ${partialRootScore.score})`);
+
+const TIERED_TABLE_SCHEME = `(a) [B3] 9, 3, -3, -3, -3 — Guidance: B2 for 3 or 4 correct or B1 for 1 or 2 correct`;
+const tieredRub = parseRubric('a', TIERED_TABLE_SCHEME);
+assert(tieredRub.criteria.length === 3 && tieredRub.overlapGroups === 1, `tiered fallback criteria share 1 overlap group (rows=${tieredRub.criteria.length}, groups=${tieredRub.overlapGroups})`);
+const tableVerdicts = [
+  { criterionIndex: 0, satisfied: true, evidence: '9, 3, -1, -3, -3, -1, 3, 9' },
+  { criterionIndex: 1, satisfied: true, evidence: '9, 3, -3, -3 match' }
+];
+const tieredScore = computeSubpartScore(tieredRub, tableVerdicts, 3);
+assert(tieredScore.score === 2 && tieredScore.contradictedIndices.includes(0), `contradicts B3 when third -3 missing and awards B2 fallback 2/3 (got ${tieredScore.score})`);
+
+const STEM_LEAF_SCHEME = `
+(c) [B2] 2 [5 7 9] 3 [6 8 8 8] 4 1 3 3 9 5 2 3 9 9 6 0
+(c) [B1] for 53 seen or for stem and leaf with no more than 2 errors or omissions.
+`;
+const stemRub = parseRubric('c', STEM_LEAF_SCHEME);
+assert(
+  isVerdictContradicted(stemRub.criteria[0], '2 | 5 7 9\n3 | 6 8 8 8\n4 | 1 1 7\n5 | 0 3 7 7 8\n6 | 1') === true,
+  'rejects mismatched stem-and-leaf leaves via ordered sequence check'
+);
+assert(
+  isVerdictContradicted(stemRub.criteria[0], '2 | 5 7 9\n3 | 6 8 8 8\n4 | 1 3 3 9\n5 | 2 3 9 9\n6 | 0') === false,
+  'accepts matching stem-and-leaf diagram'
+);
+assert(
+  isFabricatedSchemeQuote(
+    stemRub.criteria[0].text,
+    '2 | 5 7 9 3 | 6 8 8 8 4 1 3 3 9 5 2 3 9 9 6 0',
+    '4(a) values 23, 36, 38, 39, 40, 41, 47, 50, 61. 4(c) Updated diagram: 2 | 5 7 9, 3 | 6 8 8 8, 4 | 1 1 7, 5 | 0 3 7 7 8, 6 | 1.',
+    { requireSequenceOnly: true }
+  ) === true,
+  'rejects hallucinated verbatim stem-and-leaf sequence on visual subpart even when stray digits appear on page'
+);
+
 console.log(`\n══════════════════════════════════════`);
 console.log(`FINAL: ${passed} passed, ${failed} failed`);
 console.log(`══════════════════════════════════════`);

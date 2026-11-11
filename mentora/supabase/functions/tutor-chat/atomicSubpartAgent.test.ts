@@ -3,6 +3,7 @@ import {
   runWithConcurrencyLimit,
   synthesizeBookletAnnotations,
   evaluateSubpartAtomically,
+  evaluateBookletAtomically,
   getOrExtractPageTranscript,
   safeParseJsonObject
 } from './atomicSubpartAgent.ts';
@@ -349,6 +350,105 @@ async function main() {
     fabricatedChat
   );
   assert(guardOut.score === 2 && guardOut.verdicts?.[0]?.satisfied === false, `Stripped ungrounded scheme quote (30 ÷ 100 × 11.5) while keeping grounded $59.80 -> score 2 (got ${guardOut.score})`);
+
+  console.log('\n[8] Attempted 1-mark & visual 1-mark subparts recover from Pass 1 flake via consensus:');
+  let clockCalls = 0;
+  const clockChat = async (_msgs: any[], _temp?: number, seed?: number) => {
+    clockCalls++;
+    // Pass 1 (seed 42) flakes false; Pass 2 (seed 101) and Pass 3 (seed 202) both recover true
+    const pass = seed !== 42;
+    return {
+      ok: true,
+      data: {
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              student_answer_detected: '10:27 drawn on clock face',
+              transcription_notes: 'Hands pointing at 10 and 27',
+              answer_line_y: 250,
+              verdicts: [{ criterion_index: 0, satisfied: pass, evidence: pass ? 'Clock diagram showing 10:27' : '' }],
+              teacher_correction_note: '',
+              constructive_correction: ''
+            })
+          }
+        }]
+      }
+    };
+  };
+  const clockOut = await evaluateSubpartAtomically(
+    {
+      questionNumber: '3',
+      partLabel: '(a)(ii)',
+      canonicalLabel: 'a.ii',
+      marksAvailable: 1,
+      officialMarkScheme: '(a)(ii) [B1] 10 27 drawn correctly on clock face.',
+      canonicalPageIndex: 0,
+      pageImageUrl: 'data:image/jpeg;base64,CLOCK_IMG',
+      pageTranscript: '3(a)(ii) 10:47 - 20 minutes = 10:27'
+    },
+    clockChat
+  );
+  assert(clockCalls === 3 && clockOut.score === 1, `Visual 1-mark subpart ran 2-of-3 consensus and recovered from Pass 1 flake -> 1/1 (calls=${clockCalls}, score=${clockOut.score})`);
+
+  console.log('\n[9] Wave 1 -> Wave 2 FT previousAnswerSnippet propagation in evaluateBookletAtomically:');
+  const wave2Prompts: string[] = [];
+  const bookletMockChat = async (msgs: any[], _temp?: number, _seed?: number) => {
+    const userContent = msgs[1]?.content;
+    const promptText = Array.isArray(userContent) ? String(userContent[0]?.text || '') : String(userContent || '');
+    if (promptText.includes('Transcribe ALL candidate handwritten')) {
+      return { ok: true, data: { choices: [{ message: { content: JSON.stringify({ transcript: 'Q6 (d)(i) Scale factor = 3. (d)(ii) (1,4), (1,12), (13,2). Lots of extra transcript context to exceed 80 chars cleanly.' }) } }] } };
+    }
+    if (promptText.includes('Part ((d)(ii))')) {
+      wave2Prompts.push(promptText);
+      return {
+        ok: true,
+        data: {
+          choices: [{
+            message: {
+              content: JSON.stringify({
+                student_answer_detected: '(1,4), (1,12), (13,2)',
+                answer_line_y: 860,
+                verdicts: [
+                  { criterion_index: 0, satisfied: false, evidence: '' },
+                  { criterion_index: 1, satisfied: false, evidence: '' }
+                ],
+                teacher_correction_note: 'Incorrect vertices',
+                constructive_correction: ''
+              })
+            }
+          }]
+        }
+      };
+    }
+    return {
+      ok: true,
+      data: {
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              student_answer_detected: 'Scale factor = 3',
+              answer_line_y: 560,
+              verdicts: [{ criterion_index: 0, satisfied: false, evidence: '' }],
+              teacher_correction_note: 'Wrong scale factor',
+              constructive_correction: ''
+            })
+          }
+        }]
+      }
+    };
+  };
+  const ftBookletOut = await evaluateBookletAtomically(
+    ['data:image/jpeg;base64,WAVE_BOOKLET_IMG'],
+    { page_fingerprints: [{ raw_page_index: 0, detected_questions: ['6'] }], subpart_locations: new Map() },
+    [{ id: 'q6-id', question_number: '6', marks: 3, topic: 'Transformations' }],
+    { 'q6-id': '(d)(i) [B1] 7\n(d)(ii) [B1FT] (1,28)\n(d)(ii) [B1FT] (29,7)' },
+    { 'q6-id': [{ part_label: 'd.i', marks: 1 }, { part_label: 'd.ii', marks: 2 }] },
+    bookletMockChat
+  );
+  assert(
+    wave2Prompts.length > 0 && wave2Prompts.every(p => p.includes('Scale factor = 3')),
+    `Wave 2 FT evaluation received Wave 1 previousAnswerSnippet ("Scale factor = 3") in prompt (calls=${wave2Prompts.length}, subparts=${ftBookletOut.allSubparts.length})`
+  );
 
   console.log(`\n══════════════════════════════════════`);
   console.log(`RESULTS: ${passed} passed, ${failed} failed`);

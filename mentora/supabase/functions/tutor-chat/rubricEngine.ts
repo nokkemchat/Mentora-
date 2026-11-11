@@ -107,6 +107,18 @@ export function parseRubric(
     const isAllocation = /^(MARK ALLOCATION)$/i.test(baseCode);
     const isLevel = /^LEVEL/.test(baseCode) || /^level\s+\d\b/i.test(rr.text);
 
+    // Strip trailing inline guidance ("— Guidance: ..." or "— Note: ...") out of criterion text
+    // so numeric target parsers and quote validators see only the clean answer specification.
+    let cleanText = rr.text;
+    let inlineGuidance = '';
+    if (!isGuidance && !isAllocation) {
+      const inlineMatch = cleanText.match(/^(.+?)\s*[\u2013\u2014-]\s*((?:Guidance|Note)\s*:[\s\S]+)$/i);
+      if (inlineMatch) {
+        cleanText = inlineMatch[1].trim();
+        inlineGuidance = inlineMatch[2].trim();
+      }
+    }
+
     if (isGuidance || isAllocation) {
       const guidanceEntry = `${isAllocation ? 'MARK ALLOCATION' : 'GUIDANCE'}: ${rr.text}`;
       // Subpart-wide guidance ("Both parts must be clearly linked", AO budgets) applies
@@ -156,8 +168,8 @@ export function parseRubric(
           value = parseInt(codeDigits[1], 10);
         } else {
           // 3. Fallback: check criterion text for "— 3 marks", "[3 marks]", or "3 marks"
-          const textMarks = rr.text.match(/(?:[\u2013\u2014-]|\[|\()\s*(\d+)\s*marks?(?:\]|\)|\s|$)/i)
-            || rr.text.match(/\b(\d+)\s*marks?\b/i);
+          const textMarks = cleanText.match(/(?:[\u2013\u2014-]|\[|\()\s*(\d+)\s*marks?(?:\]|\)|\s|$)/i)
+            || cleanText.match(/\b(\d+)\s*marks?\b/i);
           if (textMarks) {
             value = parseInt(textMarks[1], 10);
           }
@@ -166,18 +178,53 @@ export function parseRubric(
     }
 
     const isFallback = /^SC/i.test(code)
-      || /^(?:if\s+(?:b0|0|b1)\s+scored|instead\s+award|or\s+sc\d)/i.test(rr.text)
-      || /^for\s+\d+\s+correct\b/i.test(rr.text);
+      || /^(?:if\s+(?:b0|0|b1)\s+scored|instead\s+award|or\s+sc\d)/i.test(cleanText)
+      || /^for\s+\d+\s+correct\b/i.test(cleanText);
 
     // Textual AO rows: record the per-AO cap as guidance so the judge sees it
     const aoCapGuidance = aoCapMatch
       ? `Per-AO budget: ${aoCapMatch[1].toUpperCase()} up to ${aoCapMatch[2]} marks`
       : '';
 
+    const combinedGuidance = [
+      ...(subpartWideGuidance.length > 0 ? [subpartWideGuidance.join(' | ')] : []),
+      ...(aoCapGuidance ? [aoCapGuidance] : []),
+      ...(inlineGuidance ? [inlineGuidance] : [])
+    ].join(' | ') || undefined;
+
+    // Split multi-item criteria with explicit "B1/B1FT/A1 for each" guidance (e.g. "-3.7 -2.7 — Guidance: B1FT for each")
+    // into individual 1-mark items so partial matches award 1 mark smoothly instead of swinging 0 vs full marks.
+    if (!isLevel && value >= 2 && !isFallback && inlineGuidance) {
+      const eachCodeMatch = inlineGuidance.match(/\b([ABM]1(?:FT|DEP)?|SC1)\s+(?:for\s+)?each\b/i);
+      if (eachCodeMatch) {
+        const tokenMatches = cleanText.match(/\([^)]+\)|-?\d+(?:\.\d+)?(?:\s*\/\s*-?\d+(?:\.\d+)?)?|[a-z]\s*=\s*-?\d+(?:\.\d+)?/gi) || [];
+        const leftover = cleanText
+          .replace(/\([^)]+\)|-?\d+(?:\.\d+)?(?:\s*\/\s*-?\d+(?:\.\d+)?)?|[a-z]\s*=\s*-?\d+(?:\.\d+)?/gi, '')
+          .replace(/[\s,;]+/g, '');
+        if (tokenMatches.length === value && leftover.length === 0) {
+          const itemCode = eachCodeMatch[1].toUpperCase();
+          for (const tok of tokenMatches) {
+            rows.push({
+              index: idx++,
+              label,
+              code: itemCode,
+              value: 1,
+              text: tok.trim(),
+              isLevel: false,
+              isFallback: false,
+              guidance: combinedGuidance,
+              overlapGroup: null
+            } as RubricCriterion);
+          }
+          continue;
+        }
+      }
+    }
+
     // Expand combined multi-mark "or"-lists (e.g. "(a) [4] Fact 1. or Fact 2. or ...")
     // into individual 1-mark items so 1 recalled fact cannot earn all 4 marks.
-    if (!isLevel && value >= 2 && !isCalculationCriterion(baseCode, rr.text)) {
-      const orClauses = rr.text.split(/(?<=[.?!])\s+or\s+/i).map(s => s.trim()).filter(Boolean);
+    if (!isLevel && value >= 2 && !isCalculationCriterion(baseCode, cleanText)) {
+      const orClauses = cleanText.split(/(?<=[.?!])\s+or\s+/i).map(s => s.trim()).filter(Boolean);
       if (orClauses.length >= value) {
         for (const clause of orClauses) {
           rows.push({
@@ -188,10 +235,7 @@ export function parseRubric(
             text: clause,
             isLevel: false,
             isFallback: false,
-            guidance: [
-              ...(subpartWideGuidance.length > 0 ? [subpartWideGuidance.join(' | ')] : []),
-              ...(aoCapGuidance ? [aoCapGuidance] : [])
-            ].join(' | ') || undefined,
+            guidance: combinedGuidance,
             overlapGroup: null
           } as RubricCriterion);
         }
@@ -204,15 +248,40 @@ export function parseRubric(
       label,
       code: baseCode,
       value,
-      text: rr.text,
+      text: cleanText,
       isLevel,
       isFallback,
-      guidance: [
-        ...(subpartWideGuidance.length > 0 ? [subpartWideGuidance.join(' | ')] : []),
-        ...(aoCapGuidance ? [aoCapGuidance] : [])
-      ].join(' | ') || undefined,
+      guidance: combinedGuidance,
       overlapGroup: null
     } as RubricCriterion);
+
+    // Materialize explicit tiered partial-credit fallbacks declared inside inline guidance
+    // (e.g. "Guidance: B2 for 3 or 4 correct or B1 for 1 or 2 correct") as fallback rows
+    // in the same overlap group so a single minor table mismatch degrades smoothly (e.g. 2/3)
+    // instead of collapsing from full marks to 0.
+    if (!isLevel && value >= 2 && inlineGuidance) {
+      const tierRe = /\b([ABM]\d+(?:FT|DEP)?|SC\d+)\s+for\s+((?:\d+(?:\s*(?:or|to|-)\s*\d+)?|one|two|three|four)\s+correct)\b/gi;
+      let tm: RegExpExecArray | null;
+      while ((tm = tierRe.exec(inlineGuidance)) !== null) {
+        const tierCode = tm[1].toUpperCase();
+        const tierCond = tm[2].trim();
+        const tierDigits = tierCode.match(/(\d+)/);
+        const tierVal = tierDigits ? parseInt(tierDigits[1], 10) : 1;
+        if (tierVal > 0 && tierVal < value) {
+          rows.push({
+            index: idx++,
+            label,
+            code: tierCode,
+            value: tierVal,
+            text: `${tierCond} (from: ${cleanText})`,
+            isLevel: false,
+            isFallback: true,
+            guidance: `Fallback partial tier for ${baseCode}`,
+            overlapGroup: null
+          } as RubricCriterion);
+        }
+      }
+    }
   }
 
   // Per-subpart guidance that had no preceding criterion (e.g. allocation rows first)
@@ -348,7 +417,8 @@ export function isCalculationCriterion(code: string, text: string): boolean {
     /[=<>±√π×÷^]/.test(text) ||
     /(?:\d|\))\s*[+\-*/]\s*(?:\d|\(|[a-z]\b)/i.test(text) ||
     /\b\d+(?:\.\d+)?\s*(?:cm|mm|km|mg|kg|mol|dm|ml|°)\b/i.test(text) ||
-    /^\s*(?:allow|accept|cao|oe|ft|isw)?\s*-?\d+(?:\.\d+)?(?:\s*(?:,|or)\s*-?\d+(?:\.\d+)?)*\s*$/i.test(text)
+    /^\s*(?:allow|accept|cao|oe|ft|isw)?\s*-?\d+(?:\.\d+)?(?:\s*(?:,|or)\s*-?\d+(?:\.\d+)?)*\s*$/i.test(text) ||
+    /^\s*(?:\[\s*[\d.\-\s]+\]|-?\d+(?:\.\d+)?)(?:[\s,|]+(?:\[\s*[\d.\-\s]+\]|-?\d+(?:\.\d+)?))+\s*$/i.test(text)
   );
 }
 
@@ -408,6 +478,14 @@ function assignOverlapGroups(rows: RubricCriterion[]): void {
 
         return false;
       };
+
+      // Explicitly materialized partial-credit fallback tiers (e.g. "B2 for 3 or 4 correct"
+      // derived from B3) always share an overlap group with their parent criterion.
+      if (rows[j].isFallback && rows[i].value > rows[j].value &&
+          rows[j].guidance?.includes(`Fallback partial tier for ${rows[i].code}`)) {
+        union(i, j);
+        continue;
+      }
 
       if (isCalculationCriterion(rows[i].code, rows[i].text) && isCalculationCriterion(rows[j].code, rows[j].text)) {
         if (isSameFamilyPartial(i, j) || isExplicitAlt(rows[j].text)) {
@@ -636,8 +714,49 @@ function extractEvidenceNumbers(evidence: string): {
 }
 
 /**
- * Deterministically rejects clear scalar mismatches on strict non-FT accuracy/independent
- * criteria (e.g. criterion "52" matched to "75°", or "-5" matched to "centre (1, 1)").
+ * Checks whether every number in `needle` appears in order inside `haystack`
+ * (allowing intervening numbers such as pre-printed table headers/values).
+ */
+function isOrderedSubsequence(needle: number[], haystack: number[]): boolean {
+  if (needle.length === 0) return true;
+  if (haystack.length < needle.length) return false;
+  let ni = 0;
+  for (let hi = 0; hi < haystack.length && ni < needle.length; hi++) {
+    if (Math.abs(haystack[hi] - needle[ni]) <= 1e-5) {
+      ni++;
+    }
+  }
+  return ni === needle.length;
+}
+
+/**
+ * Extracts a strict ordered numeric sequence (>= 4 numbers) from criteria like
+ * stem-and-leaf diagrams or completion tables (e.g. "9, 3, -3, -3, -3" or
+ * "2 [5 7 9] 3 [6 8 8 8] 4 1 3 3 9 5 2 3 9 9 6 0"). Bracketed "[...]" elements
+ * are treated as optional/pre-printed and omitted from the mandatory sequence.
+ */
+function parseOrderedSequenceTargets(rowText: string): number[] | null {
+  const raw = String(rowText || '').replace(/[\u2013\u2014\u2212]/g, '-').trim();
+  if (!raw) return null;
+  if (/\b(?:or|to|allow|accept|oe)\b|[a-z=<>±√π×÷^*+]/i.test(raw)) return null;
+
+  const mandatoryOnly = raw.replace(/\[[^\]]*\]/g, ' ').replace(/[|,]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!mandatoryOnly) return null;
+
+  const tokens = mandatoryOnly.split(' ').filter(Boolean);
+  if (tokens.length < 4) return null;
+  const nums: number[] = [];
+  for (const tok of tokens) {
+    if (!/^-?\d+(?:\.\d+)?$/.test(tok)) return null;
+    nums.push(parseFloat(tok));
+  }
+  return nums.length >= 4 ? nums : null;
+}
+
+/**
+ * Deterministically rejects clear scalar mismatches or mismatched ordered numeric sequences
+ * on strict non-FT accuracy/independent criteria (e.g. criterion "52" matched to "75°",
+ * "-5" matched to "centre (1, 1)", or a wrong stem-and-leaf / table sequence).
  */
 export function isVerdictContradicted(row: RubricCriterion, evidence: string): boolean {
   if (!evidence || !evidence.trim()) return false;
@@ -647,11 +766,16 @@ export function isVerdictContradicted(row: RubricCriterion, evidence: string): b
     return false;
   }
 
-  const targets = parseScalarTargets(row.text);
-  if (!targets) return false;
-
   const ev = extractEvidenceNumbers(evidence);
   if (ev.numbers.length === 0 || ev.hasArithmeticDerivation) return false;
+
+  const seqTargets = parseOrderedSequenceTargets(row.text);
+  if (seqTargets) {
+    return !isOrderedSubsequence(seqTargets, ev.numbers);
+  }
+
+  const targets = parseScalarTargets(row.text);
+  if (!targets) return false;
 
   const matchesAny = ev.numbers.some((n) => {
     if (targets.singles.some((t) => Math.abs(n - t) <= 1e-5)) return true;
@@ -710,7 +834,8 @@ export function verdictNeedsModeratorAudit(row: RubricCriterion, evidence: strin
 export function isFabricatedSchemeQuote(
   criterionText: string,
   evidence: string,
-  pageTranscript?: string
+  pageTranscript?: string,
+  options?: { requireSequenceOnly?: boolean }
 ): boolean {
   const ev = String(evidence || '').trim();
   const tr = String(pageTranscript || '').trim();
@@ -727,8 +852,15 @@ export function isFabricatedSchemeQuote(
   // Check whether the evidence closely mirrors the mark-scheme criterion
   const evWords = stemmedContentWords(ev);
   const critWords = stemmedContentWords(crit);
-  const evNums = extractEvidenceNumbers(ev).numbers;
+  const evExtracted = extractEvidenceNumbers(ev);
+  const evNums = evExtracted.numbers;
   const critNums = extractEvidenceNumbers(crit).numbers;
+
+  // On visual subparts (diagrams, graphs, clocks), only reject copied pure numeric sequences
+  // (>= 4 values, no arithmetic operators) so visual prose descriptions are never stripped.
+  if (options?.requireSequenceOnly && (evNums.length < 4 || evExtracted.hasArithmeticDerivation)) {
+    return false;
+  }
 
   const mirrorsFormula =
     normEv.length >= 4 &&
@@ -750,6 +882,9 @@ export function isFabricatedSchemeQuote(
   // Now check if evidence is ungrounded in the transcript
   if (evNums.length > 0) {
     const trNums = extractEvidenceNumbers(tr).numbers;
+    if (evNums.length >= 4 && !evExtracted.hasArithmeticDerivation && !isOrderedSubsequence(evNums, trNums)) {
+      return true;
+    }
     const missingAnyNum = evNums.some((n) => !trNums.some((tn) => Math.abs(n - tn) <= 1e-5));
     return missingAnyNum;
   }

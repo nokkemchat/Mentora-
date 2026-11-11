@@ -130,6 +130,7 @@ export interface AtomicSubpartInput {
   pageTranscript?: string;
   defaultAnswerLineY?: number;
   previousAnswerSnippet?: string;
+  questionHasVisualSubpart?: boolean;
   topic?: string;
 }
 
@@ -455,6 +456,8 @@ CRITICAL RULES FOR ATOMIC SUBPART MARKING:
    - For algebraic expressions: check variables and signs strictly! Do NOT credit mismatched expressions (e.g., "(x - 3)(x + 3)" does NOT satisfy "(x - 3)(2y + 5)").
    - For calculus: setting "dy/dx = 0" does NOT satisfy "set dy/dx = 10" or "their dy/dx = 10" unless explicitly permitted by the mark scheme.
    - For numerical accuracy (A), independent (B), coordinate, and exact mathematical-term marks: verify exact numbers, signs, coordinates, and mathematical terms strictly! NEVER mark "satisfied": true if the student's written value, coordinate, angle classification, or transformation name differs from the criterion — unless the criterion permits "oe" (or equivalent numeric/algebraic form, e.g. a combined rate or simplified fraction) or explicitly grants "FT" (follow-through consistent with the candidate's stated previous value).
+   - For multi-condition criteria (e.g. "satisfying k of N conditions"): test EACH stated condition individually against the candidate's final answer (remembering mathematical definitions such as 1 × m = m being a valid multiple of m, etc.) and mark "satisfied": true if at least k conditions hold.
+   - For Follow-Through ("FT" / "their") marks: explicitly verify the arithmetic from the candidate's plotted graph or "CANDIDATE'S PREVIOUS SUBPART ANSWER" above; credit "satisfied": true ONLY if the candidate correctly transformed or read their own earlier value rather than quoting an unchanged input or making a separate arithmetic error.
 4. DISTINCT EVIDENCE PER CRITERION & NO INFERENTIAL STRETCHING:
    - Mark a criterion "satisfied": true ONLY if the candidate's response EXPLICITLY states or directly demonstrates that specific criterion. Never infer an unstated motive, conclusion, or institution from a tangential or generic sentence.
    - Do NOT reuse the exact same claim or phrase across multiple overlapping criteria. However, if a compound sentence genuinely packs two distinct facts/points (e.g. two Biology steps or two History events in one sentence), BOTH may be credited provided you quote ONLY the specific minimal clause or phrase matching each criterion.
@@ -583,13 +586,29 @@ OUTPUT STRICTLY VALID JSON (prefer Unicode math symbols × ÷ → ° ≤ ≥ π 
     const parsed = pass1.parsed;
     const res = pass1.res;
     if (parsed) {
-      const requiresVisualVerification = rubric.criteria.some((c: RubricCriterion) =>
-        /\b(?:graph|curve|plot|plotted|diagram|bar\s*chart|histogram|pie\s*chart|stem\s*and\s*leaf|bearing|scale\s*drawing|grid|shaded|triangle|polygon|sketch|table|drawn)\b/i.test(`${c.text} ${c.guidance || ''}`)
+      const requiresVisualVerification = rubric.criteria.some((c: RubricCriterion) => {
+        const combined = `${c.code} ${c.text} ${c.guidance || ''}`;
+        if (/\b(?:graph|curve|plot|plotted|diagram|bar\s*chart|histogram|pie\s*chart|stem\s*and\s*leaf|bearing|scale\s*drawing|grid|shaded|triangle|polygon|sketch|table|drawn)\b/i.test(combined)) {
+          return true;
+        }
+        // Table-like numeric completion sequences (>= 4 pure values) or FT subparts on visual questions
+        const plainNoGuidance = c.text.replace(/\[[^\]]*\]/g, ' ').replace(/\b(?:or|to|allow|accept|oe)\b/gi, ' ');
+        if (!/[a-z]/i.test(plainNoGuidance) && (plainNoGuidance.match(/-?\d+(?:\.\d+)?/g) || []).length >= 4) {
+          return true;
+        }
+        if (input.questionHasVisualSubpart && /\b(?:ft|follow\s*through|their)\b/i.test(combined)) {
+          return true;
+        }
+        return false;
+      });
+
+      const requiresConditionOrFtVision = rubric.criteria.some((c: RubricCriterion) =>
+        /\b(?:ft|follow\s*through|their|satisfying|conditions?)\b/i.test(`${c.code} ${c.text} ${c.guidance || ''}`)
       );
 
       // Strip fabricated quotes where an LLM copied the mark scheme verbatim instead of the script
       const sanitizePassVerdicts = (verdicts: any[]) => {
-        if (!hasStructuredCriteria || requiresVisualVerification || !pageTranscript || pageTranscript.trim().length < 80) {
+        if (!hasStructuredCriteria || !pageTranscript || pageTranscript.trim().length < 80) {
           return;
         }
         for (const v of verdicts) {
@@ -597,7 +616,7 @@ OUTPUT STRICTLY VALID JSON (prefer Unicode math symbols × ÷ → ° ≤ ≥ π 
           const crit = rubric.criteria.find((c: RubricCriterion) => c.index === Number(v.criterion_index));
           if (!crit) continue;
           const ev = String(v.evidence || '');
-          if (isFabricatedSchemeQuote(crit.text, ev, pageTranscript)) {
+          if (isFabricatedSchemeQuote(crit.text, ev, pageTranscript, { requireSequenceOnly: requiresVisualVerification })) {
             console.log(`[AntiHallucination] Rejected ungrounded scheme quote on Q${questionNumber}${partLabel} criterion ${crit.index}: "${ev.slice(0, 60)}"`);
             v.satisfied = false;
             v.evidence = '';
@@ -609,15 +628,25 @@ OUTPUT STRICTLY VALID JSON (prefer Unicode math symbols × ÷ → ° ≤ ≥ π 
 
       // Check if any Pass 1 verdict looks mismatched against its criterion (e.g. wrong coordinate,
       // wrong numeric value, or mismatched single-word term) so it always gets moderated.
-      const hasAuditFlag = hasStructuredCriteria && Array.isArray(parsed.verdicts) &&
-        rubric.criteria.some((crit: RubricCriterion) => {
+      const flaggedAuditDetails: string[] = [];
+      if (hasStructuredCriteria && Array.isArray(parsed.verdicts)) {
+        for (const crit of rubric.criteria) {
           const v = parsed.verdicts.find((x: any) => Number(x.criterion_index) === crit.index);
-          return v?.satisfied === true && verdictNeedsModeratorAudit(crit, String(v.evidence || ''));
-        });
+          const ev = String(v?.evidence || '');
+          if (v?.satisfied === true && verdictNeedsModeratorAudit(crit, ev)) {
+            flaggedAuditDetails.push(`criterion ${crit.index} ([${crit.code}] "${crit.text}") matched Pass 1 quote "${ev.slice(0, 50)}"`);
+          }
+        }
+      }
+      const hasAuditFlag = flaggedAuditDetails.length > 0;
+      const detectedAnswerStr = String(parsed.student_answer_detected || '').trim();
+      const hasAttemptedWork =
+        Boolean(detectedAnswerStr) &&
+        !/^(?:none|blank|n\/a|unattempted|not\s+answered|not\s+attempted|no\s+answer|no\s+work)$/i.test(detectedAnswerStr);
 
       // Consensus stabilization:
-      // Run an independent verification pass on qualitative/menu/level subparts, multi-mark or
-      // multi-criterion calculation subparts, or any subpart flagged by the literal audit guard.
+      // Run independent verification on menu/level/multi-criterion/multi-mark subparts, visual subparts,
+      // audit-flagged verdicts, and any attempted 1-mark subpart (closing single-pass blind spots).
       const needsConsensus =
         hasStructuredCriteria &&
         Array.isArray(parsed.verdicts) &&
@@ -625,16 +654,29 @@ OUTPUT STRICTLY VALID JSON (prefer Unicode math symbols × ÷ → ° ≤ ≥ π 
           rubric.schemeType === 'levels' ||
           rubric.criteria.length >= 2 ||
           marksAvailable >= 2 ||
+          requiresVisualVerification ||
+          hasAttemptedWork ||
           hasAuditFlag);
 
       if (needsConsensus) {
-        const useTextVerifier = !requiresVisualVerification && Boolean(pageTranscript && pageTranscript.trim().length >= 80);
+        const useTextVerifier =
+          !requiresVisualVerification &&
+          !requiresConditionOrFtVision &&
+          Boolean(pageTranscript && pageTranscript.trim().length >= 80);
+        const auditInstruction = hasAuditFlag
+          ? `\nAUDIT FOCUS: Verify carefully whether ${flaggedAuditDetails.join('; ')} truly matches the criterion or is valid Follow-Through (FT) from the candidate's previous subpart work rather than an arithmetic error or unchanged input.`
+          : '';
         const verifierContent: any[] = useTextVerifier
           ? [{
               type: "text",
-              text: prompt + `\nNOTE: Evaluate strictly from the CANONICAL PAGE TRANSCRIPT above; set answer_line_y to ${Number(parsed.answer_line_y) || defaultAnswerLineY || 500}.`
+              text: prompt + `\nNOTE: Evaluate strictly from the CANONICAL PAGE TRANSCRIPT above; set answer_line_y to ${Number(parsed.answer_line_y) || defaultAnswerLineY || 500}.${auditInstruction}`
             }]
-          : userContent;
+          : auditInstruction
+            ? [
+                { type: "text", text: prompt + auditInstruction },
+                { type: "image_url", image_url: { url: pageImageUrl, detail: "high" } }
+              ]
+            : userContent;
 
         const pass2 = await invokeJsonChat(
           callChatCompletion,
@@ -1068,6 +1110,8 @@ export async function evaluateBookletAtomically(
       fallbackPageIndex = Math.min(canonicalImages.length - 1, Math.max(0, qIdx));
     }
 
+    const qHasVisualSubpart = /\b(?:graph|curve|plot|plotted|diagram|bar\s*chart|histogram|pie\s*chart|stem\s*and\s*leaf|bearing|scale\s*drawing|grid|shaded|triangle|polygon|sketch|table|drawn)\b/i.test(ms || '');
+
     subparts.forEach((sp, spIdx) => {
       const subKey = `${qNum}:${sp.canonical_label}`;
       const loc = layout?.subpart_locations?.get(subKey);
@@ -1088,6 +1132,7 @@ export async function evaluateBookletAtomically(
           canonicalPageIndex: targetPageIndex,
           pageImageUrl: canonicalImages[targetPageIndex],
           defaultAnswerLineY: answerLineY,
+          questionHasVisualSubpart: qHasVisualSubpart,
           topic: oq.topic || "Examination Script"
         },
         qNum,
@@ -1116,11 +1161,52 @@ export async function evaluateBookletAtomically(
   console.log(`[AtomicBookletEvaluator] Dispatched ${tasks.length} atomic subquestions across ${canonicalImages.length} canonical pages (concurrency 10)...`);
   const t0 = Date.now();
 
-  const evaluatedSubparts = await runWithConcurrencyLimit(
-    tasks,
+  // Wave 1: all non-FT subparts run first so FT subparts in Wave 2 receive real earlier answers.
+  const isFtTask = (t: TaskWithContext): boolean => {
+    if (!t.input.officialMarkScheme) return false;
+    const parsed = parseRubric(t.input.canonicalLabel, t.input.officialMarkScheme);
+    return parsed.criteria.some((c: RubricCriterion) =>
+      /\b(?:ft|follow\s*through|their)\b/i.test(`${c.code} ${c.text} ${c.guidance || ''}`)
+    );
+  };
+
+  const wave1Indexed = tasks.map((t, i) => ({ t, i })).filter((x) => !isFtTask(x.t));
+  const wave2Indexed = tasks.map((t, i) => ({ t, i })).filter((x) => isFtTask(x.t));
+
+  const evaluatedSubparts: AtomicSubpartOutput[] = new Array(tasks.length);
+  const wave1Results = await runWithConcurrencyLimit(
+    wave1Indexed,
     10,
-    async (t) => evaluateSubpartAtomically(t.input, callChatCompletion)
+    async (x) => evaluateSubpartAtomically(x.t.input, callChatCompletion)
   );
+  wave1Indexed.forEach((x, pos) => {
+    evaluatedSubparts[x.i] = wave1Results[pos];
+  });
+
+  if (wave2Indexed.length > 0) {
+    const wave1ByQuestion = new Map<string, string[]>();
+    wave1Results.forEach((res) => {
+      const ans = String(res.student_answer_detected || '').trim();
+      if (!ans) return;
+      const list = wave1ByQuestion.get(res.question_number) || [];
+      list.push(`${res.part_label}: "${ans}" [${res.score}/${res.max_score}]`);
+      wave1ByQuestion.set(res.question_number, list);
+    });
+    wave2Indexed.forEach((x) => {
+      const prevList = wave1ByQuestion.get(x.t.qNum);
+      if (prevList && prevList.length > 0) {
+        x.t.input.previousAnswerSnippet = prevList.join(' | ');
+      }
+    });
+    const wave2Results = await runWithConcurrencyLimit(
+      wave2Indexed,
+      10,
+      async (x) => evaluateSubpartAtomically(x.t.input, callChatCompletion)
+    );
+    wave2Indexed.forEach((x, pos) => {
+      evaluatedSubparts[x.i] = wave2Results[pos];
+    });
+  }
 
   console.log(`[AtomicBookletEvaluator] Completed all ${evaluatedSubparts.length} atomic evaluations in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 
