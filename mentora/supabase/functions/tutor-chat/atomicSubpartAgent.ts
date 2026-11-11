@@ -579,6 +579,96 @@ export interface BookletEvaluationResult {
   percentage: number;
 }
 
+const MISSING_OR_FOREIGN_NOTE_PATTERNS = [
+  "corresponds to question",
+  "instead of question",
+  "pertains to question",
+  "no work for question",
+  "entirely different question",
+  "different question",
+  "missing from the provided",
+  "missing from the submitted",
+  "missing from this image",
+  "missing from this page",
+  "not present on",
+  "not visible in",
+  "not found in the image",
+  "not found on this page",
+  "subquestion not found",
+  "subpart not found",
+  "not attempted or is missing",
+  "no candidate response",
+  "no response visible",
+  "cannot be seen",
+  "wrong page"
+];
+
+/**
+ * Returns true when a 0-mark subpart note indicates the subpart's work is absent from
+ * the page or belongs to another question, so we never stamp stray crosses onto another page.
+ */
+function isMissingOrForeignSubpartNote(sp: {
+  score?: number;
+  teacher_correction_note?: string;
+  constructive_correction?: string;
+  deductions?: string[];
+}): boolean {
+  if ((Number(sp.score) || 0) > 0) return false;
+  const combined = [
+    sp.teacher_correction_note || "",
+    sp.constructive_correction || "",
+    ...(Array.isArray(sp.deductions) ? sp.deductions : [])
+  ]
+    .join(" ")
+    .toLowerCase();
+  if (!combined) return false;
+  return MISSING_OR_FOREIGN_NOTE_PATTERNS.some((p) => combined.includes(p));
+}
+
+/**
+ * Selects the best fallback canonical page index for a question when a subpart has no exact bbox.
+ * Prefers a dedicated page for the question, then the page with the most located subparts, then the last candidate.
+ */
+function selectBestQuestionPageIndex(layout: any, qNum: string): number {
+  const fps: any[] = Array.isArray(layout?.page_fingerprints) ? layout.page_fingerprints : [];
+  const candidates = fps.filter(
+    (fp: any) => Array.isArray(fp.detected_questions) && fp.detected_questions.includes(qNum)
+  );
+  if (candidates.length === 0) return -1;
+  if (candidates.length === 1) return candidates[0].raw_page_index;
+
+  // Count explicitly located subparts per canonical page for this question
+  const locCounts = new Map<number, number>();
+  if (layout?.subpart_locations instanceof Map) {
+    layout.subpart_locations.forEach((loc: any, key: string) => {
+      if (key.startsWith(`${qNum}:`) && typeof loc?.canonical_page_index === "number") {
+        locCounts.set(loc.canonical_page_index, (locCounts.get(loc.canonical_page_index) || 0) + 1);
+      }
+    });
+  }
+
+  // 1. Prefer a dedicated page where qNum is the sole question (with work if available)
+  const dedicated = candidates.filter(
+    (fp: any) => Array.isArray(fp.detected_questions) && fp.detected_questions.length === 1
+  );
+  if (dedicated.length > 0) {
+    dedicated.sort((a: any, b: any) => (locCounts.get(b.raw_page_index) || 0) - (locCounts.get(a.raw_page_index) || 0));
+    return dedicated[0].raw_page_index;
+  }
+
+  // 2. Otherwise pick the matching page with the most located subparts for qNum
+  let best = candidates[candidates.length - 1];
+  let bestCount = -1;
+  for (const fp of candidates) {
+    const cnt = locCounts.get(fp.raw_page_index) || 0;
+    if (cnt > bestCount) {
+      bestCount = cnt;
+      best = fp;
+    }
+  }
+  return best.raw_page_index;
+}
+
 /**
  * Orchestrates atomic evaluation across the entire booklet:
  * 1. Extracts subparts for every official question.
@@ -615,14 +705,8 @@ export async function evaluateBookletAtomically(
 
     const subparts = extractQuestionSubparts(qNum, qMarks, ms, dbParts);
 
-    // Look for any known page for this question
-    let matchedPageIndex = -1;
-    if (layout?.page_fingerprints) {
-      const matchedPage = layout.page_fingerprints.find((fp: any) =>
-        Array.isArray(fp.detected_questions) && fp.detected_questions.includes(qNum)
-      );
-      if (matchedPage) matchedPageIndex = matchedPage.raw_page_index;
-    }
+    // Look for the best matching canonical page for this question
+    const matchedPageIndex = selectBestQuestionPageIndex(layout, qNum);
 
     // Check if any subparts have explicit locations from fingerprinter layout
     let subpartLocated = false;
@@ -722,12 +806,16 @@ export async function evaluateBookletAtomically(
   console.log(`[AtomicBookletEvaluator] Completed all ${evaluatedSubparts.length} atomic evaluations in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 
   // Group subparts by question and enforce deterministic caps
+  const unattemptedSet = new Set<string>(
+    unattemptedQuestions.map((uq: any) => String(uq.question_number).trim())
+  );
   const questionEvaluations: any[] = [];
   let grandTotalScore = 0;
   const grandTotalMax = officialPaperQuestions.reduce((s: number, q: any) => s + (Number(q.marks) || 0), 0);
 
   officialPaperQuestions.forEach((oq: any) => {
     const qNum = String(oq.question_number).trim();
+    if (unattemptedSet.has(qNum)) return; // Already recorded cleanly in unattemptedQuestions
     const qMax = Number(oq.marks) || 10;
 
     // Subparts belonging to this question
@@ -750,13 +838,7 @@ export async function evaluateBookletAtomically(
 
     const validSubparts = deduplicatedSubparts.filter((sp) => {
       if ((sp as any).unattempted || sp.page_index < 0) return false;
-      const note = (sp.teacher_correction_note || "").toLowerCase();
-      if (note.includes("corresponds to question") ||
-          note.includes("instead of question") ||
-          note.includes("pertains to question") ||
-          note.includes("no work for question")) {
-        return false;
-      }
+      if (isMissingOrForeignSubpartNote(sp)) return false;
       return true;
     });
 
@@ -845,14 +927,8 @@ export function synthesizeBookletAnnotations(
     if (typeof p !== 'number' || p < 0 || p >= canonicalImages.length) return;
     if ((sp as any).unattempted) return;
 
-    // Filter out annotations that are explicit mismatch notices from another question
-    const note = (sp.teacher_correction_note || "").toLowerCase();
-    const isForeignQuestion = 
-      note.includes("corresponds to question") ||
-      note.includes("instead of question") ||
-      note.includes("pertains to question") ||
-      note.includes("no work for question");
-    if (isForeignQuestion) return; // Do not stamp annotations on the wrong question's page!
+    // Filter out annotations that are explicit mismatch or missing-work notices
+    if (isMissingOrForeignSubpartNote(sp)) return; // Do not stamp annotations on the wrong question's page!
 
     if (!subpartsByPage.has(p)) subpartsByPage.set(p, []);
     subpartsByPage.get(p)!.push(sp);
@@ -862,12 +938,14 @@ export function synthesizeBookletAnnotations(
     // Sort subparts by vertical baseline
     pageSubs.sort((a, b) => a.line_y - b.line_y);
 
+    // Reserve bottom y >= 870 for bottom-right per-question total stamps
+    const maxBadgeY = 860;
+    const minBadgeGap = pageSubs.length > 10 ? Math.max(22, Math.floor(800 / pageSubs.length)) : 28;
     let prevBadgeY = 0;
     pageSubs.forEach((sp) => {
-      let yMid = sp.line_y;
-      // Separation to avoid overlap
-      if (prevBadgeY > 0 && yMid < prevBadgeY + 28) {
-        yMid = prevBadgeY + 28;
+      let yMid = Math.min(Math.max(sp.line_y, 35), maxBadgeY);
+      if (prevBadgeY > 0 && yMid < prevBadgeY + minBadgeGap) {
+        yMid = Math.min(prevBadgeY + minBadgeGap, maxBadgeY);
       }
       prevBadgeY = yMid;
       sp.line_y = yMid;
@@ -879,23 +957,22 @@ export function synthesizeBookletAnnotations(
         comment: sp.score > 0
           ? (sp.marks_awarded?.[0] || `Part ${sp.part_label}: ${sp.score}/${sp.max_score} marks`)
           : (sp.deductions?.[0] || `Part ${sp.part_label}: 0/${sp.max_score} marks`),
-        box_2d: [Math.max(yMid - 14, 25), 865, Math.min(yMid + 14, 975), 975],
+        box_2d: [Math.max(yMid - 14, 25), 865, Math.min(yMid + 14, 875), 975],
         subpart_label: sp.part_label,
         page_index: pIdx
       });
 
       // 2. Inline ticks for earned marking points
-      // Exactly sp.score neat ticks placed neatly to the right, preceding the margin badge
+      // Exactly sp.score neat ticks placed neatly to the right, well clear of the margin badge (x >= 865)
       const earnedCount = Math.min(Math.max(0, sp.score), sp.max_score);
       for (let k = 0; k < earnedCount; k++) {
         const tickY = Math.max(yMid - 10, 25);
-        // Position ticks to the right preceding the margin badge
-        const tickX = Math.min(740 + k * 35, 835);
+        const tickX = Math.min(700 + k * 28, 785);
         annotations.push({
           type: 'inline_tick',
           text: '✓',
           comment: sp.marks_awarded?.[k] || `Part ${sp.part_label} mark ${k + 1} earned`,
-          box_2d: [Math.max(tickY - 14, 25), tickX, Math.min(tickY + 14, 940), Math.min(tickX + 28, 855)],
+          box_2d: [Math.max(tickY - 14, 25), tickX, Math.min(tickY + 14, 875), Math.min(tickX + 26, 815)],
           subpart_label: sp.part_label,
           page_index: pIdx
         });
@@ -907,7 +984,7 @@ export function synthesizeBookletAnnotations(
           type: 'teacher_note',
           text: sp.teacher_correction_note,
           comment: sp.constructive_correction || sp.teacher_correction_note,
-          box_2d: [Math.min(yMid + 16, 940), 160, Math.min(yMid + 50, 975), 840],
+          box_2d: [Math.min(yMid + 16, 845), 160, Math.min(yMid + 50, 880), 820],
           subpart_label: sp.part_label,
           page_index: pIdx
         });

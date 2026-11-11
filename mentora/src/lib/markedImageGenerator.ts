@@ -131,17 +131,34 @@ export async function generateMarkedImageFile({
     }
 
     // 7. Paint each red ink annotation onto the bitmap.
-    // ONLY render annotations for this page — filter out unattempted / foreign question notices.
+    // ONLY render annotations for this page — filter out unattempted / missing / foreign question notices.
+    const missingOrForeignPatterns = [
+      'corresponds to question',
+      'answers for question',
+      'pertains to question',
+      'instead of question',
+      'no work for question',
+      'entirely different question',
+      'different question',
+      'missing from the provided',
+      'missing from the submitted',
+      'missing from this image',
+      'missing from this page',
+      'not present on',
+      'not visible in',
+      'not found in the image',
+      'not found on this page',
+      'subquestion not found',
+      'subpart not found',
+      'not attempted or is missing',
+      'no candidate response',
+      'no response visible',
+      'cannot be seen',
+      'wrong page'
+    ];
     const activeAnnotations = (annotations && annotations.length > 0 ? annotations : []).filter((ann) => {
-      const comment = ((ann as any).comment || ann.text || '').toLowerCase();
-      if (comment.includes('corresponds to question') || 
-          comment.includes('answers for question') || 
-          comment.includes('pertains to question') || 
-          comment.includes('instead of question') ||
-          comment.includes('no work for question')) {
-        return false;
-      }
-      return true;
+      const combined = `${(ann as any).comment || ''} ${(ann as any).teacher_correction || ''} ${ann.text || ''}`.toLowerCase();
+      return !missingOrForeignPatterns.some((p) => combined.includes(p));
     });
 
     activeAnnotations.forEach((ann, idx) => {
