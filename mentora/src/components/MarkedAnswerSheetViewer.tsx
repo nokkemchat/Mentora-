@@ -17,7 +17,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Line, Circle, G } from 'react-native-svg';
 import { AssessmentResult, VisualAnnotation, TutorAgentTools } from '@/lib/tutorAgent';
-import { reconcileAssessment, ensureAssessmentAnnotations, cleanCorrectionNote } from '@/lib/annotationUtils';
+import { reconcileAssessment, ensureAssessmentAnnotations, cleanCorrectionNote, canonicalSubpartKey, isScoreFractionText } from '@/lib/annotationUtils';
 
 interface MarkedAnswerSheetViewerProps {
   imageUri: string;
@@ -201,6 +201,31 @@ export function MarkedAnswerSheetViewer({
     const currentAnnotations = ensureAssessmentAnnotations(reconciled, safePageIndex);
     if (!currentAnnotations || currentAnnotations.length === 0) return null;
 
+    const seenBadges = new Set<string>();
+    const dedupedAnnotations = currentAnnotations.filter((ann) => {
+      const normX = ann.bbox ? ann.bbox.x : (ann.box_2d ? ann.box_2d[1] / 1000 : 0.85);
+      const normY = ann.bbox && typeof ann.bbox.height === 'number'
+        ? (ann.bbox.y + ann.bbox.height / 2)
+        : (ann.box_2d ? (ann.box_2d[0] + ann.box_2d[2]) / 2000 : 0.2);
+      const rawType = ((ann as any).type || '').toLowerCase();
+      const isPill =
+        rawType === 'mark_badge' ||
+        (isScoreFractionText(ann.text) && normX >= 0.70);
+      if (isPill && rawType !== 'total_header') {
+        const qVal = (ann as any).question_number;
+        const qNorm = qVal !== undefined && qVal !== null ? String(qVal).trim().replace(/^q(?:uestion)?\s*/i, '') : '';
+        const partKey = canonicalSubpartKey((ann as any).subpart_label, qNorm);
+        const badgeKey = partKey
+          ? `${qNorm}::${partKey}`
+          : `raw::${(ann.text || '').trim()}::${Math.round((normY * 1000) / 30)}`;
+        if (seenBadges.has(badgeKey)) {
+          return false;
+        }
+        seenBadges.add(badgeKey);
+      }
+      return true;
+    });
+
     const rect = getImageLayoutRect(containerW, containerH);
     const overlayW = rect.width;
     const overlayH = rect.height;
@@ -218,7 +243,7 @@ export function MarkedAnswerSheetViewer({
       >
         {/* Connector lines removed to prevent artificial dashed lines across student script */}
 
-        {currentAnnotations.map((ann, idx) => {
+        {dedupedAnnotations.map((ann, idx) => {
           // 1. Pixel conversion strictly at render time from normalized coordinates [0.0, 1.0]
           const normX = ann.bbox ? ann.bbox.x : (ann.box_2d ? ann.box_2d[1] / 1000 : 0.85);
           const normY = ann.bbox && typeof ann.bbox.height === 'number'
@@ -244,8 +269,7 @@ export function MarkedAnswerSheetViewer({
           // Detect if this is a right-margin mark badge (e.g. "✗ 0/3", "✓ 3/3", "(0/3)")
           const isScorePill =
             rawType === 'mark_badge' ||
-            (ann.text && (ann.text.includes('/') || ann.text.includes('Total')) && normX >= 0.70) ||
-            normX >= 0.82;
+            (isScoreFractionText(ann.text) && normX >= 0.70);
 
           // 1. Right Margin Score Badges (Authentic Teacher Red Pen: (2/2), (3/4), (0/3))
           if (isScorePill && rawType !== 'total_header') {

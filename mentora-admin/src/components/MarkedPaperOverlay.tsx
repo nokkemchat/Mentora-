@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import type { VisualAnnotation } from '../lib/annotationUtils';
-import { cleanCorrectionNote } from '../lib/annotationUtils';
+import { canonicalSubpartKey, cleanCorrectionNote, isScoreFractionText } from '../lib/annotationUtils';
 
 interface MarkedPaperOverlayProps {
   imageUrl: string;
@@ -27,15 +27,37 @@ export default function MarkedPaperOverlay({
 
   // Legacy declutter: hide per-question "Q Total" / "Cont." page stamps — only the
   // booklet total (top-left of the first page) renders as a page-level stamp.
-  const renderableAnnotations = useMemo(
-    () =>
-      annotations.filter(ann => {
-        if (ann.type !== 'total_header') return true;
+  const renderableAnnotations = useMemo(() => {
+    const seenBadges = new Set<string>();
+    return annotations.filter(ann => {
+      if (ann.type === 'total_header') {
         const t = ann.text || '';
         return !/^Q\d+\s*Total/i.test(t) && !/Cont\. from/i.test(t);
-      }),
-    [annotations]
-  );
+      }
+
+      const [ymin, xmin, ymax] = ann.box_2d || [0, 0, 0, 0];
+      const normX = xmin <= 1 && ymin <= 1 ? xmin * 100 : (xmin / 10);
+      const isPill =
+        ann.type === 'mark_badge' ||
+        (isScoreFractionText(ann.text) && (normX >= 65 || ann.type === 'tick'));
+
+      if (isPill) {
+        const qVal = (ann as any).question_number;
+        const qNorm = qVal !== undefined && qVal !== null ? String(qVal).trim().replace(/^q(?:uestion)?\s*/i, '') : '';
+        const partKey = canonicalSubpartKey(ann.subpart_label, qNorm);
+        const yBucket = Math.round(((ymin + ymax) / 2) / (ymin <= 1 && ymax <= 1 ? 0.03 : 30));
+        const badgeKey = partKey
+          ? `${qNorm}::${partKey}`
+          : `raw::${(ann.text || '').trim()}::${yBucket}`;
+        if (seenBadges.has(badgeKey)) {
+          return false;
+        }
+        seenBadges.add(badgeKey);
+      }
+
+      return true;
+    });
+  }, [annotations]);
 
   // Dynamically detect coordinate scale (raw image pixel dimensions vs normalized 0-1000)
   const { scaleX, scaleY } = useMemo(() => {
@@ -98,7 +120,7 @@ export default function MarkedPaperOverlay({
             // Detect if this is a right-margin mark badge (e.g. "✓ 2/2", "✓ 2/3", "✓ 3/4")
             const isScorePill =
               ann.type === 'mark_badge' ||
-              ((ann.text || '').includes('/') && (leftStartPct >= 65 || ann.type === 'tick'));
+              (isScoreFractionText(ann.text) && (leftStartPct >= 65 || ann.type === 'tick'));
 
             // 1. Right Margin Score Badges (Rendered as Authentic Teacher Red Ink: ✓(score/max))
             if (isScorePill && ann.type !== 'total_header') {
@@ -247,8 +269,9 @@ export default function MarkedPaperOverlay({
 
             // 4. Inline Tick (Placed AFTER or SUPERSCRIPT above the student's formula / working step, clear of right-margin score badges)
             if (ann.type === 'tick' || ann.type === 'inline_tick') {
-              // Position tick slightly superscript above the baseline and clear of right-margin badges (x >= 84%)
-              const leftPct = Math.min(Math.max(leftEndPct + 1.2, leftStartPct + 6), 78);
+              // Preserve point coordinates for small tick boxes; place after wide phrase boxes, clear of right-margin badges (>= 84%)
+              const isWideSpan = leftEndPct - leftStartPct > 6;
+              const leftPct = Math.min(isWideSpan ? leftEndPct + 1.0 : leftStartPct, 80);
               const elevatedTopPct = Math.max(topPct - 1.8, 1.5);
 
               return (

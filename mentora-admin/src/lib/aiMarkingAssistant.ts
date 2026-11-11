@@ -195,17 +195,17 @@ function syncSubpartAnnotationsOnList(
     const annRaw = String(ann.subpart_label).toLowerCase().replace(/[^a-z0-9]/g, '');
     const annNorm = normalizeSubpartKey(ann.subpart_label, questionNumber);
     if (annRaw && rawPartNorm && annRaw === rawPartNorm) return true;
-    // Only match bare normalized key if the page doesn't have another question with the same bare key,
-    // or if subpart_label explicitly starts with questionNumber
+
+    const explicitQPrefixMatch = String(ann.subpart_label)
+      .trim()
+      .toLowerCase()
+      .match(/^(?:q(?:uestion)?\s*)?(\d+)/);
+    if (explicitQPrefixMatch && explicitQPrefixMatch[1] !== questionNumber.toLowerCase()) {
+      return false;
+    }
+
     if (annNorm && targetNorm && annNorm === targetNorm) {
-      const explicitQMatch = String(ann.subpart_label)
-        .trim()
-        .toLowerCase()
-        .replace(/^q(?:uestion)?\s*/i, '')
-        .startsWith(questionNumber.toLowerCase());
-      if (explicitQMatch || !/^\d/.test(String(ann.subpart_label).trim())) {
-        return true;
-      }
+      return true;
     }
     return false;
   };
@@ -214,7 +214,9 @@ function syncSubpartAnnotationsOnList(
   const existingBadge = annotations.find(
     (a) =>
       matchesThisSubpart(a) &&
-      (a.type === 'mark_badge' || ((a.text || '').includes('/') && a.type !== 'total_header'))
+      (a.type === 'mark_badge' ||
+        (a.type !== 'total_header' &&
+          /^\s*[✓✔✗]?\s*\(?\s*\d+(?:\.\d+)?\s*\/\s*\d+(?:\.\d+)?\s*\)?\s*$/.test(String(a.text || ''))))
   );
 
   const anchorY: number =
@@ -245,20 +247,23 @@ function syncSubpartAnnotationsOnList(
         ? subpart.marks_awarded?.[0] || `Part ${subpart.part_label}: ${newScore}/${maxScore} marks`
         : subpart.deductions?.[0] || `Part ${subpart.part_label}: 0/${maxScore} marks`,
     box_2d: badgeBox,
+    question_number: questionNumber,
     subpart_label: badgeLabel,
     page_index: pageIndex,
   });
 
   // 2. Inline ticks for earned marks (or cross if 0)
   const earnedCount = Math.min(Math.max(0, newScore), maxScore);
+  const xStops = [520, 660, 585, 735, 480, 700, 620, 760];
   for (let k = 0; k < earnedCount; k++) {
     const tickY = Math.max(anchorY - 10, 25);
-    const tickX = Math.min(740 + k * 35, 835);
+    const tickX = xStops[k % xStops.length];
     kept.push({
       type: 'inline_tick',
       text: '✓',
       comment: subpart.marks_awarded?.[k] || `Part ${subpart.part_label} mark ${k + 1} earned`,
-      box_2d: [Math.max(tickY - 14, 25), tickX, Math.min(tickY + 14, 940), Math.min(tickX + 28, 855)],
+      box_2d: [Math.max(tickY - 14, 25), tickX, Math.min(tickY + 14, 940), tickX + 28],
+      question_number: questionNumber,
       subpart_label: badgeLabel,
       page_index: pageIndex,
     });
@@ -271,6 +276,7 @@ function syncSubpartAnnotationsOnList(
       comment: subpart.deductions?.[0] || subpart.teacher_correction_note || '0 marks awarded',
       teacher_correction: subpart.teacher_correction_note || '',
       box_2d: [Math.max(anchorY - 12, 25), 480, Math.min(anchorY + 12, 940), 510],
+      question_number: questionNumber,
       subpart_label: badgeLabel,
       page_index: pageIndex,
     });
@@ -285,6 +291,7 @@ function syncSubpartAnnotationsOnList(
       comment: subpart.constructive_correction || cleanNote,
       teacher_correction: cleanNote,
       box_2d: [Math.min(anchorY + 16, 940), 160, Math.min(anchorY + 50, 975), 840],
+      question_number: questionNumber,
       subpart_label: badgeLabel,
       page_index: pageIndex,
     });

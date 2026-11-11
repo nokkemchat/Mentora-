@@ -3,13 +3,14 @@
 // drawn on top (same rendering rules as MarkedPaperOverlay), assembled with jsPDF.
 
 import { jsPDF } from 'jspdf';
-import { cleanCorrectionNote } from './annotationUtils';
+import { canonicalSubpartKey, cleanCorrectionNote, isScoreFractionText } from './annotationUtils';
 
 export interface PdfAnnotation {
   type?: string;
   text?: string;
   comment?: string;
   teacher_correction?: string;
+  question_number?: string | number;
   subpart_label?: string;
   box_2d?: [number, number, number, number];
   bbox?: { y: number; x?: number; ymax?: number; xmax?: number; width?: number; height?: number };
@@ -42,10 +43,36 @@ function drawAnnotations(
 ) {
   // Legacy declutter: skip per-question "Q Total" / "Cont." stamps — only the
   // booklet total (top-left of the first page) renders as a page-level stamp.
+  const seenBadges = new Set<string>();
   const renderable = annotations.filter(ann => {
-    if (ann.type !== 'total_header') return true;
-    const t = ann.text || '';
-    return !/^Q\d+\s*Total/i.test(t) && !/Cont\. from/i.test(t);
+    if (ann.type === 'total_header') {
+      const t = ann.text || '';
+      return !/^Q\d+\s*Total/i.test(t) && !/Cont\. from/i.test(t);
+    }
+
+    const box = ann.box_2d || [0, 0, 0, 0];
+    const isNorm = box.every(v => v >= 0 && v <= 1);
+    const xmin = isNorm ? box[1] * 1000 : box[1];
+    const yMid = isNorm ? ((box[0] + box[2]) / 2) * 1000 : (box[0] + box[2]) / 2;
+    const isPill =
+      ann.type === 'mark_badge' ||
+      (isScoreFractionText(ann.text) && (xmin >= 650 || ann.type === 'tick'));
+
+    if (isPill) {
+      const qNorm = ann.question_number !== undefined && ann.question_number !== null
+        ? String(ann.question_number).trim().replace(/^q(?:uestion)?\s*/i, '')
+        : '';
+      const partKey = canonicalSubpartKey(ann.subpart_label, qNorm);
+      const badgeKey = partKey
+        ? `${qNorm}::${partKey}`
+        : `raw::${(ann.text || '').trim()}::${Math.round(yMid / 30)}`;
+      if (seenBadges.has(badgeKey)) {
+        return false;
+      }
+      seenBadges.add(badgeKey);
+    }
+
+    return true;
   });
 
   // Detect coordinate scale (raw pixels vs normalized 0-1000) — same as the overlay.
@@ -89,7 +116,7 @@ function drawAnnotations(
 
     const isScorePill =
       ann.type === 'mark_badge' ||
-      (((ann.text || '').includes('/')) && (leftStart >= W * 0.65 || ann.type === 'tick'));
+      (isScoreFractionText(ann.text) && (leftStart >= W * 0.65 || ann.type === 'tick'));
 
     // 1. Right-margin score badge: ✓(2/2) / ✗(0/2)
     if (isScorePill && ann.type !== 'total_header') {

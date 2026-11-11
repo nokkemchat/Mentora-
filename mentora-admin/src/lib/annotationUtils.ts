@@ -152,6 +152,51 @@ const MISSING_OR_FOREIGN_TEXT_PATTERNS = [
   'wrong page'
 ];
 
+export function canonicalSubpartKey(label?: string, questionNumber?: string | number): string {
+  if (!label) return '';
+  let s = String(label).toLowerCase().trim();
+  s = s.replace(/^(?:question\s*\d*|q\s*(?=\d)|part\s+)\s*/i, '');
+  if (questionNumber !== undefined && questionNumber !== null) {
+    const qClean = String(questionNumber).toLowerCase().replace(/^q(?:uestion)?\s*/i, '').trim();
+    if (qClean && s.startsWith(qClean)) {
+      const rest = s.slice(qClean.length).trim();
+      if (rest.startsWith('(') || rest.startsWith('.') || /^[a-z]/i.test(rest)) {
+        s = rest.replace(/^[.\s-]+/, '');
+      }
+    }
+  }
+  s = s.replace(/^\d{1,2}\s*(?=[({.]*[a-z]|[a-z]$)/, '');
+  return s.replace(/[^a-z0-9]/g, '');
+}
+
+export function isScoreFractionText(raw?: string): boolean {
+  const s = String(raw || '').trim();
+  return /^[✓✗(\[\s]*\d+(?:\.\d+)?\s*\/\s*\d+(?:\.\d+)?[)\]\s]*$/.test(s);
+}
+
+export function deduplicateSubparts(subparts: any[]): any[] {
+  if (!Array.isArray(subparts) || subparts.length <= 1) return subparts || [];
+  const map = new Map<string, any>();
+  subparts.forEach((sp, idx) => {
+    const qKey = sp.question_number !== undefined && sp.question_number !== null
+      ? String(sp.question_number).trim().replace(/^q(?:uestion)?\s*/i, '')
+      : '';
+    const pKey = canonicalSubpartKey(sp.canonical_label || sp.part_label, qKey);
+    const key = pKey ? `${qKey}::${pKey}` : `__idx_${idx}`;
+    const existing = map.get(key);
+    if (!existing) {
+      map.set(key, sp);
+    } else {
+      const existingValid = !existing.unattempted && (typeof existing.page_index !== 'number' || existing.page_index >= 0);
+      const curValid = !sp.unattempted && (typeof sp.page_index !== 'number' || sp.page_index >= 0);
+      if ((curValid && !existingValid) || (curValid === existingValid && (Number(sp.score) || 0) > (Number(existing.score) || 0))) {
+        map.set(key, sp);
+      }
+    }
+  });
+  return Array.from(map.values());
+}
+
 export function isMissingOrForeignAnnotationText(raw?: string): boolean {
   const text = (raw || '').toLowerCase();
   if (!text) return false;
@@ -181,14 +226,14 @@ export function reconcileAssessment(assessment: AssessmentResult, officialMaxSco
     (assessment as any).question_summaries = Array.from(dedupQMap.values());
   }
 
-  // Sanitize subparts on root and on every page to merge any hallucinated fragments
+  // Sanitize & deduplicate subparts on root and on every page to prevent double marks
   if (Array.isArray(assessment.subparts)) {
-    assessment.subparts = sanitizeAndMergeSubparts(assessment.subparts, assessment.annotations);
+    assessment.subparts = deduplicateSubparts(sanitizeAndMergeSubparts(assessment.subparts, assessment.annotations));
   }
   if (Array.isArray(assessment.pages)) {
     assessment.pages.forEach((p: any) => {
       if (Array.isArray(p.subparts)) {
-        p.subparts = sanitizeAndMergeSubparts(p.subparts, p.annotations);
+        p.subparts = deduplicateSubparts(sanitizeAndMergeSubparts(p.subparts, p.annotations));
       }
     });
   }
@@ -543,37 +588,93 @@ function finalizeAnnotationsList(
   targetPageIndex: number,
   layoutRegions: any[] = []
 ): any[] {
-  const badges: any[] = [];
+  const rawBadges: any[] = [];
   const otherMarks: any[] = [];
+
+  // Only subparts belonging to this page (and actually attempted/present) should ever receive margin badges
+  const activeSubparts = deduplicateSubparts(
+    (subpartsList || []).filter((sp: any) => {
+      if (sp.unattempted) return false;
+      if (typeof sp.page_index === 'number' && sp.page_index !== targetPageIndex) return false;
+      if ((Number(sp.score) || 0) === 0) {
+        const combined = `${sp.teacher_correction_note || ''} ${sp.constructive_correction || ''} ${(sp.deductions || []).join(' ')}`;
+        if (isMissingOrForeignAnnotationText(combined)) return false;
+      }
+      return true;
+    })
+  );
 
   rawList.forEach((ann) => {
     if (isLikelyHallucinatedSubpart(ann.subpart_label)) {
-      if (ann.type === 'mark_badge' || (ann.text || '').includes('/')) {
+      if (ann.type === 'mark_badge' || isScoreFractionText(ann.text)) {
         return; // Drop hallucinated/duplicate badge
       }
     }
     const isBadge =
       ann.type === 'mark_badge' ||
-      ((ann.text || '').includes('/') && !(ann.text || '').includes('Total') && (ann.bbox?.x >= 0.70 || ann.box_2d?.[1] >= 700));
+      (isScoreFractionText(ann.text) && !(ann.text || '').toLowerCase().includes('total') && (ann.bbox?.x >= 0.70 || ann.box_2d?.[1] >= 700));
     if (isBadge) {
-      badges.push(ann);
+      rawBadges.push(ann);
     } else {
       otherMarks.push(ann);
     }
   });
 
-  // Re-anchor each badge directly to the student answer line (line_y) of its subpart
-  // and keep badge text & marks strictly aligned with the subpart's current score
-  badges.forEach((b) => {
-    const bKey = (b.subpart_label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-    const matchedSp = subpartsList.find((sp: any) => {
-      const spKey = (sp.part_label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-      return spKey === bKey || spKey.endsWith(bKey) || bKey.endsWith(spKey);
+  // Deduplicate badges and anchor each to its unique subpart on this page so NO subpart ever gets double marks
+  const badges: any[] = [];
+  const matchedSpIndices = new Set<number>();
+  const seenFallbackBadgeKeys = new Set<string>();
+
+  const getBadgeY = (b: any): number =>
+    Array.isArray(b.box_2d) ? b.box_2d[0] : Math.round((b.bbox?.y || 0) * 1000);
+
+  rawBadges.forEach((b) => {
+    const bQ = b.question_number !== undefined && b.question_number !== null
+      ? String(b.question_number).trim().replace(/^q(?:uestion)?\s*/i, '')
+      : '';
+    const bKey = canonicalSubpartKey(b.subpart_label, bQ);
+
+    // Find candidate subparts matching this badge's label (and question_number if present)
+    const candidateIndices: number[] = [];
+    activeSubparts.forEach((sp: any, idx: number) => {
+      const spQ = sp.question_number !== undefined && sp.question_number !== null
+        ? String(sp.question_number).trim().replace(/^q(?:uestion)?\s*/i, '')
+        : '';
+      if (bQ && spQ && bQ !== spQ) return;
+      const spKey = canonicalSubpartKey(sp.part_label, spQ);
+      if (bKey && spKey && (spKey === bKey || spKey.endsWith(bKey) || bKey.endsWith(spKey))) {
+        candidateIndices.push(idx);
+      }
     });
-    if (matchedSp) {
+
+    if (candidateIndices.length > 0) {
+      const availableIndices = candidateIndices.filter((idx) => !matchedSpIndices.has(idx));
+      if (availableIndices.length === 0) {
+        // Every matching subpart on this page already has a badge -> drop duplicate badge!
+        return;
+      }
+
+      // Pick the closest unmatched subpart vertically
+      const bY = getBadgeY(b);
+      let bestIdx = availableIndices[0];
+      let bestDist = Infinity;
+      availableIndices.forEach((idx) => {
+        const spY = typeof activeSubparts[idx].line_y === 'number' ? activeSubparts[idx].line_y : bY;
+        const dist = Math.abs(spY - bY);
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestIdx = idx;
+        }
+      });
+
+      matchedSpIndices.add(bestIdx);
+      const matchedSp = activeSubparts[bestIdx];
       const spScore = Number(matchedSp.score ?? 0);
       const spMax = Number(matchedSp.max_score ?? 1);
       b.text = `(${spScore}/${spMax})`;
+      if (!b.question_number && matchedSp.question_number) {
+        b.question_number = matchedSp.question_number;
+      }
       b.comment = spScore > 0
         ? matchedSp.marks_awarded?.[0] || `Part ${matchedSp.part_label}: ${spScore}/${spMax} marks`
         : matchedSp.deductions?.[0] || `Part ${matchedSp.part_label}: 0/${spMax} marks`;
@@ -583,7 +684,10 @@ function finalizeAnnotationsList(
         for (let idx = otherMarks.length - 1; idx >= 0; idx--) {
           const m = otherMarks[idx];
           if (m.type === 'cross' || m.text === '✗') {
-            const mKey = (m.subpart_label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+            const mQ = m.question_number ? String(m.question_number).trim().replace(/^q(?:uestion)?\s*/i, '') : '';
+            const spQ = matchedSp.question_number ? String(matchedSp.question_number).trim().replace(/^q(?:uestion)?\s*/i, '') : '';
+            if (mQ && spQ && mQ !== spQ) continue;
+            const mKey = canonicalSubpartKey(m.subpart_label, mQ);
             if (mKey === bKey || mKey.endsWith(bKey) || bKey.endsWith(mKey)) {
               otherMarks.splice(idx, 1);
             }
@@ -602,36 +706,43 @@ function finalizeAnnotationsList(
           b.bbox.y = targetY / 1000;
         }
       }
+      badges.push(b);
+    } else {
+      // No matching subpart in activeSubparts (e.g. legacy payload) -> still deduplicate by canonical key + text
+      const fallbackKey = bKey
+        ? `${bQ}::${bKey}`
+        : `nolabel::${String(b.text || '').trim()}::${Math.round(getBadgeY(b) / 30)}`;
+      if (seenFallbackBadgeKeys.has(fallbackKey)) {
+        return;
+      }
+      seenFallbackBadgeKeys.add(fallbackKey);
+      badges.push(b);
     }
   });
 
-  // Guarantee that every subpart from the paper manifest/subparts has a margin score mark
-  const seenLabels = new Set(
-    badges
-      .map((b) => (b.subpart_label || '').toLowerCase().replace(/[^a-z0-9]/g, ''))
-      .filter(Boolean)
-  );
-
-  subpartsList.forEach((sp: any, idx: number) => {
-    const rawLabel = (sp.part_label || '').toLowerCase().trim();
-    const cleanKey = rawLabel.replace(/[^a-z0-9]/g, '');
-    if (cleanKey && !seenLabels.has(cleanKey)) {
-      seenLabels.add(cleanKey);
+  // Guarantee that every active subpart on this page has exactly one margin score mark
+  activeSubparts.forEach((sp: any, idx: number) => {
+    if (matchedSpIndices.has(idx)) return;
+    const spQ = sp.question_number !== undefined && sp.question_number !== null
+      ? String(sp.question_number).trim().replace(/^q(?:uestion)?\s*/i, '')
+      : '';
+    const cleanKey = canonicalSubpartKey(sp.part_label, spQ);
+    if (cleanKey) {
+      matchedSpIndices.add(idx);
       const score = Number(sp.score) || 0;
       const maxScore = Number(sp.max_score) || 1;
-      const isZero = score === 0;
 
       // Anchor to Page Surveyor verified region if available
       const matchingRegion = layoutRegions.find((lr: any) =>
         lr.type === 'answer_line' && lr.subpart_label &&
-        lr.subpart_label.replace(/[^a-z0-9]/gi, '').toLowerCase() === cleanKey
+        canonicalSubpartKey(lr.subpart_label, spQ) === cleanKey
       );
 
       const yEstimate = (matchingRegion && matchingRegion.bbox?.y)
         ? Math.max(35, Math.round((matchingRegion.bbox.y + (matchingRegion.bbox.height || 0.02) / 2) * 1000))
         : (typeof sp.line_y === 'number' && sp.line_y >= 40 && sp.line_y <= 950
             ? sp.line_y
-            : Math.round(70 + idx * (800 / Math.max(1, subpartsList.length - 1))));
+            : Math.round(70 + idx * (800 / Math.max(1, activeSubparts.length - 1))));
 
       const { box_2d, bbox } = recalibrateAnnotationBox({
         type: 'mark_badge',
@@ -642,6 +753,7 @@ function finalizeAnnotationsList(
       });
       badges.push({
         type: 'mark_badge',
+        question_number: sp.question_number,
         subpart_label: sp.part_label,
         text: `(${score}/${maxScore})`,
         comment: `Part ${sp.part_label}: ${score}/${maxScore}`,
@@ -672,22 +784,49 @@ function finalizeAnnotationsList(
     lastY = curY;
   });
 
+  const normalizeQ = (q: any) =>
+    q !== undefined && q !== null ? String(q).trim().replace(/^q(?:uestion)?\s*/i, '') : '';
+
+  const getScopedSubpartKey = (label: any, q: any) => {
+    const qNorm = normalizeQ(q);
+    const partKey = canonicalSubpartKey(label, qNorm);
+    return partKey ? `${qNorm}::${partKey}` : '';
+  };
+
   // Build a vertical boundary map for each subpart based on badge positions
   // In British/Cambridge exam sheets, mark badges sit at the END / answer line of the subpart!
   // Subpart i's territory is therefore [prevBadge.Y + 15, currentBadge.Y + 15]
   const subpartBoundaryMap = new Map<string, { startY: number; endY: number }>();
   badges.forEach((b, bIdx) => {
-    const key = (b.subpart_label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-    if (key) {
+    const scopedKey = getScopedSubpartKey(b.subpart_label, b.question_number);
+    if (scopedKey) {
       const prevBadge = badges[bIdx - 1];
       const startY = prevBadge
         ? Math.max(30, (prevBadge.box_2d ? prevBadge.box_2d[0] : Math.round((prevBadge.bbox?.y || 0) * 1000)) + 15)
         : 35;
       const curBadgeY = b.box_2d ? b.box_2d[0] : Math.round((b.bbox?.y || 0) * 1000);
       const endY = Math.max(startY + 25, curBadgeY + 15);
-      subpartBoundaryMap.set(key, { startY, endY });
+      subpartBoundaryMap.set(scopedKey, { startY, endY });
     }
   });
+
+  const findSubpartBounds = (label: any, q: any) => {
+    const qNorm = normalizeQ(q);
+    const partKey = canonicalSubpartKey(label, qNorm);
+    if (!partKey) return null;
+    if (subpartBoundaryMap.has(`${qNorm}::${partKey}`)) {
+      return subpartBoundaryMap.get(`${qNorm}::${partKey}`)!;
+    }
+    if (!qNorm) {
+      for (const [k, v] of subpartBoundaryMap.entries()) {
+        const [, kPart] = k.split('::');
+        if (kPart === partKey || kPart.endsWith(partKey) || partKey.endsWith(kPart)) {
+          return v;
+        }
+      }
+    }
+    return null;
+  };
 
   // Bound otherMarks (crosses, comments, underlines) strictly within their subpart's territory
   const clampedOtherMarks = otherMarks.map((ann) => {
@@ -701,8 +840,7 @@ function finalizeAnnotationsList(
       }
     }
 
-    const key = (ann.subpart_label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-    const bounds = key ? subpartBoundaryMap.get(key) : null;
+    const bounds = findSubpartBounds(ann.subpart_label, ann.question_number);
     if (bounds) {
       let curY = ann.box_2d ? ann.box_2d[0] : Math.round((ann.bbox?.y || 0) * 1000);
       // If annotation drifted outside its subpart's boundaries, clamp it safely inside!
@@ -721,24 +859,28 @@ function finalizeAnnotationsList(
     return ann;
   });
 
-  // Guarantee that every subpart with missed marks has an authentic teacher red-ink correction note
+  // Guarantee that every active subpart with missed marks has an authentic teacher red-ink correction note
   // and guarantee that every earned mark has a point-by-point inline tick
-  subpartsList.forEach((sp: any) => {
-    const rawLabel = (sp.part_label || '').toLowerCase().trim();
-    const cleanKey = rawLabel.replace(/[^a-z0-9]/g, '');
+  activeSubparts.forEach((sp: any) => {
+    const spQ = normalizeQ(sp.question_number);
+    const cleanKey = canonicalSubpartKey(sp.part_label, spQ);
     const score = Number(sp.score) || 0;
     const maxScore = Number(sp.max_score) || 1;
-    const bounds = subpartBoundaryMap.get(cleanKey);
+    const bounds = findSubpartBounds(sp.part_label, spQ);
     const matchingBadge = badges.find(b => {
-      const bKey = (b.subpart_label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-      return bKey === cleanKey || bKey.endsWith(cleanKey) || cleanKey.endsWith(bKey);
+      const bQ = normalizeQ(b.question_number);
+      if (spQ && bQ && spQ !== bQ) return false;
+      const bKey = canonicalSubpartKey(b.subpart_label, bQ);
+      return Boolean(cleanKey && bKey && (bKey === cleanKey || bKey.endsWith(cleanKey) || cleanKey.endsWith(bKey)));
     });
     const badgeY = matchingBadge?.box_2d ? matchingBadge.box_2d[0] : Math.round((matchingBadge?.bbox?.y || 0) * 1000);
 
     // 1. Synthesize point-by-point inline ticks if fewer ticks exist than earned score
     const existingTicks = clampedOtherMarks.filter(m => {
-      const mKey = (m.subpart_label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-      return (mKey === cleanKey || mKey.endsWith(cleanKey) || cleanKey.endsWith(mKey)) &&
+      const mQ = normalizeQ(m.question_number);
+      if (spQ && mQ && spQ !== mQ) return false;
+      const mKey = canonicalSubpartKey(m.subpart_label, mQ);
+      return Boolean(cleanKey && mKey && (mKey === cleanKey || mKey.endsWith(cleanKey) || cleanKey.endsWith(mKey))) &&
              (m.type === 'tick' || m.type === 'inline_tick');
     });
 
@@ -752,6 +894,7 @@ function finalizeAnnotationsList(
         ? sp.marking_points.filter((pt: any) => pt.is_earned || pt.tick_or_cross === 'tick')
         : [];
 
+      const xStops = [520, 660, 585, 735, 480, 700, 620, 760];
       for (let i = 0; i < neededTicks; i++) {
         const pt = earnedPoints[existingTicks.length + i];
         let tickY: number;
@@ -761,9 +904,9 @@ function finalizeAnnotationsList(
           tickY = Math.round((pt.box_2d[0] + pt.box_2d[2]) / 2);
           tickX = Math.min(Math.max(pt.box_2d[3] + 8, 140), 760);
         } else {
-          const stepFrac = (existingTicks.length + i + 1) / (score + 1);
+          const totalTicks = existingTicks.length + neededTicks;
+          const stepFrac = (existingTicks.length + i + 1) / (totalTicks + 1);
           tickY = Math.round(startY + totalSpan * stepFrac);
-          const xStops = [520, 680, 590, 740];
           tickX = xStops[(existingTicks.length + i) % xStops.length];
         }
 
@@ -774,6 +917,7 @@ function finalizeAnnotationsList(
           type: 'inline_tick',
           text: tickText,
           comment: pt?.criterion || pt?.student_phrase || `Part ${sp.part_label} mark earned`,
+          question_number: sp.question_number,
           subpart_label: sp.part_label,
           page_index: targetPageIndex,
           box_2d: [tickY - 12, tickX, tickY + 12, tickX + 28],
@@ -792,9 +936,11 @@ function finalizeAnnotationsList(
     ).replace(/^✎\s*/, '').replace(/^\^\s*/, '').trim();
 
     if (score < maxScore && note) {
-      let existingNote = clampedOtherMarks.find((m) => {
-        const mKey = (m.subpart_label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-        return (mKey === cleanKey || mKey.endsWith(cleanKey) || cleanKey.endsWith(mKey)) &&
+      const existingNote = clampedOtherMarks.find((m) => {
+        const mQ = normalizeQ(m.question_number);
+        if (spQ && mQ && spQ !== mQ) return false;
+        const mKey = canonicalSubpartKey(m.subpart_label, mQ);
+        return Boolean(cleanKey && mKey && (mKey === cleanKey || mKey.endsWith(cleanKey) || cleanKey.endsWith(mKey))) &&
                (m.type === 'comment' || m.type === 'teacher_note' || m.type === 'underline');
       });
 
@@ -814,6 +960,7 @@ function finalizeAnnotationsList(
           text: note,
           comment: note,
           teacher_correction: note,
+          question_number: sp.question_number,
           subpart_label: sp.part_label,
           page_index: targetPageIndex,
           box_2d: [corrY, 130, Math.min(corrY + 28, 940), 760],
@@ -828,9 +975,9 @@ function finalizeAnnotationsList(
   const deduplicatedOtherMarks: any[] = [];
   clampedOtherMarks.forEach((m) => {
     if (m.type === 'comment' || m.type === 'teacher_note') {
-      const cleanKey = (m.subpart_label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const scopedKey = getScopedSubpartKey(m.subpart_label, m.question_number);
       const textClean = (m.teacher_correction || m.text || m.comment || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 30);
-      const dedupeKey = `${cleanKey}_${textClean}`;
+      const dedupeKey = `${scopedKey}_${textClean}`;
       if (seenComments.has(dedupeKey)) {
         return; // Discard duplicate comment
       }
@@ -848,9 +995,12 @@ function finalizeAnnotationsList(
     if (!Array.isArray(cBox) || cBox.length < 4) return;
 
     // Check collision against all ticks in the same subpart
-    const commSubpart = (comm.subpart_label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const commQ = normalizeQ(comm.question_number);
+    const commSubpart = canonicalSubpartKey(comm.subpart_label, commQ);
     const relevantTicks = ticks.filter(t => {
-      const tSubpart = (t.subpart_label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const tQ = normalizeQ(t.question_number);
+      if (commQ && tQ && commQ !== tQ) return false;
+      const tSubpart = canonicalSubpartKey(t.subpart_label, tQ);
       return !commSubpart || !tSubpart || commSubpart === tSubpart;
     });
 
